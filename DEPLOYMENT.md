@@ -10,6 +10,7 @@
 
 1. Open SQL Editor.
 2. Run `supabase/schema.sql`.
+   - This includes `sync_payment_fields_on_tenant_update` trigger so tenant edits (name/room/rent/property) instantly reflect in Payments and Dashboard.
 3. In Storage Dashboard:
    - Create bucket `tenant-files`.
    - Configure bucket policies in policy editor for read + authenticated owner-scoped write/update/delete.

@@ -1061,7 +1061,62 @@ export const supabaseOwnerDataApi = {
       throw error;
     }
 
-    return mapTenant(data);
+    const updatedTenant = mapTenant(data);
+
+    const paymentPayload: Record<string, unknown> = {};
+    if (input.name !== undefined) {
+      paymentPayload.tenant_name = updatedTenant.name;
+    }
+    if (input.room !== undefined) {
+      paymentPayload.room = updatedTenant.room;
+    }
+    if (input.propertyId !== undefined) {
+      paymentPayload.property_id = updatedTenant.propertyId;
+    }
+    if (input.monthlyRent !== undefined) {
+      paymentPayload.monthly_rent = updatedTenant.rent;
+    }
+
+    if (Object.keys(paymentPayload).length > 0) {
+      const { error: paymentUpdateError } = await supabase
+        .from('payments')
+        .update(paymentPayload)
+        .eq('tenant_id', tenantId)
+        .eq('owner_id', ownerId);
+
+      if (paymentUpdateError) {
+        throw paymentUpdateError;
+      }
+    }
+
+    if (input.monthlyRent !== undefined) {
+      const { data: tenantPayments, error: tenantPaymentsError } = await supabase
+        .from('payments')
+        .select('id, extra_charges')
+        .eq('tenant_id', tenantId)
+        .eq('owner_id', ownerId)
+        .returns<Array<{ id: string; extra_charges: number }>>();
+
+      if (tenantPaymentsError) {
+        throw tenantPaymentsError;
+      }
+
+      const paymentsToSync = tenantPayments ?? [];
+      for (const payment of paymentsToSync) {
+        const nextTotal = Number(updatedTenant.rent) + Number(payment.extra_charges ?? 0);
+        const { error: totalSyncError } = await supabase
+          .from('payments')
+          .update({ total_amount: nextTotal })
+          .eq('id', payment.id)
+          .eq('owner_id', ownerId);
+
+        if (totalSyncError) {
+          throw totalSyncError;
+        }
+      }
+    }
+
+    return updatedTenant;
   },
 
   async deleteTenant(tenantId: string): Promise<void> {
