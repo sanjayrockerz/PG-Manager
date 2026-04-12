@@ -1,0 +1,21 @@
+# Local setup/env secrets
+.env.setup
+.env.local
+.env.*.local
+
+# Dependencies and generated outputs
+node_modules/
+build/
+dist/
+.tools/
+supabase/.temp/
+supabase/_tmp*.sql
+
+# Common logs and editor caches
+*.log
+.DS_Store
+Thumbs.db
+
+# Local CLI/project metadata
+.vercel/
+.vercel
