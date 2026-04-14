@@ -26,6 +26,16 @@ export function Payments() {
     amount: 0,
   });
 
+  const getStatusClasses = (status: 'paid' | 'pending' | 'overdue') => {
+    if (status === 'paid') {
+      return 'bg-green-100 text-green-700';
+    }
+    if (status === 'pending') {
+      return 'bg-yellow-100 text-yellow-700';
+    }
+    return 'bg-red-100 text-red-700';
+  };
+
   const loadPayments = useCallback(async () => {
     setIsLoading(true);
     setError('');
@@ -285,7 +295,7 @@ export function Payments() {
               <tr>
                 <th className="px-4 py-3 text-left text-xs text-gray-600">Tenant Name</th>
                 {selectedProperty === 'all' && <th className="px-4 py-3 text-left text-xs text-gray-600">Property</th>}
-                <th className="px-4 py-3 text-left text-xs text-gray-600">Room</th>
+                <th className="px-4 py-3 text-left text-xs text-gray-600">Room Number</th>
                 <th className="px-4 py-3 text-left text-xs text-gray-600">Monthly Rent</th>
                 <th className="px-4 py-3 text-left text-xs text-gray-600">Extra Charges</th>
                 <th className="px-4 py-3 text-left text-xs text-gray-600">Total Amount</th>
@@ -314,15 +324,20 @@ export function Payments() {
                     <td className="px-4 py-3 text-sm text-gray-900">Rs {payment.totalAmount.toLocaleString()}</td>
                     <td className="px-4 py-3 text-sm text-gray-600">{payment.dueDate}</td>
                     <td className="px-4 py-3">
-                      <select
-                        value={payment.status}
-                        onChange={(e) => void handleStatusChange(payment.id, e.target.value as 'paid' | 'pending' | 'overdue')}
-                        className={`px-3 py-1 rounded-full text-xs border-0 cursor-pointer ${payment.status === 'paid' ? 'bg-green-100 text-green-700' : payment.status === 'pending' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'}`}
-                      >
-                        <option value="paid">Paid</option>
-                        <option value="pending">Pending</option>
-                        <option value="overdue">Overdue</option>
-                      </select>
+                      <div className="flex items-center gap-2">
+                        <select
+                          value={payment.status}
+                          onChange={(e) => void handleStatusChange(payment.id, e.target.value as 'paid' | 'pending' | 'overdue')}
+                          className="px-3 py-1 rounded-lg text-xs border border-gray-300 bg-white text-gray-700 cursor-pointer"
+                        >
+                          <option value="paid">Paid</option>
+                          <option value="pending">Pending</option>
+                          <option value="overdue">Overdue</option>
+                        </select>
+                        <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${getStatusClasses(payment.status)}`}>
+                          {payment.status}
+                        </span>
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       <button onClick={() => handleAddCharge(payment)} className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs hover:bg-blue-700 transition-colors flex items-center gap-1">

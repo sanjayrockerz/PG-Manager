@@ -63,6 +63,30 @@ export function Tenants({ onViewTenant }: TenantsProps) {
   const [error, setError] = useState('');
   const [formData, setFormData] = useState<TenantFormState>(emptyForm());
 
+  const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+
+  const selectedPropertyRooms = useMemo(() => {
+    const property = properties.find((entry) => entry.id === formData.propertyId);
+    return property?.rooms ?? [];
+  }, [formData.propertyId, properties]);
+
+  const selectableRooms = useMemo(
+    () => selectedPropertyRooms.filter((room) => room.floor === formData.floor),
+    [selectedPropertyRooms, formData.floor],
+  );
+
+  const selectedRoom = useMemo(
+    () => selectedPropertyRooms.find((room) => room.number === formData.room && room.floor === formData.floor),
+    [selectedPropertyRooms, formData.room, formData.floor],
+  );
+
+  const availableBeds = useMemo(() => {
+    if (!selectedRoom) {
+      return [] as string[];
+    }
+    return Array.from({ length: selectedRoom.beds }, (_, index) => String(index + 1));
+  }, [selectedRoom]);
+
   const loadTenants = useCallback(async () => {
     setIsLoading(true);
     setError('');
@@ -157,9 +181,9 @@ export function Tenants({ onViewTenant }: TenantsProps) {
   };
 
   const toTenantInput = (): TenantCreateInput => ({
-    name: formData.name,
-    phone: formData.phone,
-    email: formData.email,
+    name: formData.name.trim(),
+    phone: formData.phone.replace(/\D/g, ''),
+    email: formData.email.trim().toLowerCase(),
     propertyId: formData.propertyId,
     floor: formData.floor,
     room: formData.room,
@@ -177,8 +201,42 @@ export function Tenants({ onViewTenant }: TenantsProps) {
     idDocument: formData.idDocument,
   });
 
+  const validateTenantForm = (): string => {
+    const cleanName = formData.name.trim();
+    const cleanEmail = formData.email.trim().toLowerCase();
+    const cleanPhone = formData.phone.replace(/\D/g, '');
+    const cleanParentPhone = formData.parentPhone.replace(/\D/g, '');
+
+    if (!cleanName || cleanName.length < 2) return 'Enter a valid tenant name.';
+    if (!cleanEmail || !isValidEmail(cleanEmail)) return 'Enter a valid tenant email address.';
+    if (!cleanPhone || cleanPhone.length !== 10) return 'Enter a valid 10-digit tenant phone number.';
+    if (!formData.propertyId) return 'Select a property before saving tenant.';
+    if (!formData.room) return 'Select a room number from the dropdown.';
+    if (!formData.bed) return 'Select a bed from the dropdown.';
+    if (!formData.monthlyRent || formData.monthlyRent <= 0) return 'Monthly rent must be greater than zero.';
+    if (!formData.parentName.trim()) return 'Parent name is required.';
+    if (!cleanParentPhone || cleanParentPhone.length !== 10) return 'Enter a valid 10-digit parent phone number.';
+    if (!formData.idType.trim()) return 'ID type is required.';
+    if (!formData.idNumber.trim()) return 'ID number is required.';
+
+    const hasExistingIdDocument = Boolean(editingTenant?.idDocumentUrl);
+    if (!formData.idDocument && !hasExistingIdDocument) {
+      return 'ID document is compulsory. Upload an ID document before saving.';
+    }
+
+    return '';
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    const validationError = validateTenantForm();
+    if (validationError) {
+      setError(validationError);
+      toast.error(validationError);
+      return;
+    }
+
     setIsSaving(true);
     setError('');
 
@@ -264,7 +322,7 @@ export function Tenants({ onViewTenant }: TenantsProps) {
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Tenant</th>
                 {selectedProperty === 'all' && <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Property</th>}
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Room</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Room Number</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Contact</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Rent</th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Join Date</th>
@@ -371,7 +429,12 @@ export function Tenants({ onViewTenant }: TenantsProps) {
 
                 <div className="space-y-2 md:col-span-2">
                   <label className="text-sm text-gray-500">Property *</label>
-                  <select required value={formData.propertyId} onChange={(e) => setFormData({ ...formData, propertyId: e.target.value })} className="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                  <select
+                    required
+                    value={formData.propertyId}
+                    onChange={(e) => setFormData({ ...formData, propertyId: e.target.value, floor: 1, room: '', bed: '' })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                  >
                     <option value="">Select Property</option>
                     {properties.map((property) => (
                       <option key={property.id} value={property.id}>{property.name}</option>
@@ -381,19 +444,58 @@ export function Tenants({ onViewTenant }: TenantsProps) {
 
                 <div className="space-y-2">
                   <label className="text-sm text-gray-500">Floor *</label>
-                  <select required value={formData.floor} onChange={(e) => setFormData({ ...formData, floor: Number(e.target.value) })} className="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                  <select
+                    required
+                    value={formData.floor}
+                    onChange={(e) => setFormData({ ...formData, floor: Number(e.target.value), room: '', bed: '' })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                  >
                     {availableFloors.map((floor) => (
                       <option key={floor} value={floor}>Floor {floor}</option>
                     ))}
                   </select>
                 </div>
                 <div className="space-y-2">
-                  <label className="text-sm text-gray-500">Room *</label>
-                  <input required value={formData.room} onChange={(e) => setFormData({ ...formData, room: e.target.value })} className="w-full px-4 py-2 border border-gray-300 rounded-lg" />
+                  <label className="text-sm text-gray-500">Room Number *</label>
+                  <select
+                    required
+                    value={formData.room}
+                    onChange={(e) => {
+                      const roomNumber = e.target.value;
+                      const room = selectableRooms.find((entry) => entry.number === roomNumber);
+                      setFormData({
+                        ...formData,
+                        room: roomNumber,
+                        bed: room ? '1' : '',
+                      });
+                    }}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                  >
+                    <option value="">Select room number</option>
+                    {selectableRooms.map((room) => (
+                      <option key={room.id} value={room.number}>
+                        {room.number} ({room.type}, {room.beds} bed{room.beds > 1 ? 's' : ''})
+                      </option>
+                    ))}
+                  </select>
+                  {formData.propertyId && selectableRooms.length === 0 && (
+                    <p className="text-xs text-amber-600">No rooms available on this floor. Add rooms first from Properties.</p>
+                  )}
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm text-gray-500">Bed *</label>
-                  <input required value={formData.bed} onChange={(e) => setFormData({ ...formData, bed: e.target.value })} className="w-full px-4 py-2 border border-gray-300 rounded-lg" />
+                  <select
+                    required
+                    value={formData.bed}
+                    onChange={(e) => setFormData({ ...formData, bed: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                    disabled={!selectedRoom}
+                  >
+                    <option value="">Select bed</option>
+                    {availableBeds.map((bed) => (
+                      <option key={bed} value={bed}>Bed {bed}</option>
+                    ))}
+                  </select>
                 </div>
 
                 <div className="space-y-2">
@@ -445,8 +547,11 @@ export function Tenants({ onViewTenant }: TenantsProps) {
                 </div>
 
                 <div className="space-y-2 md:col-span-2">
-                  <label className="text-sm text-gray-500">ID Document (optional)</label>
-                  <input type="file" onChange={(e) => setFormData({ ...formData, idDocument: e.target.files?.[0] ?? null })} className="w-full px-4 py-2 border border-gray-300 rounded-lg" />
+                  <label className="text-sm text-gray-500">ID Document *</label>
+                  <input type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" onChange={(e) => setFormData({ ...formData, idDocument: e.target.files?.[0] ?? null })} className="w-full px-4 py-2 border border-gray-300 rounded-lg" />
+                  {editingTenant?.idDocumentUrl && !formData.idDocument && (
+                    <p className="text-xs text-gray-500">Existing ID document found. Upload a new file only if you want to replace it.</p>
+                  )}
                 </div>
               </div>
 

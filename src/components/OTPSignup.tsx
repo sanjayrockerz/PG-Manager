@@ -1,23 +1,23 @@
 import { useState, useRef, useEffect } from 'react';
-import { Smartphone, ArrowRight, ArrowLeft, CheckCircle2, User, Building2, MapPin, Sparkles, Mail, Check } from 'lucide-react';
+import { Smartphone, ArrowRight, ArrowLeft, CheckCircle2, User, Building2, Sparkles, Mail, Check } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 interface OTPSignupProps {
   onSwitchToLogin: () => void;
 }
 
-const OTP_LENGTH = Number((import.meta as any).env?.VITE_SUPABASE_OTP_LENGTH ?? 8);
+const OTP_LENGTH = Number((import.meta as any).env?.VITE_SUPABASE_OTP_LENGTH ?? 6);
+const NAME_MAX_LENGTH = 80;
+const EMAIL_MAX_LENGTH = 254;
 const EMPTY_OTP = Array.from({ length: OTP_LENGTH }, () => '');
 
 export function OTPSignup({ onSwitchToLogin }: OTPSignupProps) {
-  const { requestSignupOTP, signupWithOTP, authError, isLoading } = useAuth();
+  const { requestSignupOTP, signupWithOTP, signInWithGoogle, authError, isLoading } = useAuth();
   const [step, setStep] = useState<'details' | 'otp' | 'success'>('details');
   const [formData, setFormData] = useState({
     name: '',
     email: '',
     phoneNumber: '',
-    pgName: '',
-    city: '',
   });
   const [otp, setOtp] = useState<string[]>(EMPTY_OTP);
   const [error, setError] = useState('');
@@ -41,26 +41,39 @@ export function OTPSignup({ onSwitchToLogin }: OTPSignupProps) {
   const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 
   const validateDetails = () => {
-    if (!formData.name.trim()) {
-      setError('Please enter your name');
+    const cleanName = formData.name.trim();
+    const cleanEmail = formData.email.trim().toLowerCase();
+    const cleanPhone = formData.phoneNumber.replace(/\D/g, '');
+
+    if (!cleanName) {
+      setError('Full name is required.');
       return false;
     }
-    if (!isValidEmail(formData.email.trim().toLowerCase())) {
-      setError('Please enter a valid email address');
+    if (cleanName.length < 2) {
+      setError('Full name must be at least 2 characters.');
       return false;
     }
-    if (!formData.phoneNumber || formData.phoneNumber.length !== 10) {
-      setError('Please enter a valid 10-digit phone number');
+    if (cleanName.length > NAME_MAX_LENGTH) {
+      setError('Full name is too long.');
       return false;
     }
-    if (!formData.pgName.trim()) {
-      setError('Please enter your PG name');
+    if (!cleanEmail) {
+      setError('Email address is required.');
       return false;
     }
-    if (!formData.city.trim()) {
-      setError('Please enter your city');
+    if (cleanEmail.length > EMAIL_MAX_LENGTH) {
+      setError('Email address is too long.');
       return false;
     }
+    if (!isValidEmail(cleanEmail)) {
+      setError('Please enter a valid email address.');
+      return false;
+    }
+    if (!cleanPhone || cleanPhone.length !== 10) {
+      setError('Please enter a valid 10-digit phone number.');
+      return false;
+    }
+
     return true;
   };
 
@@ -68,10 +81,16 @@ export function OTPSignup({ onSwitchToLogin }: OTPSignupProps) {
     return requestSignupOTP({
       name: formData.name.trim(),
       email: formData.email.trim().toLowerCase(),
-      phone: formData.phoneNumber,
-      pgName: formData.pgName.trim(),
-      city: formData.city.trim(),
+      phone: formData.phoneNumber.replace(/\D/g, ''),
     });
+  };
+
+  const handleGoogleSignIn = async () => {
+    setError('');
+    const success = await signInWithGoogle();
+    if (!success) {
+      setError(authError || 'Unable to continue with Google.');
+    }
   };
 
   const handleDetailsSubmit = async (e: React.FormEvent) => {
@@ -220,6 +239,7 @@ export function OTPSignup({ onSwitchToLogin }: OTPSignupProps) {
                         type="text"
                         value={formData.name}
                         onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                        maxLength={NAME_MAX_LENGTH}
                         className="w-full pl-9 pr-3 py-2.5 border border-[#E5E7EB] rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#6366F1]/30 focus:border-[#6366F1] transition-all"
                         placeholder="John Doe"
                       />
@@ -234,6 +254,7 @@ export function OTPSignup({ onSwitchToLogin }: OTPSignupProps) {
                         type="email"
                         value={formData.email}
                         onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                        maxLength={EMAIL_MAX_LENGTH}
                         className="w-full pl-9 pr-3 py-2.5 border border-[#E5E7EB] rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#6366F1]/30 focus:border-[#6366F1] transition-all"
                         placeholder="owner@example.com"
                       />
@@ -255,34 +276,6 @@ export function OTPSignup({ onSwitchToLogin }: OTPSignupProps) {
                         className="w-full pl-24 pr-3 py-2.5 border border-[#E5E7EB] rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#6366F1]/30 focus:border-[#6366F1] transition-all"
                         placeholder="9876543210"
                         maxLength={10}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-gray-700">PG name</label>
-                    <div className="relative">
-                      <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                      <input
-                        type="text"
-                        value={formData.pgName}
-                        onChange={(e) => setFormData({ ...formData, pgName: e.target.value })}
-                        className="w-full pl-9 pr-3 py-2.5 border border-[#E5E7EB] rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#6366F1]/30 focus:border-[#6366F1] transition-all"
-                        placeholder="Sunrise PG"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-gray-700">City</label>
-                    <div className="relative">
-                      <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                      <input
-                        type="text"
-                        value={formData.city}
-                        onChange={(e) => setFormData({ ...formData, city: e.target.value })}
-                        className="w-full pl-9 pr-3 py-2.5 border border-[#E5E7EB] rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#6366F1]/30 focus:border-[#6366F1] transition-all"
-                        placeholder="Mumbai"
                       />
                     </div>
                   </div>
@@ -309,6 +302,24 @@ export function OTPSignup({ onSwitchToLogin }: OTPSignupProps) {
                         <ArrowRight className="w-5 h-5" />
                       </>
                     )}
+                  </button>
+
+                  <div className="relative">
+                    <div className="absolute inset-0 flex items-center">
+                      <div className="w-full border-t border-[#E5E7EB]" />
+                    </div>
+                    <div className="relative flex justify-center text-xs">
+                      <span className="px-3 bg-white text-slate-500">or</span>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => void handleGoogleSignIn()}
+                    disabled={isLoading}
+                    className="w-full py-2.5 border border-[#E5E7EB] text-slate-700 rounded-xl text-sm font-semibold hover:bg-slate-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Continue with Google
                   </button>
                 </form>
 

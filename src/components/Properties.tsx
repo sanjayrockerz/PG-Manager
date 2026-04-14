@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useProperty, Property, Room } from '../contexts/PropertyContext';
 import { Building2, Plus, Edit2, Trash2, MapPin, Phone, Mail, Layers, Home, X, Bed, ChevronDown, ChevronUp } from 'lucide-react';
 
+const EMAIL_MAX_LENGTH = 254;
+
 export function Properties() {
   const { properties, addProperty, updateProperty, deleteProperty, addRoom, updateRoom, deleteRoom } = useProperty();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -10,6 +12,7 @@ export function Properties() {
   const [showRoomDialog, setShowRoomDialog] = useState(false);
   const [editingRoom, setEditingRoom] = useState<Room | null>(null);
   const [currentPropertyId, setCurrentPropertyId] = useState<string>('');
+  const [formError, setFormError] = useState('');
   
   const [formData, setFormData] = useState({
     name: '',
@@ -34,6 +37,7 @@ export function Properties() {
   });
 
   const handleOpenDialog = (property?: Property) => {
+    setFormError('');
     if (property) {
       setEditingProperty(property);
       setFormData({
@@ -69,14 +73,54 @@ export function Properties() {
   const handleCloseDialog = () => {
     setIsDialogOpen(false);
     setEditingProperty(null);
+    setFormError('');
+  };
+
+  const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+
+  const validatePropertyForm = (): string => {
+    const cleanEmail = formData.contactEmail.trim();
+    const cleanPhone = formData.contactPhone.replace(/\D/g, '');
+
+    if (!formData.name.trim()) return 'Property name is required.';
+    if (!formData.address.trim()) return 'Address is required.';
+    if (!formData.city.trim()) return 'City is required.';
+    if (!formData.state.trim()) return 'State is required.';
+    if (!formData.pincode.trim()) return 'Pincode is required.';
+    if (!formData.contactName.trim()) return 'Contact person name is required.';
+    if (!cleanPhone || cleanPhone.length < 10 || cleanPhone.length > 15) return 'Enter a valid contact phone number.';
+    if (cleanEmail.length > EMAIL_MAX_LENGTH) return 'Email address is too long.';
+    if (cleanEmail && !isValidEmail(cleanEmail)) return 'Enter a valid email address or leave it blank.';
+    if (formData.floors < 1) return 'Number of floors must be at least 1.';
+
+    return '';
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+
+    const validationError = validatePropertyForm();
+    if (validationError) {
+      setFormError(validationError);
+      return;
+    }
+
+    const payload = {
+      ...formData,
+      address: formData.address.trim(),
+      city: formData.city.trim(),
+      state: formData.state.trim(),
+      pincode: formData.pincode.trim(),
+      name: formData.name.trim(),
+      contactName: formData.contactName.trim(),
+      contactPhone: formData.contactPhone.trim(),
+      contactEmail: formData.contactEmail.trim(),
+    };
+
     if (editingProperty) {
-      updateProperty(editingProperty.id, formData);
+      updateProperty(editingProperty.id, payload);
     } else {
-      addProperty(formData);
+      addProperty(payload);
     }
     handleCloseDialog();
   };
@@ -400,6 +444,12 @@ export function Properties() {
             </div>
 
             <form onSubmit={handleSubmit} className="p-6 space-y-6">
+              {formError && (
+                <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {formError}
+                </div>
+              )}
+
               {/* Property Details */}
               <div className="space-y-4">
                 <h3 className="text-sm text-gray-500 uppercase tracking-wide">
@@ -507,12 +557,12 @@ export function Properties() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm mb-2">Email Address *</label>
+                    <label className="block text-sm mb-2">Email Address (optional)</label>
                     <input
                       type="email"
-                      required
                       value={formData.contactEmail}
                       onChange={(e) => setFormData({ ...formData, contactEmail: e.target.value })}
+                      maxLength={EMAIL_MAX_LENGTH}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       placeholder="contact@property.com"
                     />

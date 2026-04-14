@@ -6,6 +6,7 @@ import { OwnerSettingsRecord, supabaseOwnerDataApi } from '../services/supabaseD
 export function Settings() {
   const { user } = useAuth();
   const [settings, setSettings] = useState<OwnerSettingsRecord | null>(null);
+  const [activeSection, setActiveSection] = useState<'profile' | 'pg-rules' | 'whatsapp'>('profile');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState('');
@@ -199,7 +200,30 @@ export function Settings() {
       {error && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
       {success && <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">{success}</div>}
 
-      <div className="bg-white rounded-xl border border-gray-200 p-6">
+      <div className="bg-white rounded-xl border border-gray-200 p-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {[
+            { key: 'profile', label: 'Profile' },
+            { key: 'pg-rules', label: 'PG Rules' },
+            { key: 'whatsapp', label: 'WhatsApp Integration' },
+          ].map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveSection(tab.key as 'profile' | 'pg-rules' | 'whatsapp')}
+              className={`px-4 py-2 rounded-lg text-sm transition-colors ${
+                activeSection === tab.key
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-50 text-gray-700 hover:bg-gray-100'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {activeSection === 'profile' && (
+        <div className="bg-white rounded-xl border border-gray-200 p-6">
         <div className="flex items-center gap-3 mb-4">
           <div className="p-3 bg-purple-50 rounded-lg">
             <User className="w-5 h-5 text-purple-600" />
@@ -233,9 +257,11 @@ export function Settings() {
             <p className="text-gray-900 mt-1">{user?.city || '-'}</p>
           </div>
         </div>
-      </div>
+        </div>
+      )}
 
-      <div className="bg-white rounded-xl border border-gray-200 p-6">
+      {activeSection === 'pg-rules' && (
+        <div className="bg-white rounded-xl border border-gray-200 p-6">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
             <div className="p-3 bg-blue-50 rounded-lg">
@@ -277,9 +303,11 @@ export function Settings() {
             ))
           )}
         </div>
-      </div>
+        </div>
+      )}
 
-      <div className="bg-white rounded-xl border border-gray-200 p-6">
+      {activeSection === 'whatsapp' && (
+        <div className="bg-white rounded-xl border border-gray-200 p-6">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
             <div className="p-3 bg-green-50 rounded-lg">
@@ -353,7 +381,8 @@ export function Settings() {
             ))}
           </div>
         </div>
-      </div>
+        </div>
+      )}
 
       {showAddRuleModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={() => setShowAddRuleModal(false)}>

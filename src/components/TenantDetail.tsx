@@ -218,7 +218,7 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
                   <thead className="bg-gray-50 border-b border-gray-200">
                     <tr>
                       <th className="px-4 py-3 text-left text-xs text-gray-600">Due Date</th>
-                      <th className="px-4 py-3 text-left text-xs text-gray-600">Room</th>
+                      <th className="px-4 py-3 text-left text-xs text-gray-600">Room Number</th>
                       <th className="px-4 py-3 text-left text-xs text-gray-600">Amount</th>
                       <th className="px-4 py-3 text-left text-xs text-gray-600">Status</th>
                     </tr>

@@ -6,11 +6,15 @@ interface OTPLoginProps {
   onSwitchToSignup: () => void;
 }
 
-const OTP_LENGTH = Number((import.meta as any).env?.VITE_SUPABASE_OTP_LENGTH ?? 8);
+const OTP_LENGTH = Number((import.meta as any).env?.VITE_SUPABASE_OTP_LENGTH ?? 6);
+const EMAIL_MAX_LENGTH = 254;
+const OWNER_DEMO_EMAIL = 'owner.demo@pgmanager.app';
+const ADMIN_DEMO_EMAIL = 'admin.demo@pgmanager.app';
+const TENANT_DEMO_EMAIL = 'tenant.demo@pgmanager.app';
 const EMPTY_OTP = Array.from({ length: OTP_LENGTH }, () => '');
 
 export function OTPLogin({ onSwitchToSignup }: OTPLoginProps) {
-  const { requestLoginOTP, loginWithOTP, authError, isLoading } = useAuth();
+  const { requestLoginOTP, loginWithOTP, signInWithGoogle, authError, isLoading } = useAuth();
   const [step, setStep] = useState<'email' | 'otp' | 'success'>('email');
   const [email, setEmail] = useState('');
   const [otp, setOtp] = useState<string[]>(EMPTY_OTP);
@@ -32,15 +36,42 @@ export function OTPLogin({ onSwitchToSignup }: OTPLoginProps) {
     }
   }, [authError]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    const prefilledEmail = params.get('email')?.trim().toLowerCase() ?? '';
+    if (prefilledEmail && isValidEmail(prefilledEmail)) {
+      setEmail(prefilledEmail);
+    }
+  }, []);
+
   const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+
+  const validateEmailInput = (value: string): string => {
+    const cleaned = value.trim().toLowerCase();
+    if (!cleaned) {
+      return 'Email address is required.';
+    }
+    if (cleaned.length > EMAIL_MAX_LENGTH) {
+      return 'Email address is too long.';
+    }
+    if (!isValidEmail(cleaned)) {
+      return 'Please enter a valid email address.';
+    }
+    return '';
+  };
 
   const handleEmailSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
     const cleanEmail = email.trim().toLowerCase();
-    if (!isValidEmail(cleanEmail)) {
-      setError('Please enter a valid email address');
+    const validationError = validateEmailInput(cleanEmail);
+    if (validationError) {
+      setError(validationError);
       return;
     }
 
@@ -53,6 +84,14 @@ export function OTPLogin({ onSwitchToSignup }: OTPLoginProps) {
     setStep('otp');
     setResendTimer(30);
     setTimeout(() => otpInputs.current[0]?.focus(), 100);
+  };
+
+  const handleGoogleSignIn = async () => {
+    setError('');
+    const success = await signInWithGoogle();
+    if (!success) {
+      setError(authError || 'Unable to continue with Google.');
+    }
   };
 
   const handleOtpChange = (index: number, value: string) => {
@@ -182,6 +221,7 @@ export function OTPLogin({ onSwitchToSignup }: OTPLoginProps) {
                         type="email"
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
+                        maxLength={EMAIL_MAX_LENGTH}
                         className="w-full pl-9 pr-3 py-2.5 text-sm border border-[#E5E7EB] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#6366F1]/30 focus:border-[#6366F1] transition-all"
                         placeholder="you@company.com"
                       />
@@ -210,7 +250,49 @@ export function OTPLogin({ onSwitchToSignup }: OTPLoginProps) {
                       </>
                     )}
                   </button>
+
+                  <div className="relative">
+                    <div className="absolute inset-0 flex items-center">
+                      <div className="w-full border-t border-[#E5E7EB]" />
+                    </div>
+                    <div className="relative flex justify-center text-xs">
+                      <span className="px-3 bg-white text-slate-500">or</span>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => void handleGoogleSignIn()}
+                    disabled={isLoading}
+                    className="w-full py-2.5 border border-[#E5E7EB] text-slate-700 rounded-xl text-sm font-semibold hover:bg-slate-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Continue with Google
+                  </button>
                 </form>
+
+                <div className="mt-4">
+                  <p className="text-xs text-slate-500 mb-2">Quick email presets</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {[OWNER_DEMO_EMAIL, ADMIN_DEMO_EMAIL, TENANT_DEMO_EMAIL].map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        onClick={() => setEmail(preset)}
+                        className="px-2.5 py-1 text-xs border border-[#E5E7EB] rounded-lg text-slate-600 hover:text-slate-800 hover:bg-slate-50"
+                      >
+                        {preset}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-3 text-xs">
+                    <a href={`/?email=${encodeURIComponent(ADMIN_DEMO_EMAIL)}`} className="text-[#6366F1] hover:text-[#4F46E5] underline">
+                      Admin login link
+                    </a>
+                    <a href={`/?email=${encodeURIComponent(TENANT_DEMO_EMAIL)}`} className="text-[#6366F1] hover:text-[#4F46E5] underline">
+                      Tenant login link
+                    </a>
+                  </div>
+                </div>
 
                 <div className="flex items-center justify-between mt-4 text-sm">
                   <button

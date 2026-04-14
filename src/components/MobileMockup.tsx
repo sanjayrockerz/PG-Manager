@@ -285,7 +285,11 @@ export function MobileMockup() {
                 <p className="text-xs text-gray-500">Due {formatDate(payment.dueDate)}</p>
               </div>
               <span className={`px-2 py-1 rounded-full text-xs ${
-                payment.status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'
+                payment.status === 'paid'
+                  ? 'bg-green-100 text-green-700'
+                  : payment.status === 'pending'
+                    ? 'bg-yellow-100 text-yellow-700'
+                    : 'bg-red-100 text-red-700'
               }`}>
                 {payment.status}
               </span>

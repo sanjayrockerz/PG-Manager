@@ -16,8 +16,6 @@ interface SignupDraft {
   name: string;
   email: string;
   phone: string;
-  pgName: string;
-  city: string;
 }
 
 interface AuthContextType {
@@ -25,6 +23,7 @@ interface AuthContextType {
   authError: string;
   requestLoginOTP: (email: string) => Promise<boolean>;
   loginWithOTP: (email: string, otp: string) => Promise<boolean>;
+  signInWithGoogle: () => Promise<boolean>;
   requestSignupOTP: (draft: SignupDraft) => Promise<boolean>;
   signupWithOTP: (email: string, otp: string) => Promise<boolean>;
   logout: () => Promise<void>;
@@ -71,6 +70,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return 'Account not found for this email. Use Create Account first.';
       }
       return message || 'OTP request could not be processed. Check Auth settings and try again.';
+    }
+
+    if (message?.toLowerCase().includes('provider') && message?.toLowerCase().includes('google')) {
+      return 'Google Sign-In is not enabled in Supabase Auth providers. Enable Google provider and try again.';
     }
 
     if (message) {
@@ -282,8 +285,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           data: {
             name: draft.name,
             phone: draft.phone,
-            pgName: draft.pgName,
-            city: draft.city,
             role: 'owner',
           },
         },
@@ -296,6 +297,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return true;
     } catch (error) {
       setAuthError(toAuthMessage(error, 'Unable to send signup OTP.'));
+      return false;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const signInWithGoogle = async (): Promise<boolean> => {
+    setIsLoading(true);
+    setAuthError('');
+
+    try {
+      const redirectTo = resolveEmailRedirectTo();
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          ...(redirectTo ? { redirectTo } : {}),
+        },
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      return true;
+    } catch (error) {
+      setAuthError(toAuthMessage(error, 'Unable to sign in with Google.'));
       return false;
     } finally {
       setIsLoading(false);
@@ -335,8 +362,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           email: pending.email,
           name: pending.name,
           phone: pending.phone,
-          pgName: pending.pgName,
-          city: pending.city,
+          pgName: '',
+          city: '',
           role: 'owner',
         });
       }
@@ -377,7 +404,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, authError, requestLoginOTP, loginWithOTP, requestSignupOTP, signupWithOTP, logout, isLoading }}>
+    <AuthContext.Provider value={{ user, authError, requestLoginOTP, loginWithOTP, signInWithGoogle, requestSignupOTP, signupWithOTP, logout, isLoading }}>
       {children}
     </AuthContext.Provider>
   );
