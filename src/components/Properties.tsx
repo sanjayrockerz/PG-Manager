@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useProperty, Property, Room } from '../contexts/PropertyContext';
-import { Building2, Plus, Edit2, Trash2, MapPin, Phone, Mail, Layers, Home, X, Bed, ChevronDown, ChevronUp } from 'lucide-react';
-
-const EMAIL_MAX_LENGTH = 254;
+import { Building2, Plus, Edit2, Trash2, MapPin, Phone, Mail, Layers, Home, X, Bed, ChevronDown, ChevronUp, AlertCircle } from 'lucide-react';
+import { AddressSuggestion, searchAddressSuggestions } from '../services/addressLookup';
+import { validatePropertyForm, normaliseAndValidatePhone, validatePincode } from '../utils/validation';
 
 export function Properties() {
   const { properties, addProperty, updateProperty, deleteProperty, addRoom, updateRoom, deleteRoom } = useProperty();
@@ -13,19 +13,32 @@ export function Properties() {
   const [editingRoom, setEditingRoom] = useState<Room | null>(null);
   const [currentPropertyId, setCurrentPropertyId] = useState<string>('');
   const [formError, setFormError] = useState('');
+  const [addressSuggestions, setAddressSuggestions] = useState<AddressSuggestion[]>([]);
+  const [isAddressLookupLoading, setIsAddressLookupLoading] = useState(false);
   
   const [formData, setFormData] = useState({
     name: '',
     address: '',
+    addressLine1: '',
+    addressLine2: '',
+    locality: '',
+    landmark: '',
+    latitude: null as number | null,
+    longitude: null as number | null,
+    formattedAddress: '',
     city: '',
     state: '',
     pincode: '',
+    country: 'India',
     floors: 1,
     totalRooms: 0,
     contactName: '',
     contactPhone: '',
     contactEmail: '',
   });
+
+  // Per-field inline error state
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const [roomFormData, setRoomFormData] = useState({
     number: '',
@@ -38,14 +51,23 @@ export function Properties() {
 
   const handleOpenDialog = (property?: Property) => {
     setFormError('');
+    setFieldErrors({});
     if (property) {
       setEditingProperty(property);
       setFormData({
         name: property.name,
         address: property.address,
+        addressLine1: property.addressLine1 ?? property.address,
+        addressLine2: property.addressLine2 ?? '',
+        locality: property.locality ?? property.city,
+        landmark: property.landmark ?? '',
+        latitude: property.latitude ?? null,
+        longitude: property.longitude ?? null,
+        formattedAddress: property.formattedAddress ?? property.address,
         city: property.city,
         state: property.state,
         pincode: property.pincode,
+        country: 'India',
         floors: property.floors,
         totalRooms: property.totalRooms,
         contactName: property.contactName,
@@ -57,9 +79,17 @@ export function Properties() {
       setFormData({
         name: '',
         address: '',
+        addressLine1: '',
+        addressLine2: '',
+        locality: '',
+        landmark: '',
+        latitude: null,
+        longitude: null,
+        formattedAddress: '',
         city: '',
         state: '',
         pincode: '',
+        country: 'India',
         floors: 1,
         totalRooms: 0,
         contactName: '',
@@ -74,32 +104,88 @@ export function Properties() {
     setIsDialogOpen(false);
     setEditingProperty(null);
     setFormError('');
+    setFieldErrors({});
+    setAddressSuggestions([]);
   };
 
-  const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+  useEffect(() => {
+    if (!isDialogOpen) {
+      return;
+    }
 
-  const validatePropertyForm = (): string => {
-    const cleanEmail = formData.contactEmail.trim();
-    const cleanPhone = formData.contactPhone.replace(/\D/g, '');
+    const query = formData.address.trim();
+    if (query.length < 3) {
+      setAddressSuggestions([]);
+      setIsAddressLookupLoading(false);
+      return;
+    }
 
-    if (!formData.name.trim()) return 'Property name is required.';
-    if (!formData.address.trim()) return 'Address is required.';
-    if (!formData.city.trim()) return 'City is required.';
-    if (!formData.state.trim()) return 'State is required.';
-    if (!formData.pincode.trim()) return 'Pincode is required.';
-    if (!formData.contactName.trim()) return 'Contact person name is required.';
-    if (!cleanPhone || cleanPhone.length < 10 || cleanPhone.length > 15) return 'Enter a valid contact phone number.';
-    if (cleanEmail.length > EMAIL_MAX_LENGTH) return 'Email address is too long.';
-    if (cleanEmail && !isValidEmail(cleanEmail)) return 'Enter a valid email address or leave it blank.';
-    if (formData.floors < 1) return 'Number of floors must be at least 1.';
+    const controller = new AbortController();
+    setIsAddressLookupLoading(true);
 
-    return '';
+    // 400ms debounce — respects Nominatim 1 req/s policy
+    const timeout = window.setTimeout(() => {
+      void searchAddressSuggestions(query, controller.signal)
+        .then((results) => {
+          setAddressSuggestions(results);
+        })
+        .catch((error) => {
+          if ((error as { name?: string }).name !== 'AbortError') {
+            setAddressSuggestions([]);
+          }
+        })
+        .finally(() => {
+          setIsAddressLookupLoading(false);
+        });
+    }, 400);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timeout);
+    };
+  }, [formData.address, isDialogOpen]);
+
+  const applyAddressSuggestion = (suggestion: AddressSuggestion) => {
+    setFormData((current) => ({
+      ...current,
+      address: suggestion.addressLine1 || suggestion.formattedAddress,
+      addressLine1: suggestion.addressLine1 || suggestion.formattedAddress,
+      addressLine2: suggestion.addressLine2,
+      locality: suggestion.locality,
+      landmark: suggestion.landmark,
+      city: suggestion.city || current.city,
+      state: suggestion.state || current.state,
+      pincode: suggestion.pincode || current.pincode,
+      country: suggestion.country || current.country,
+      latitude: suggestion.latitude,
+      longitude: suggestion.longitude,
+      formattedAddress: suggestion.formattedAddress,
+    }));
+    setAddressSuggestions([]);
+    // Clear address-related field errors
+    setFieldErrors((prev) => ({ ...prev, address: '', city: '', state: '', pincode: '' }));
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
-    const validationError = validatePropertyForm();
+    // Normalise phone before validation
+    const { cleaned: cleanedPhone, error: phoneErr } = normaliseAndValidatePhone(formData.contactPhone);
+    if (phoneErr) {
+      setFormError(phoneErr);
+      setFieldErrors((prev) => ({ ...prev, contactPhone: phoneErr }));
+      return;
+    }
+
+    const pincodeErr = validatePincode(formData.pincode);
+    if (pincodeErr) {
+      setFormError(pincodeErr);
+      setFieldErrors((prev) => ({ ...prev, pincode: pincodeErr }));
+      return;
+    }
+
+    const normalized = { ...formData, contactPhone: cleanedPhone };
+    const validationError = validatePropertyForm(normalized);
     if (validationError) {
       setFormError(validationError);
       return;
@@ -108,12 +194,18 @@ export function Properties() {
     const payload = {
       ...formData,
       address: formData.address.trim(),
+      addressLine1: (formData.addressLine1 || formData.address).trim(),
+      addressLine2: formData.addressLine2.trim(),
+      locality: formData.locality.trim(),
+      landmark: formData.landmark.trim(),
+      formattedAddress: (formData.formattedAddress || formData.address).trim(),
       city: formData.city.trim(),
       state: formData.state.trim(),
       pincode: formData.pincode.trim(),
+      country: formData.country || 'India',
       name: formData.name.trim(),
       contactName: formData.contactName.trim(),
-      contactPhone: formData.contactPhone.trim(),
+      contactPhone: cleanedPhone,
       contactEmail: formData.contactEmail.trim(),
     };
 
@@ -469,15 +561,109 @@ export function Properties() {
                 </div>
 
                 <div>
-                  <label className="block text-sm mb-2">Address *</label>
+                  <label className="block text-sm font-medium mb-1.5">
+                    Address Search
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={formData.address}
+                      onChange={(e) =>
+                        setFormData({
+                          ...formData,
+                          address: e.target.value,
+                          addressLine1: e.target.value,
+                          formattedAddress: '',
+                          latitude: null,
+                          longitude: null,
+                        })
+                      }
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Type an address, landmark, pincode or city name…"
+                    />
+
+                    {(isAddressLookupLoading || addressSuggestions.length > 0) && (
+                      <div className="absolute z-20 mt-1 w-full rounded-lg border border-gray-200 bg-white shadow-xl">
+                        {isAddressLookupLoading && (
+                          <p className="px-4 py-3 text-sm text-gray-500">Searching via OpenStreetMap…</p>
+                        )}
+
+                        {!isAddressLookupLoading && addressSuggestions.length > 0 && (
+                          <ul className="max-h-60 overflow-y-auto py-1">
+                            {addressSuggestions.map((suggestion) => (
+                              <li key={suggestion.id}>
+                                <button
+                                  type="button"
+                                  onClick={() => applyAddressSuggestion(suggestion)}
+                                  className="w-full px-4 py-2.5 text-left hover:bg-blue-50 transition-colors border-b border-gray-50 last:border-b-0"
+                                >
+                                  <p className="text-sm text-gray-900">{suggestion.addressLine1 || suggestion.formattedAddress.split(',')[0]}</p>
+                                  <p className="text-xs text-gray-500 mt-0.5 truncate">
+                                    {[suggestion.locality, suggestion.city, suggestion.state, suggestion.pincode].filter(Boolean).join(', ')}
+                                  </p>
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  <p className="mt-1 text-xs text-gray-400">
+                    Select a suggestion to auto-fill fields below, or fill them manually.
+                  </p>
+
+                  {formData.latitude !== null && formData.longitude !== null && (
+                    <p className="mt-1 text-xs text-green-600">
+                      ✓ Coordinates captured: {formData.latitude.toFixed(5)}, {formData.longitude.toFixed(5)}
+                    </p>
+                  )}
+                </div>
+
+                {/* Address Line 1 - always visible and required */}
+                <div>
+                  <label className="block text-sm font-medium mb-1.5">Address Line 1 *</label>
                   <input
                     type="text"
                     required
-                    value={formData.address}
-                    onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                    value={formData.addressLine1}
+                    onChange={(e) => setFormData({ ...formData, addressLine1: e.target.value, address: e.target.value })}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="Street address"
+                    placeholder="House no., building, street"
                   />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-sm mb-2">Address Line 2 (optional)</label>
+                    <input
+                      type="text"
+                      value={formData.addressLine2}
+                      onChange={(e) => setFormData({ ...formData, addressLine2: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Apartment, wing, etc."
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm mb-2">Locality (optional)</label>
+                    <input
+                      type="text"
+                      value={formData.locality}
+                      onChange={(e) => setFormData({ ...formData, locality: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Area or neighborhood"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm mb-2">Landmark (optional)</label>
+                    <input
+                      type="text"
+                      value={formData.landmark}
+                      onChange={(e) => setFormData({ ...formData, landmark: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Nearby landmark"
+                    />
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -502,14 +688,29 @@ export function Properties() {
                     />
                   </div>
                   <div>
-                    <label className="block text-sm mb-2">Pincode *</label>
+                    <label className="block text-sm font-medium mb-1.5">Pincode *</label>
                     <input
                       type="text"
                       required
+                      maxLength={6}
+                      inputMode="numeric"
                       value={formData.pincode}
-                      onChange={(e) => setFormData({ ...formData, pincode: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/\D/g, '').slice(0, 6);
+                        setFormData({ ...formData, pincode: val });
+                        const err = val.length > 0 && val.length !== 6 ? 'Pincode must be exactly 6 digits.' : '';
+                        setFieldErrors((prev) => ({ ...prev, pincode: err }));
+                      }}
+                      className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                        fieldErrors.pincode ? 'border-red-400' : 'border-gray-300'
+                      }`}
+                      placeholder="560001"
                     />
+                    {fieldErrors.pincode && (
+                      <p className="mt-1 text-xs text-red-600 flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3" />{fieldErrors.pincode}
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -546,23 +747,41 @@ export function Properties() {
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm mb-2">Phone Number *</label>
+                    <label className="block text-sm font-medium mb-1.5">Phone Number *</label>
                     <input
                       type="tel"
                       required
+                      maxLength={15}
+                      inputMode="numeric"
                       value={formData.contactPhone}
-                      onChange={(e) => setFormData({ ...formData, contactPhone: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      placeholder="+91 98765 43210"
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        setFormData({ ...formData, contactPhone: raw });
+                        const { error: phoneErr } = normaliseAndValidatePhone(raw);
+                        setFieldErrors((prev) => ({ ...prev, contactPhone: raw.length > 0 ? phoneErr : '' }));
+                      }}
+                      className={`w-full px-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                        fieldErrors.contactPhone ? 'border-red-400' : 'border-gray-300'
+                      }`}
+                      placeholder="9876543210 (10 digits)"
                     />
+                    {fieldErrors.contactPhone ? (
+                      <p className="mt-1 text-xs text-red-600 flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3" />{fieldErrors.contactPhone}
+                      </p>
+                    ) : (
+                      <p className="mt-1 text-xs text-gray-400">Enter 10-digit Indian mobile (no country code).</p>
+                    )}
                   </div>
                   <div>
-                    <label className="block text-sm mb-2">Email Address (optional)</label>
+                    <label className="block text-sm font-medium mb-1.5">Email Address (optional)</label>
                     <input
                       type="email"
                       value={formData.contactEmail}
-                      onChange={(e) => setFormData({ ...formData, contactEmail: e.target.value })}
-                      maxLength={EMAIL_MAX_LENGTH}
+                      onChange={(e) => {
+                        setFormData({ ...formData, contactEmail: e.target.value });
+                      }}
+                      maxLength={254}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       placeholder="contact@property.com"
                     />

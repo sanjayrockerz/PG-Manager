@@ -1,21 +1,46 @@
-import { useEffect, useState } from 'react';
-import { User, FileText, Plus, X, MessageCircle, Save } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, FileText, MessageCircle, Plus, Save, Shield, User, Users, X } from 'lucide-react';
+import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import { OwnerSettingsRecord, supabaseOwnerDataApi } from '../services/supabaseData';
+import { AppLanguage, useLocalization } from '../contexts/LocalizationContext';
+import { OwnerSettingsRecord, supabaseAuthDataApi, supabaseOwnerDataApi } from '../services/supabaseData';
+import { TeamMembers } from './TeamMembers';
+import { canManageTeam } from '../utils/roles';
+
+interface ProfileFormState {
+  name: string;
+  email: string;
+  phone: string;
+}
+
+const PHONE_LENGTH = 10;
+
+const toDigits = (value: string): string => value.replace(/\D/g, '').slice(0, PHONE_LENGTH);
 
 export function Settings() {
-  const { user } = useAuth();
+  const { user, refreshProfile, logout } = useAuth();
+  const { setLanguage, t } = useLocalization();
   const [settings, setSettings] = useState<OwnerSettingsRecord | null>(null);
-  const [activeSection, setActiveSection] = useState<'profile' | 'pg-rules' | 'whatsapp'>('profile');
+  const [activeSection, setActiveSection] = useState<'profile' | 'pg-rules' | 'whatsapp' | 'team'>('profile');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+
+  const [profileForm, setProfileForm] = useState<ProfileFormState>({
+    name: '',
+    email: '',
+    phone: '',
+  });
+
   const [newRule, setNewRule] = useState('');
   const [showAddRuleModal, setShowAddRuleModal] = useState(false);
   const [editingRuleIndex, setEditingRuleIndex] = useState<number | null>(null);
   const [showTemplateModal, setShowTemplateModal] = useState(false);
-  const [editingTemplate, setEditingTemplate] = useState<{ type: 'welcomeMessage' | 'rentReminder' | 'paymentConfirmation'; value: string } | null>(null);
+  const [editingTemplate, setEditingTemplate] = useState<{
+    type: 'welcomeMessage' | 'rentReminder' | 'paymentConfirmation' | 'complaintUpdate';
+    value: string;
+  } | null>(null);
 
   const loadSettings = async () => {
     setIsLoading(true);
@@ -34,17 +59,160 @@ export function Settings() {
     void loadSettings();
   }, []);
 
-  const persistSettings = async (nextSettings: OwnerSettingsRecord) => {
+  useEffect(() => {
+    if (!settings) {
+      return;
+    }
+
+    const selectedLanguage = settings.additionalSettings.language;
+    if (selectedLanguage === 'English' || selectedLanguage === 'Hindi' || selectedLanguage === 'Kannada') {
+      setLanguage(selectedLanguage as AppLanguage);
+    }
+  }, [settings, setLanguage]);
+
+  useEffect(() => {
+    setProfileForm({
+      name: user?.name ?? '',
+      email: user?.email ?? '',
+      phone: toDigits(user?.phone ?? ''),
+    });
+  }, [user]);
+
+  const persistSettings = async (nextSettings: OwnerSettingsRecord, successMessage = 'Settings saved successfully.') => {
     setIsSaving(true);
     setError('');
     setSuccess('');
     try {
       const saved = await supabaseOwnerDataApi.updateOwnerSettings(nextSettings);
       setSettings(saved);
-      setSuccess('Settings saved successfully.');
+      setSuccess(successMessage);
     } catch {
       setError('Unable to save settings.');
     } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const updateSettingsDraft = (updater: (current: OwnerSettingsRecord) => OwnerSettingsRecord) => {
+    setSettings((current) => {
+      if (!current) {
+        return current;
+      }
+      return updater(current);
+    });
+  };
+
+  const handleSaveProfile = async () => {
+    const cleanedName = profileForm.name.trim();
+    const cleanedPhone = toDigits(profileForm.phone);
+
+    if (cleanedName.length < 2) {
+      setError('Full name must be at least 2 characters.');
+      return;
+    }
+
+    if (cleanedPhone.length !== PHONE_LENGTH) {
+      setError('Phone number must be exactly 10 digits.');
+      return;
+    }
+
+    setIsSaving(true);
+    setError('');
+    setSuccess('');
+    try {
+      await supabaseAuthDataApi.updateCurrentProfile({
+        name: cleanedName,
+        phone: cleanedPhone,
+      });
+      await refreshProfile();
+      setSuccess('Profile updated successfully.');
+    } catch {
+      setError('Unable to update profile.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleSendPasswordReset = async () => {
+    if (!profileForm.email) {
+      setError('No email found for this account.');
+      return;
+    }
+
+    setIsSaving(true);
+    setError('');
+    setSuccess('');
+    try {
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(profileForm.email, {
+        redirectTo: window.location.origin,
+      });
+
+      if (resetError) {
+        throw resetError;
+      }
+
+      setSuccess('Password reset link sent to your email.');
+    } catch {
+      setError('Unable to send password reset email.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleExportData = async () => {
+    setIsSaving(true);
+    setError('');
+    setSuccess('');
+    try {
+      const payload = await supabaseOwnerDataApi.exportOwnerData();
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `pg-manager-export-${new Date().toISOString().split('T')[0]}.json`;
+      link.click();
+      URL.revokeObjectURL(link.href);
+      setSuccess('Data export generated successfully.');
+    } catch {
+      setError('Unable to export data right now.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDeleteAllData = async () => {
+    const typed = window.prompt('Type DELETE to remove all property, tenant, payment and ticket data.');
+    if (typed !== 'DELETE') {
+      return;
+    }
+
+    setIsSaving(true);
+    setError('');
+    setSuccess('');
+    try {
+      await supabaseOwnerDataApi.clearOwnerData();
+      await loadSettings();
+      setSuccess('All owner data cleared successfully.');
+    } catch {
+      setError('Unable to clear owner data.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleCloseAccount = async () => {
+    const typed = window.prompt('Type CLOSE to clear your account data and sign out.');
+    if (typed !== 'CLOSE') {
+      return;
+    }
+
+    setIsSaving(true);
+    setError('');
+    setSuccess('');
+    try {
+      await supabaseOwnerDataApi.clearOwnerData();
+      await logout();
+    } catch {
+      setError('Unable to close account right now.');
       setIsSaving(false);
     }
   };
@@ -64,7 +232,7 @@ export function Settings() {
     await persistSettings({
       ...settings,
       pgRules: nextRules,
-    });
+    }, 'PG rules saved successfully.');
 
     setNewRule('');
     setEditingRuleIndex(null);
@@ -92,92 +260,90 @@ export function Settings() {
     await persistSettings({
       ...settings,
       pgRules: nextRules,
-    });
+    }, 'PG rule deleted successfully.');
   };
 
-  const handleToggleTemplate = async (type: 'welcomeMessage' | 'rentReminder' | 'paymentConfirmation') => {
+  const handleTemplateEdit = (type: 'welcomeMessage' | 'rentReminder' | 'paymentConfirmation' | 'complaintUpdate') => {
     if (!settings) {
       return;
     }
 
-    await persistSettings({
-      ...settings,
-      whatsappSettings: {
-        ...settings.whatsappSettings,
-        [type]: {
-          ...settings.whatsappSettings[type],
-          enabled: !settings.whatsappSettings[type].enabled,
-        },
-      },
-    });
-  };
-
-  const handleTemplateEdit = (type: 'welcomeMessage' | 'rentReminder' | 'paymentConfirmation') => {
-    if (!settings) {
-      return;
-    }
+    const templateValue = type === 'complaintUpdate'
+      ? settings.whatsappSettings.complaintUpdate.template
+      : settings.whatsappSettings[type].template;
 
     setEditingTemplate({
       type,
-      value: settings.whatsappSettings[type].template,
+      value: templateValue,
     });
     setShowTemplateModal(true);
   };
 
   const handleTemplateSave = async () => {
-    if (!settings || !editingTemplate) {
+    if (!settings || !editingTemplate || !editingTemplate.value.trim()) {
       return;
     }
 
-    const { type, value } = editingTemplate;
-    await persistSettings({
-      ...settings,
-      whatsappSettings: {
-        ...settings.whatsappSettings,
-        [type]: {
-          ...settings.whatsappSettings[type],
-          template: value,
+    if (editingTemplate.type === 'complaintUpdate') {
+      await persistSettings({
+        ...settings,
+        whatsappSettings: {
+          ...settings.whatsappSettings,
+          complaintUpdate: {
+            ...settings.whatsappSettings.complaintUpdate,
+            template: editingTemplate.value.trim(),
+          },
         },
-      },
-    });
+      }, 'WhatsApp complaint template updated successfully.');
+    } else {
+      await persistSettings({
+        ...settings,
+        whatsappSettings: {
+          ...settings.whatsappSettings,
+          [editingTemplate.type]: {
+            ...settings.whatsappSettings[editingTemplate.type],
+            template: editingTemplate.value.trim(),
+          },
+        },
+      }, 'WhatsApp template updated successfully.');
+    }
 
     setEditingTemplate(null);
     setShowTemplateModal(false);
   };
 
-  const handleComplaintToggle = async (field: 'enabled' | 'notifyOnCreate' | 'notifyOnProgress' | 'notifyOnResolve') => {
+  const whatsappTemplateItems = useMemo(() => {
     if (!settings) {
-      return;
+      return [];
     }
 
-    await persistSettings({
-      ...settings,
-      whatsappSettings: {
-        ...settings.whatsappSettings,
-        complaintUpdate: {
-          ...settings.whatsappSettings.complaintUpdate,
-          [field]: !settings.whatsappSettings.complaintUpdate[field],
-        },
+    return [
+      {
+        key: 'welcomeMessage' as const,
+        label: 'Welcome Message',
+        enabled: settings.whatsappSettings.welcomeMessage.enabled,
+        template: settings.whatsappSettings.welcomeMessage.template,
       },
-    });
-  };
-
-  const handleRentReminderDaysChange = async (days: number) => {
-    if (!settings) {
-      return;
-    }
-
-    await persistSettings({
-      ...settings,
-      whatsappSettings: {
-        ...settings.whatsappSettings,
-        rentReminder: {
-          ...settings.whatsappSettings.rentReminder,
-          daysBeforeDue: days,
-        },
+      {
+        key: 'rentReminder' as const,
+        label: 'Rent Reminder',
+        enabled: settings.whatsappSettings.rentReminder.enabled,
+        template: settings.whatsappSettings.rentReminder.template,
       },
-    });
-  };
+      {
+        key: 'paymentConfirmation' as const,
+        label: 'Payment Confirmation',
+        enabled: settings.whatsappSettings.paymentConfirmation.enabled,
+        template: settings.whatsappSettings.paymentConfirmation.template,
+      },
+      {
+        key: 'complaintUpdate' as const,
+        label: 'Complaint Notifications',
+        enabled: settings.whatsappSettings.complaintUpdate.enabled,
+        template: settings.whatsappSettings.complaintUpdate.template,
+      },
+    ];
+  }, [settings]);
 
   if (isLoading || !settings) {
     return (
@@ -193,8 +359,8 @@ export function Settings() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-gray-900">Settings</h1>
-        <p className="text-gray-600 mt-1">Manage your account settings</p>
+        <h1 className="text-gray-900">{t('settings.title', 'Settings')}</h1>
+        <p className="text-gray-600 mt-1">{t('settings.subtitle', 'Manage your account settings')}</p>
       </div>
 
       {error && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
@@ -203,19 +369,21 @@ export function Settings() {
       <div className="bg-white rounded-xl border border-gray-200 p-2">
         <div className="flex flex-wrap items-center gap-2">
           {[
-            { key: 'profile', label: 'Profile' },
-            { key: 'pg-rules', label: 'PG Rules' },
-            { key: 'whatsapp', label: 'WhatsApp Integration' },
+            { key: 'profile', label: 'Profile', icon: User },
+            { key: 'pg-rules', label: 'PG Rules', icon: FileText },
+            { key: 'whatsapp', label: 'WhatsApp', icon: MessageCircle },
+            ...(canManageTeam(user?.role) ? [{ key: 'team', label: 'Team', icon: Users }] : []),
           ].map((tab) => (
             <button
               key={tab.key}
-              onClick={() => setActiveSection(tab.key as 'profile' | 'pg-rules' | 'whatsapp')}
-              className={`px-4 py-2 rounded-lg text-sm transition-colors ${
+              onClick={() => setActiveSection(tab.key as 'profile' | 'pg-rules' | 'whatsapp' | 'team')}
+              className={`px-4 py-2 rounded-lg text-sm transition-colors flex items-center gap-2 ${
                 activeSection === tab.key
                   ? 'bg-blue-600 text-white'
                   : 'bg-gray-50 text-gray-700 hover:bg-gray-100'
               }`}
             >
+              <tab.icon className="w-3.5 h-3.5" />
               {tab.label}
             </button>
           ))}
@@ -223,165 +391,358 @@ export function Settings() {
       </div>
 
       {activeSection === 'profile' && (
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
-        <div className="flex items-center gap-3 mb-4">
-          <div className="p-3 bg-purple-50 rounded-lg">
-            <User className="w-5 h-5 text-purple-600" />
-          </div>
-          <h2 className="text-gray-900">Profile</h2>
-        </div>
+        <div className="space-y-6">
+          <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-purple-50 rounded-lg">
+                <User className="w-5 h-5 text-purple-600" />
+              </div>
+              <div>
+                <h2 className="text-gray-900">Profile Settings</h2>
+                <p className="text-sm text-gray-600">Keep your account profile up to date.</p>
+              </div>
+            </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-          <div>
-            <p className="text-gray-500">Name</p>
-            <p className="text-gray-900 mt-1">{user?.name || 'Owner'}</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm text-gray-600">Full Name</label>
+                <input value={profileForm.name} onChange={(e) => setProfileForm({ ...profileForm, name: e.target.value })} className="w-full px-4 py-2 border border-gray-300 rounded-lg" />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm text-gray-600">Email</label>
+                <input value={profileForm.email} disabled className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-100 text-gray-500" />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm text-gray-600">Phone</label>
+                <input value={profileForm.phone} inputMode="numeric" maxLength={PHONE_LENGTH} onChange={(e) => setProfileForm({ ...profileForm, phone: toDigits(e.target.value) })} className="w-full px-4 py-2 border border-gray-300 rounded-lg" />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end">
+              <button onClick={() => void handleSaveProfile()} disabled={isSaving} className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60">
+                {isSaving ? 'Saving...' : 'Update Profile'}
+              </button>
+            </div>
           </div>
-          <div>
-            <p className="text-gray-500">Email</p>
-            <p className="text-gray-900 mt-1">{user?.email || '-'}</p>
+
+          <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
+            <h2 className="text-gray-900">Notifications</h2>
+            <div className="space-y-3">
+              {[
+                ['paymentNotifications', 'Payment Notifications', 'Get notified about payments'],
+                ['maintenanceAlerts', 'Maintenance Alerts', 'New maintenance requests'],
+                ['tenantUpdates', 'Tenant Updates', 'Check-in and check-out alerts'],
+                ['emailNotifications', 'Email Notifications', 'Receive email updates'],
+              ].map(([field, label, note]) => (
+                <label key={field} className="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3">
+                  <div>
+                    <p className="text-sm text-gray-900">{label}</p>
+                    <p className="text-xs text-gray-500 mt-1">{note}</p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={settings.notifications[field as keyof OwnerSettingsRecord['notifications']]}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      updateSettingsDraft((current) => ({
+                        ...current,
+                        notifications: {
+                          ...current.notifications,
+                          [field]: checked,
+                        },
+                      }));
+                    }}
+                    className="w-4 h-4"
+                  />
+                </label>
+              ))}
+            </div>
+            <div className="flex items-center justify-end">
+              <button onClick={() => void persistSettings(settings, 'Notification settings saved successfully.')} disabled={isSaving} className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60">Save Notifications</button>
+            </div>
           </div>
-          <div>
-            <p className="text-gray-500">Phone</p>
-            <p className="text-gray-900 mt-1">{user?.phone || '-'}</p>
+
+          <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
+            <h2 className="text-gray-900">Security</h2>
+            <div className="rounded-lg border border-gray-200 px-4 py-3 flex items-center justify-between">
+              <div>
+                <p className="text-sm text-gray-900">Two-Factor Authentication</p>
+                <p className="text-xs text-gray-500 mt-1">Add an extra layer of security</p>
+              </div>
+              <input
+                type="checkbox"
+                checked={settings.security.twoFactorAuthentication}
+                onChange={(e) => {
+                  const checked = e.target.checked;
+                  updateSettingsDraft((current) => ({
+                    ...current,
+                    security: {
+                      ...current.security,
+                      twoFactorAuthentication: checked,
+                    },
+                  }));
+                }}
+                className="w-4 h-4"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <button onClick={() => void handleSendPasswordReset()} disabled={isSaving} className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">Change Password</button>
+              <button disabled className="px-4 py-2 border border-gray-200 text-gray-400 rounded-lg cursor-not-allowed">Active Sessions: Current Device</button>
+            </div>
+
+            <div className="flex items-center justify-end">
+              <button onClick={() => void persistSettings(settings, 'Security settings saved successfully.')} disabled={isSaving} className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60">Save Security</button>
+            </div>
           </div>
-          <div>
-            <p className="text-gray-500">Role</p>
-            <p className="text-gray-900 mt-1">{user?.role || 'owner'}</p>
+
+          <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
+            <h2 className="text-gray-900">Payment Settings</h2>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm text-gray-600">UPI ID</label>
+                <input value={settings.paymentSettings.upiId} onChange={(e) => updateSettingsDraft((current) => ({ ...current, paymentSettings: { ...current.paymentSettings, upiId: e.target.value } }))} className="w-full px-4 py-2 border border-gray-300 rounded-lg" />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm text-gray-600">Bank Account</label>
+                <input value={settings.paymentSettings.bankAccount} onChange={(e) => updateSettingsDraft((current) => ({ ...current, paymentSettings: { ...current.paymentSettings, bankAccount: e.target.value } }))} className="w-full px-4 py-2 border border-gray-300 rounded-lg" />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm text-gray-600">Late Payment Fee</label>
+                <input type="number" min={0} value={settings.paymentSettings.latePaymentFee} onChange={(e) => updateSettingsDraft((current) => ({ ...current, paymentSettings: { ...current.paymentSettings, latePaymentFee: Number(e.target.value) || 0 } }))} className="w-full px-4 py-2 border border-gray-300 rounded-lg" />
+              </div>
+            </div>
+            <div className="flex items-center justify-end">
+              <button onClick={() => void persistSettings(settings, 'Payment settings saved successfully.')} disabled={isSaving} className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60">Save Payment Settings</button>
+            </div>
           </div>
-          <div>
-            <p className="text-gray-500">PG Name</p>
-            <p className="text-gray-900 mt-1">{user?.pgName || '-'}</p>
+
+          <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
+            <h2 className="text-gray-900">Additional Settings</h2>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm text-gray-600">Language</label>
+                <select value={settings.additionalSettings.language} onChange={(e) => updateSettingsDraft((current) => ({ ...current, additionalSettings: { ...current.additionalSettings, language: e.target.value } }))} className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-white">
+                  <option value="English">English</option>
+                  <option value="Hindi">Hindi</option>
+                  <option value="Kannada">Kannada</option>
+                </select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm text-gray-600">Timezone</label>
+                <select value={settings.additionalSettings.timezone} onChange={(e) => updateSettingsDraft((current) => ({ ...current, additionalSettings: { ...current.additionalSettings, timezone: e.target.value } }))} className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-white">
+                  <option value="IST (UTC+5:30)">IST (UTC+5:30)</option>
+                  <option value="UTC">UTC</option>
+                </select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm text-gray-600">Currency</label>
+                <select value={settings.additionalSettings.currency} onChange={(e) => updateSettingsDraft((current) => ({ ...current, additionalSettings: { ...current.additionalSettings, currency: e.target.value } }))} className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-white">
+                  <option value="INR (Rs)">INR (Rs)</option>
+                  <option value="USD ($)">USD ($)</option>
+                </select>
+              </div>
+            </div>
+            <div className="flex items-center justify-end">
+              <button
+                onClick={() => {
+                  const selectedLanguage = settings.additionalSettings.language;
+                  if (selectedLanguage === 'English' || selectedLanguage === 'Hindi' || selectedLanguage === 'Kannada') {
+                    setLanguage(selectedLanguage as AppLanguage);
+                  }
+                  void persistSettings(settings, 'Additional settings saved successfully.');
+                }}
+                disabled={isSaving}
+                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60"
+              >
+                Save Additional Settings
+              </button>
+            </div>
           </div>
-          <div>
-            <p className="text-gray-500">City</p>
-            <p className="text-gray-900 mt-1">{user?.city || '-'}</p>
+
+          <div className="bg-white rounded-xl border border-red-200 p-6 space-y-4">
+            <div className="flex items-center gap-3">
+              <AlertTriangle className="w-5 h-5 text-red-600" />
+              <div>
+                <h2 className="text-gray-900">Danger Zone</h2>
+                <p className="text-xs text-gray-500 mt-1">These actions can clear your account data.</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <button onClick={() => void handleExportData()} disabled={isSaving} className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">Export All Data</button>
+              <button onClick={() => void handleDeleteAllData()} disabled={isSaving} className="px-4 py-2 border border-red-300 text-red-700 rounded-lg hover:bg-red-50 transition-colors">Delete All Data</button>
+              <button onClick={() => void handleCloseAccount()} disabled={isSaving} className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors">Close Account</button>
+            </div>
           </div>
-        </div>
         </div>
       )}
 
       {activeSection === 'pg-rules' && (
         <div className="bg-white rounded-xl border border-gray-200 p-6">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <div className="p-3 bg-blue-50 rounded-lg">
-              <FileText className="w-5 h-5 text-blue-600" />
-            </div>
-            <div>
-              <h2 className="text-gray-900">PG Rules</h2>
-              <p className="text-sm text-gray-600">Rules used for WhatsApp replies</p>
-            </div>
-          </div>
-          <button
-            onClick={() => {
-              setEditingRuleIndex(null);
-              setNewRule('');
-              setShowAddRuleModal(true);
-            }}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Add Rule</span>
-          </button>
-        </div>
-
-        <div className="space-y-2">
-          {settings.pgRules.length === 0 ? (
-            <p className="text-sm text-gray-500">No rules added yet.</p>
-          ) : (
-            settings.pgRules.map((rule, index) => (
-              <div key={`rule-${index}`} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                <div className="flex items-center gap-3">
-                  <span className="text-sm text-gray-500 font-mono">{index + 1}.</span>
-                  <p className="text-sm text-gray-900">{rule}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button onClick={() => handleEditRule(index)} className="px-3 py-1 text-sm text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">Edit</button>
-                  <button onClick={() => void handleDeleteRule(index)} className="px-3 py-1 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors">Delete</button>
-                </div>
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-blue-50 rounded-lg">
+                <FileText className="w-5 h-5 text-blue-600" />
               </div>
-            ))
-          )}
-        </div>
+              <div>
+                <h2 className="text-gray-900">PG Rules</h2>
+                <p className="text-sm text-gray-600">Rules for WhatsApp chatbot auto-replies</p>
+              </div>
+            </div>
+            <button
+              onClick={() => {
+                setEditingRuleIndex(null);
+                setNewRule('');
+                setShowAddRuleModal(true);
+              }}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Add Rule</span>
+            </button>
+          </div>
+
+          <div className="space-y-2">
+            {settings.pgRules.length === 0 ? (
+              <p className="text-sm text-gray-500">No rules added yet.</p>
+            ) : (
+              settings.pgRules.map((rule, index) => (
+                <div key={`rule-${index}`} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                  <div className="flex items-center gap-3">
+                    <span className="text-sm text-gray-500 font-mono">{index + 1}.</span>
+                    <p className="text-sm text-gray-900">{rule}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => handleEditRule(index)} className="px-3 py-1 text-sm text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">Edit</button>
+                    <button onClick={() => void handleDeleteRule(index)} className="px-3 py-1 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors">Delete</button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
         </div>
       )}
 
       {activeSection === 'whatsapp' && (
         <div className="bg-white rounded-xl border border-gray-200 p-6">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <div className="p-3 bg-green-50 rounded-lg">
-              <MessageCircle className="w-5 h-5 text-green-600" />
-            </div>
-            <div>
-              <h2 className="text-gray-900">WhatsApp Automation</h2>
-              <p className="text-sm text-gray-600">Manage templates and complaint notifications</p>
-            </div>
-          </div>
-          <div className="text-xs text-gray-500 flex items-center gap-1">
-            <Save className="w-3 h-3" />
-            Auto-saved
-          </div>
-        </div>
-
-        <div className="space-y-3">
-          {([
-            ['welcomeMessage', 'Welcome Message'],
-            ['rentReminder', 'Rent Reminder'],
-            ['paymentConfirmation', 'Payment Confirmation'],
-          ] as const).map(([key, label]) => (
-            <div key={key} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-green-50 rounded-lg">
+                <MessageCircle className="w-5 h-5 text-green-600" />
+              </div>
               <div>
-                <p className="text-sm text-gray-900">{label}</p>
-                <p className="text-xs text-gray-500 mt-1">{settings.whatsappSettings[key].template}</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <label className="relative inline-block w-12 h-6">
-                  <input type="checkbox" className="sr-only peer" checked={settings.whatsappSettings[key].enabled} onChange={() => void handleToggleTemplate(key)} />
-                  <div className="w-12 h-6 bg-gray-300 rounded-full peer-checked:bg-blue-600 transition-colors cursor-pointer"></div>
-                  <div className="absolute left-1 top-1 w-4 h-4 bg-white rounded-full peer-checked:translate-x-6 transition-transform"></div>
-                </label>
-                <button onClick={() => handleTemplateEdit(key)} className="px-3 py-1 text-sm text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">Edit</button>
+                <h2 className="text-gray-900">WhatsApp Automation</h2>
+                <p className="text-sm text-gray-600">Configure WhatsApp chatbot templates</p>
               </div>
             </div>
-          ))}
-
-          <div className="p-3 bg-gray-50 rounded-lg space-y-2">
-            <div className="flex items-center justify-between">
-              <p className="text-sm text-gray-900">Rent Reminder Lead Time</p>
-              <input
-                type="number"
-                min={1}
-                max={15}
-                value={settings.whatsappSettings.rentReminder.daysBeforeDue}
-                onChange={(e) => void handleRentReminderDaysChange(Number(e.target.value) || 1)}
-                className="w-20 px-2 py-1 border border-gray-300 rounded-md text-sm"
-              />
+            <div className="text-xs text-gray-500 flex items-center gap-1">
+              <Save className="w-3 h-3" />
+              Live Sync
             </div>
-            <p className="text-xs text-gray-500">Days before due date to send reminders</p>
           </div>
 
-          <div className="p-3 bg-gray-50 rounded-lg space-y-2">
-            <p className="text-sm text-gray-900">Complaint Notifications</p>
-            {([
-              ['enabled', 'Automation Enabled'],
-              ['notifyOnCreate', 'Notify on Ticket Create'],
-              ['notifyOnProgress', 'Notify on In Progress'],
-              ['notifyOnResolve', 'Notify on Resolve'],
-            ] as const).map(([field, label]) => (
-              <label key={field} className="flex items-center gap-2 text-sm text-gray-700">
-                <input
-                  type="checkbox"
-                  checked={settings.whatsappSettings.complaintUpdate[field]}
-                  onChange={() => void handleComplaintToggle(field)}
-                  className="w-4 h-4"
-                />
-                <span>{label}</span>
-              </label>
+          <div className="space-y-3">
+            {whatsappTemplateItems.map((item, index) => (
+              <div key={item.key} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div>
+                  <p className="text-sm text-gray-900">{index + 1}. {item.label}</p>
+                  <p className="text-xs text-gray-500 mt-1">{item.template}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="relative inline-block w-12 h-6">
+                    <input
+                      type="checkbox"
+                      className="sr-only peer"
+                      checked={item.enabled}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        updateSettingsDraft((current) => ({
+                          ...current,
+                          whatsappSettings: {
+                            ...current.whatsappSettings,
+                            [item.key]: {
+                              ...current.whatsappSettings[item.key],
+                              enabled: checked,
+                            },
+                          },
+                        }));
+                      }}
+                    />
+                    <div className="w-12 h-6 bg-gray-300 rounded-full peer-checked:bg-blue-600 transition-colors cursor-pointer"></div>
+                    <div className="absolute left-1 top-1 w-4 h-4 bg-white rounded-full peer-checked:translate-x-6 transition-transform"></div>
+                  </label>
+                  <button onClick={() => handleTemplateEdit(item.key)} className="px-3 py-1 text-sm text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">Edit</button>
+                </div>
+              </div>
             ))}
+
+            <div className="p-3 bg-gray-50 rounded-lg space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-gray-900">Rent Reminder Timing</p>
+                <input
+                  type="number"
+                  min={1}
+                  max={15}
+                  value={settings.whatsappSettings.rentReminder.daysBeforeDue}
+                  onChange={(e) => {
+                    const days = Math.min(15, Math.max(1, Number(e.target.value) || 1));
+                    updateSettingsDraft((current) => ({
+                      ...current,
+                      whatsappSettings: {
+                        ...current.whatsappSettings,
+                        rentReminder: {
+                          ...current.whatsappSettings.rentReminder,
+                          daysBeforeDue: days,
+                        },
+                      },
+                    }));
+                  }}
+                  className="w-20 px-2 py-1 border border-gray-300 rounded-md text-sm"
+                />
+              </div>
+              <p className="text-xs text-gray-500">Automatic reminders are sent this many days before due date.</p>
+            </div>
+
+            <div className="p-3 bg-gray-50 rounded-lg space-y-2">
+              <p className="text-sm text-gray-900">Complaint Notification Flags</p>
+              {([
+                ['notifyOnCreate', 'Notify on Ticket Create'],
+                ['notifyOnProgress', 'Notify on In Progress'],
+                ['notifyOnResolve', 'Notify on Resolve'],
+              ] as const).map(([field, label]) => (
+                <label key={field} className="flex items-center gap-2 text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={settings.whatsappSettings.complaintUpdate[field]}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      updateSettingsDraft((current) => ({
+                        ...current,
+                        whatsappSettings: {
+                          ...current.whatsappSettings,
+                          complaintUpdate: {
+                            ...current.whatsappSettings.complaintUpdate,
+                            [field]: checked,
+                          },
+                        },
+                      }));
+                    }}
+                    className="w-4 h-4"
+                  />
+                  <span>{label}</span>
+                </label>
+              ))}
+            </div>
+
+            <div className="flex items-center justify-end">
+              <button onClick={() => void persistSettings(settings, 'WhatsApp automation settings saved successfully.')} disabled={isSaving} className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60">Save WhatsApp Settings</button>
+            </div>
           </div>
         </div>
-        </div>
+      )}
+
+      {activeSection === 'team' && canManageTeam(user?.role) && (
+        <TeamMembers />
       )}
 
       {showAddRuleModal && (
