@@ -351,23 +351,130 @@ create index if not exists idx_owner_invites_status       on public.owner_invite
 
 -- ================================================================
 -- SECTION 3: DATABASE CONSTRAINTS (validation)
+-- Existing dirty data is cleaned BEFORE constraints are added.
+-- This prevents ERROR 23514 check constraint violations.
 -- ================================================================
 
--- Properties: pincode exactly 6 digits (Indian format)
+-- ── Step 3a: Normalise existing property pincodes ─────────────────
+-- Strip all non-digit characters first
+update public.properties
+set pincode = regexp_replace(pincode, '[^\d]', '', 'g')
+where pincode ~ '[^\d]';
+
+-- Strip leading country code 91 if pincode is 8 digits starting with 91 (e.g. "91560001")
+update public.properties
+set pincode = right(pincode, 6)
+where length(pincode) = 8 and pincode like '91%';
+
+-- Left-pad with zeros if 5 digits (rare edge case)
+update public.properties
+set pincode = lpad(pincode, 6, '0')
+where length(pincode) = 5 and pincode ~ '^\d{5}$';
+
+-- If still not 6 digits (empty, test data, etc.) set a placeholder that we can fix manually
+-- '000000' is visually obvious in the UI that it needs correcting
+update public.properties
+set pincode = '000000'
+where pincode !~ '^\d{6}$';
+
+-- ── Step 3b: Normalise existing property contact_phone ────────────
+-- Strip all non-digit characters
+update public.properties
+set contact_phone = regexp_replace(contact_phone, '[^\d]', '', 'g')
+where contact_phone ~ '[^\d]';
+
+-- Strip leading country code: +91 / 91 / 0 prefix → 10 digits
+update public.properties
+set contact_phone = right(contact_phone, 10)
+where length(contact_phone) = 12 and contact_phone like '91%';
+
+update public.properties
+set contact_phone = right(contact_phone, 10)
+where length(contact_phone) = 11 and contact_phone like '0%';
+
+-- Pad to 10 if short (unlikely but safe)
+update public.properties
+set contact_phone = lpad(contact_phone, 10, '0')
+where length(contact_phone) < 10 and contact_phone ~ '^\d+$';
+
+-- Truncate to 10 if somehow longer
+update public.properties
+set contact_phone = right(contact_phone, 10)
+where length(contact_phone) > 10 and contact_phone ~ '^\d+$';
+
+-- Fallback for anything still invalid
+update public.properties
+set contact_phone = '0000000000'
+where contact_phone !~ '^\d{10}$';
+
+-- ── Step 3c: Normalise existing property contact_email ────────────
+-- Clear obviously invalid emails (keep blank or valid)
+update public.properties
+set contact_email = ''
+where contact_email is not null
+  and contact_email <> ''
+  and contact_email !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$';
+
+-- Ensure not null
+update public.properties
+set contact_email = ''
+where contact_email is null;
+
+-- ── Step 3d: Normalise existing tenant phones ─────────────────────
+-- Strip non-digit chars (except leading +)
+update public.tenants
+set phone = regexp_replace(phone, '[^\d\+]', '', 'g')
+where phone ~ '[^\d\+]';
+
+-- Acceptable formats: +91XXXXXXXXXX, +XXXXXXXXXXX, XXXXXXXXXX
+-- Clear anything that still doesn't match after stripping
+update public.tenants
+set phone = '0000000000'
+where phone !~ '^\+?\d{10,15}$';
+
+-- ── Step 3e: Normalise existing tenant emails ─────────────────────
+update public.tenants
+set email = ''
+where email is not null
+  and email <> ''
+  and email !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$';
+
+update public.tenants
+set email = ''
+where email is null;
+
+-- ── Step 3f: Normalise existing tenant parent_phone ───────────────
+update public.tenants
+set parent_phone = regexp_replace(parent_phone, '[^\d\+]', '', 'g')
+where parent_phone ~ '[^\d\+]';
+
+update public.tenants
+set parent_phone = ''
+where parent_phone is not null
+  and parent_phone <> ''
+  and parent_phone !~ '^\+?\d{10,15}$';
+
+update public.tenants
+set parent_phone = ''
+where parent_phone is null;
+
+-- ── Step 3g: ADD CONSTRAINTS (data is clean now) ──────────────────
+
+-- Properties: pincode exactly 6 digits
 alter table public.properties
   drop constraint if exists properties_pincode_format;
 alter table public.properties
   add constraint properties_pincode_format
     check (pincode ~ '^\d{6}$');
 
--- Properties: contact_phone exactly 10 digits (Indian mobile, no country code stored)
+-- Properties: contact_phone exactly 10 digits
 alter table public.properties
   drop constraint if exists properties_contact_phone_format;
 alter table public.properties
   add constraint properties_contact_phone_format
     check (contact_phone ~ '^\d{10}$');
 
--- Properties: email must be blank or valid format
+-- Properties: email blank or valid format
 alter table public.properties
   drop constraint if exists properties_contact_email_format;
 alter table public.properties
