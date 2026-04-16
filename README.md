@@ -15,10 +15,13 @@
 
   - `VITE_SUPABASE_URL`
   - `VITE_SUPABASE_ANON_KEY`
+  - `VITE_SITE_URL` (recommended for OTP redirects in preview/production)
 
   ## 3. Configure Supabase
 
   1. Run `supabase/schema.sql` in Supabase SQL editor.
+  2. Run `supabase/migrations/20260412_sync_tenant_payment_updates.sql`.
+  3. Run `supabase/migrations/20260414_multi_owner_saas_expansion.sql`.
   2. Complete manual Storage, Realtime, and Auth setup from `supabase/README.md`.
   3. Seed bootstrap data using one of the paths in `supabase/README.md`.
 

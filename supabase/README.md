@@ -7,9 +7,11 @@ This project is structured as a production-grade working model.
 Run these files in order:
 
 1. `supabase/schema.sql`
-2. `supabase/seed_demo_owner.sql` (optional bootstrap data)
-3. `supabase/seed_demo_tenant_link.sql` (optional tenant account link)
-4. `supabase/seed_demo_admin_link.sql` (optional admin account link)
+2. `supabase/migrations/20260412_sync_tenant_payment_updates.sql`
+3. `supabase/migrations/20260414_multi_owner_saas_expansion.sql`
+4. `supabase/seed_demo_owner.sql` (optional bootstrap data)
+5. `supabase/seed_demo_tenant_link.sql` (optional tenant account link)
+6. `supabase/seed_demo_admin_link.sql` (optional admin account link)
 
 `schema.sql` includes only SQL-editor-safe application database objects:
 - Core app tables
@@ -41,6 +43,7 @@ In Supabase Dashboard:
 
 1. Open Database -> Replication (Realtime).
 2. Ensure these tables are enabled for realtime changes:
+   - `profiles`
    - `properties`
    - `rooms`
    - `tenants`
@@ -50,6 +53,10 @@ In Supabase Dashboard:
    - `maintenance_notes`
    - `announcements`
    - `notifications`
+   - `owner_user_property_scopes`
+   - `owner_subscriptions`
+   - `support_tickets`
+   - `support_ticket_comments`
 
 ## C) Auth setup steps
 
@@ -84,6 +91,7 @@ Set in local and hosting environments:
 
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_ANON_KEY`
+- `VITE_SITE_URL` (recommended for OTP redirect consistency)
 
 ## F) Idempotency notes
 

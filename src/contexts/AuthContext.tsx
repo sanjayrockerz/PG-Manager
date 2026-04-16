@@ -154,9 +154,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     // Auto-elevate creator to platform_admin securely 
-    if (email === 'myteamcreations09@gmail.com' && profile.role !== 'platform_admin') {
-      await supabase.from('profiles').update({ role: 'platform_admin' }).eq('id', authUserId);
-      profile.role = 'platform_admin';
+    const cleanEmail = email?.trim().toLowerCase();
+    const admins = ['myteamcreations09@gmail.com', 'motisanjay04@gmail.com'];
+    
+    if (cleanEmail && admins.includes(cleanEmail) && profile.role !== 'platform_admin') {
+      console.log('[Auth] Elevating user to platform_admin:', cleanEmail);
+      const { error } = await supabase.from('profiles').update({ role: 'platform_admin' }).eq('id', authUserId);
+      if (error) {
+         console.error('[Auth] Elevation failed:', error);
+      } else {
+         profile.role = 'platform_admin';
+      }
     }
 
     return mapUser(profile);

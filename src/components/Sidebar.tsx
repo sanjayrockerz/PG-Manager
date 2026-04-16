@@ -45,6 +45,7 @@ const adminMenuItems = [
 ];
 
 export function Sidebar({ activeTab, setActiveTab, sidebarOpen, setSidebarOpen, userRole = 'owner' }: SidebarProps) {
+  const [isCollapsed, setIsCollapsed] = useState(false);
   const [portalsExpanded, setPortalsExpanded] = useState(false);
   const { t } = useLocalization();
 
@@ -79,17 +80,27 @@ export function Sidebar({ activeTab, setActiveTab, sidebarOpen, setSidebarOpen, 
       {/* Sidebar */}
       <aside className={`
         fixed lg:static inset-y-0 left-0 z-50
-        w-64 bg-white border-r border-gray-200
-        transform transition-transform duration-300 ease-in-out
+        bg-white border-r border-gray-200
+        transform transition-all duration-300 ease-in-out
         ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
+        ${isCollapsed ? 'w-20' : 'w-64'}
       `}>
         <div className="flex flex-col h-full">
-          {/* Logo */}
-          <div className="flex items-center justify-between p-6 border-b border-gray-200">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg"></div>
-              <span className="font-semibold">PG Manager</span>
+          {/* Logo & Desktop Toggle */}
+          <div className={`flex items-center justify-between p-6 border-b border-gray-200 ${isCollapsed ? 'px-4' : 'px-6'}`}>
+            <div className="flex items-center gap-2 overflow-hidden">
+              <div className="flex-shrink-0 w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg"></div>
+              {!isCollapsed && <span className="font-semibold whitespace-nowrap">PG Manager</span>}
             </div>
+            
+            {/* Desktop Collapse Toggle */}
+            <button 
+              onClick={() => setIsCollapsed(!isCollapsed)}
+              className="hidden lg:flex p-1.5 hover:bg-gray-100 rounded-lg text-gray-400"
+            >
+              {isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronDown className="w-4 h-4 -rotate-90" />}
+            </button>
+
             <button 
               onClick={() => setSidebarOpen(false)}
               className="lg:hidden p-2 hover:bg-gray-100 rounded-lg"
@@ -112,28 +123,34 @@ export function Sidebar({ activeTab, setActiveTab, sidebarOpen, setSidebarOpen, 
                     setActiveTab(item.id);
                     setSidebarOpen(false);
                   }}
+                  title={isCollapsed ? item.label : ''}
                   className={`
                     w-full flex items-center gap-3 px-4 py-3 rounded-lg
-                    transition-colors
+                    transition-all
+                    ${isCollapsed ? 'justify-center px-0' : 'justify-start px-4'}
                     ${isActive 
                       ? 'bg-gray-100 text-gray-900 font-semibold' 
                       : 'text-gray-600 hover:bg-gray-50'
                     }
                   `}
                 >
-                  <Icon className="w-5 h-5" />
-                  <span>{
-                    item.id === 'dashboard' ? t('nav.dashboard', item.label)
-                      : item.id === 'properties' ? t('nav.properties', item.label)
-                        : item.id === 'tenants' ? t('nav.tenants', item.label)
-                          : item.id === 'payments' ? t('nav.payments', item.label)
-                            : item.id === 'maintenance' ? t('nav.maintenance', item.label)
-                              : item.id === 'announcements' ? t('nav.announcements', item.label)
-                                : item.id === 'support' ? t('nav.support', item.label)
-                                  : item.id === 'subscriptions' ? t('nav.subscriptions', item.label)
-                                : item.id === 'pricing' ? t('nav.pricing', item.label)
-                                  : item.label
-                  }</span>
+                  <Icon className="w-5 h-5 flex-shrink-0" />
+                  {!isCollapsed && (
+                    <span className="whitespace-nowrap overflow-hidden text-ellipsis">
+                      {
+                        item.id === 'dashboard' ? t('nav.dashboard', item.label)
+                          : item.id === 'properties' ? t('nav.properties', item.label)
+                            : item.id === 'tenants' ? t('nav.tenants', item.label)
+                              : item.id === 'payments' ? t('nav.payments', item.label)
+                                : item.id === 'maintenance' ? t('nav.maintenance', item.label)
+                                  : item.id === 'announcements' ? t('nav.announcements', item.label)
+                                    : item.id === 'support' ? t('nav.support', item.label)
+                                      : item.id === 'subscriptions' ? t('nav.subscriptions', item.label)
+                                    : item.id === 'pricing' ? t('nav.pricing', item.label)
+                                      : item.label
+                      }
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -199,30 +216,31 @@ export function Sidebar({ activeTab, setActiveTab, sidebarOpen, setSidebarOpen, 
               </>
             )}
 
-            {/* Settings at bottom of menu */}
             {(userRole === 'owner' || isPlatformAdmin || userRole === 'tenant') && (
               <button
                 onClick={() => {
                   setActiveTab('settings');
                   setSidebarOpen(false);
                 }}
+                title={isCollapsed ? t('nav.settings', 'Settings') : ''}
                 className={`
                   w-full flex items-center gap-3 px-4 py-3 rounded-lg
-                  transition-colors
+                  transition-all
+                  ${isCollapsed ? 'justify-center px-0' : 'justify-start px-4'}
                   ${activeTab === 'settings'
                     ? 'bg-gray-100 text-gray-900 font-semibold' 
                     : 'text-gray-600 hover:bg-gray-50'
                   }
                 `}
               >
-                <Settings className="w-5 h-5" />
-                <span>{t('nav.settings', 'Settings')}</span>
+                <Settings className="w-5 h-5 flex-shrink-0" />
+                {!isCollapsed && <span className="whitespace-nowrap overflow-hidden text-ellipsis">{t('nav.settings', 'Settings')}</span>}
               </button>
             )}
           </nav>
 
           {/* Footer */}
-          {userRole === 'owner' && (
+          {(userRole === 'owner' && !isCollapsed) && (
             <div className="p-4 border-t border-gray-200">
               <div className="bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg p-4 text-white">
                 <p className="text-sm">Upgrade to Pro</p>

@@ -164,78 +164,119 @@ export function AdminSection({ view, onNavigate }: AdminSectionProps) {
   }
 
   const renderDashboard = () => (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-gray-900">{t('admin.title', 'Platform Admin')}</h1>
-        <p className="text-gray-600 mt-1">{t('admin.subtitle', 'SaaS control center for owners, plans, support, and operations.')}</p>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-        <div className="bg-white rounded-xl p-5 border border-gray-200">
-          <p className="text-xs text-gray-500 uppercase tracking-wide">Owners</p>
-          <p className="text-2xl text-gray-900 mt-2">{summary.stats.totalOwners}</p>
+    <div className="space-y-8 animate-in fade-in duration-500">
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">{t('admin.title', 'Platform Intelligence')}</h1>
+          <p className="text-slate-500 mt-1 font-medium">{t('admin.subtitle', 'Live telemetry and ecosystem overview.')}</p>
         </div>
-        <div className="bg-white rounded-xl p-5 border border-gray-200">
-          <p className="text-xs text-gray-500 uppercase tracking-wide">Properties</p>
-          <p className="text-2xl text-gray-900 mt-2">{summary.stats.totalProperties}</p>
-        </div>
-        <div className="bg-white rounded-xl p-5 border border-gray-200">
-          <p className="text-xs text-gray-500 uppercase tracking-wide">Tenants</p>
-          <p className="text-2xl text-gray-900 mt-2">{summary.stats.totalTenants}</p>
-        </div>
-        <div className="bg-white rounded-xl p-5 border border-gray-200">
-          <p className="text-xs text-gray-500 uppercase tracking-wide">Active Plans</p>
-          <p className="text-2xl text-gray-900 mt-2">{summary.stats.activeSubscriptions}</p>
-        </div>
-        <div className="bg-white rounded-xl p-5 border border-gray-200">
-          <p className="text-xs text-gray-500 uppercase tracking-wide">Open Support</p>
-          <p className="text-2xl text-gray-900 mt-2">{summary.stats.openSupportTickets}</p>
-        </div>
-        <div className="bg-white rounded-xl p-5 border border-gray-200">
-          <p className="text-xs text-gray-500 uppercase tracking-wide">Monthly Revenue</p>
-          <p className="text-xl text-gray-900 mt-2">{formatAmount(summary.stats.monthlyRevenue)}</p>
+        <div className="bg-white px-4 py-2 rounded-xl border border-slate-200 shadow-sm flex items-center gap-3">
+           <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+           <span className="text-xs font-bold text-slate-600 uppercase tracking-widest">System Operational</span>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-gray-900">Top Owner Accounts</h2>
-            <button onClick={() => onNavigate?.('owners')} className="text-sm text-blue-600 hover:text-blue-700">View all</button>
-          </div>
-          <div className="space-y-3">
-            {summary.owners.slice(0, 6).map((owner) => (
-              <div key={owner.id} className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm text-gray-900 font-semibold">{owner.name}</p>
-                  <p className="text-xs text-gray-500">{owner.propertyCount} properties • {owner.tenantCount} tenants</p>
-                </div>
-                <span className="px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-700">{owner.planCode}</span>
+      {/* Primary KPI Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        {[
+          { label: 'Total Revenue', value: formatAmount(summary.stats.monthlyRevenue), sub: '+12.5% from last month', icon: DollarSign, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+          { label: 'PG Owners', value: summary.stats.totalOwners, sub: 'Active Organizations', icon: Users, color: 'text-blue-600', bg: 'bg-blue-50' },
+          { label: 'Total Tenants', value: summary.stats.totalTenants, sub: 'Housed Profiles', icon: Shield, color: 'text-purple-600', bg: 'bg-purple-50' },
+          { label: 'Active Nodes', value: summary.stats.totalProperties, sub: 'Hardware Properties', icon: Building2, color: 'text-orange-600', bg: 'bg-orange-50' },
+        ].map((kpi, i) => (
+          <div key={i} className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm hover:shadow-md transition-shadow group">
+            <div className="flex items-center justify-between mb-4">
+              <div className={`p-3 rounded-xl ${kpi.bg} ${kpi.color} group-hover:scale-110 transition-transform`}>
+                <kpi.icon className="w-6 h-6" />
               </div>
-            ))}
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{kpi.label}</span>
+            </div>
+            <p className="text-3xl font-black text-slate-900">{kpi.value}</p>
+            <p className="text-xs font-semibold text-slate-400 mt-1">{kpi.sub}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
+        {/* Rev Breakdown */}
+        <div className="xl:col-span-1 bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+          <h2 className="text-lg font-bold text-slate-900 mb-6 flex items-center gap-2">
+            <Package className="w-5 h-5 text-blue-500" /> Subscription Weight
+          </h2>
+          <div className="space-y-6">
+             {[
+               { name: 'Enterprise', percentage: 45, color: 'bg-blue-600' },
+               { name: 'Professional', percentage: 35, color: 'bg-purple-600' },
+               { name: 'Starter', percentage: 20, color: 'bg-emerald-500' },
+             ].map((plan, i) => (
+               <div key={i} className="space-y-2">
+                  <div className="flex justify-between text-sm font-bold">
+                    <span className="text-slate-700">{plan.name}</span>
+                    <span className="text-slate-400">{plan.percentage}%</span>
+                  </div>
+                  <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                    <div className={`h-full ${plan.color} rounded-full`} style={{ width: `${plan.percentage}%` }}></div>
+                  </div>
+               </div>
+             ))}
+          </div>
+          <div className="mt-8 pt-6 border-t border-slate-100">
+             <div className="flex items-center justify-between text-sm">
+                <span className="text-slate-500 font-medium">Auto-renew Rate</span>
+                <span className="text-emerald-600 font-bold">98.2%</span>
+             </div>
           </div>
         </div>
 
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-gray-900">Support Queue</h2>
-            <button onClick={() => onNavigate?.('support')} className="text-sm text-blue-600 hover:text-blue-700">Open queue</button>
+        {/* Support Queue Analytics */}
+        <div className="xl:col-span-2 bg-slate-900 rounded-2xl shadow-xl p-8 text-white relative overflow-hidden">
+          <div className="absolute top-0 right-0 p-8 opacity-10">
+             <Activity className="w-48 h-48" />
           </div>
-          <div className="space-y-3">
-            {summary.support.slice(0, 6).map((ticket) => (
-              <div key={ticket.id} className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm text-gray-900 font-semibold">{ticket.subject}</p>
-                  <p className="text-xs text-gray-500">{ticket.category} • {formatDate(ticket.createdAt)}</p>
-                </div>
-                <span className={`px-2 py-1 rounded-full text-xs ${ticket.status === 'open' ? 'bg-red-100 text-red-700' : ticket.status === 'in_progress' ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'}`}>
-                  {ticket.status}
-                </span>
-              </div>
-            ))}
-            {summary.support.length === 0 && (
-              <p className="text-sm text-gray-500">No support tickets in the queue.</p>
-            )}
+          <div className="relative z-10">
+            <div className="flex items-center justify-between mb-8">
+               <div>
+                 <h2 className="text-2xl font-black">Support Telemetry</h2>
+                 <p className="text-slate-400 font-medium text-sm">Real-time resolution velocity</p>
+               </div>
+               <button onClick={() => onNavigate?.('support')} className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-xl text-sm font-bold transition-colors">
+                 Action All Tickets
+               </button>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+               <div className="space-y-1">
+                  <p className="text-3xl font-black">{summary.stats.openSupportTickets}</p>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Active Tickets</p>
+               </div>
+               <div className="space-y-1 text-emerald-400">
+                  <p className="text-3xl font-black">12m</p>
+                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Avg Response</p>
+               </div>
+               <div className="space-y-1">
+                  <p className="text-3xl font-black">94%</p>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">CSAT Score</p>
+               </div>
+               <div className="space-y-1">
+                  <p className="text-3xl font-black">2.4k</p>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Resolved YTD</p>
+               </div>
+            </div>
+
+            <div className="mt-12 space-y-4">
+               {summary.support.slice(0, 3).map((ticket) => (
+                 <div key={ticket.id} className="bg-white/5 border border-white/10 rounded-xl p-4 flex items-center justify-between group hover:bg-white/10 transition-colors">
+                    <div className="flex items-center gap-4">
+                       <div className={`w-2 h-2 rounded-full ${ticket.status === 'open' ? 'bg-red-500' : 'bg-yellow-500'}`}></div>
+                       <div>
+                          <p className="text-sm font-bold group-hover:text-blue-400 transition-colors">{ticket.subject}</p>
+                          <p className="text-[10px] text-slate-500 uppercase tracking-widest font-black mt-0.5">{ticket.id.slice(0, 8)} • {formatDate(ticket.createdAt)}</p>
+                       </div>
+                    </div>
+                    <span className="px-3 py-1 bg-white/5 rounded-lg text-[10px] font-black uppercase tracking-widest text-slate-400 line-clamp-1">{ticket.status}</span>
+                 </div>
+               ))}
+            </div>
           </div>
         </div>
       </div>

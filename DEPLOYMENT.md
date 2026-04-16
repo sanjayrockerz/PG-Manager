@@ -11,13 +11,16 @@
 1. Open SQL Editor.
 2. Run `supabase/schema.sql`.
    - This includes `sync_payment_fields_on_tenant_update` trigger so tenant edits (name/room/rent/property) instantly reflect in Payments and Dashboard.
-   - For existing production databases, run [supabase/migrations/20260412_sync_tenant_payment_updates.sql](supabase/migrations/20260412_sync_tenant_payment_updates.sql) as a targeted patch.
-3. In Storage Dashboard:
+3. Run [supabase/migrations/20260412_sync_tenant_payment_updates.sql](supabase/migrations/20260412_sync_tenant_payment_updates.sql).
+4. Run [supabase/migrations/20260414_multi_owner_saas_expansion.sql](supabase/migrations/20260414_multi_owner_saas_expansion.sql).
+   - Adds multi-owner RBAC, owner scopes, subscriptions, support tickets, and normalized property address fields.
+5. In Storage Dashboard:
    - Create bucket `tenant-files`.
    - Configure bucket policies in policy editor for read + authenticated owner-scoped write/update/delete.
-4. In Database -> Replication Dashboard:
+6. In Database -> Replication Dashboard:
    - Enable realtime for `properties`, `rooms`, `tenants`, `payments`, `payment_charges`, `maintenance_tickets`, `maintenance_notes`, `announcements`, `notifications`.
-5. In Auth settings:
+   - Also enable realtime for `profiles`, `owner_user_property_scopes`, `owner_subscriptions`, `support_tickets`, `support_ticket_comments`.
+7. In Auth settings:
    - Enable Email OTP.
    - Set Site URL to your Vercel production URL.
    - Add preview URL(s) to Redirect URLs if needed.
@@ -50,6 +53,7 @@ Choose one path:
 4. Add env vars to both Preview and Production:
    - `VITE_SUPABASE_URL`
    - `VITE_SUPABASE_ANON_KEY`
+   - `VITE_SITE_URL`
 5. Deploy.
 
 ## 4. Post-deploy validation

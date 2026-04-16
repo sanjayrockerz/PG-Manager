@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Search, Plus, Phone, Mail, Edit, Trash2, Eye, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useProperty } from '../contexts/PropertyContext';
-import { supabaseOwnerDataApi, TenantCreateInput, TenantRecord } from '../services/supabaseData';
+import { supabaseOwnerDataApi, supabasePropertyApi, TenantCreateInput, TenantRecord } from '../services/supabaseData';
 import { useRealtimeRefresh } from '../hooks/useRealtimeRefresh';
 import { LiveStatusBadge } from './LiveStatusBadge';
 
@@ -27,9 +27,19 @@ interface TenantFormState {
   idType: string;
   idNumber: string;
   idDocument: File | null;
+  customRoomNumber: string;
+  customRoomBeds: number;
+  customRoomType: 'single' | 'double' | 'triple';
+  customBedLabel: string;
   joinDate: string;
   status: 'active' | 'inactive';
 }
+
+const CUSTOM_ROOM_OPTION = '__custom_room__';
+const CUSTOM_BED_OPTION = '__custom_bed__';
+const PHONE_LENGTH = 10;
+const NAME_MAX_LENGTH = 80;
+const ID_NUMBER_MAX_LENGTH = 64;
 
 const emptyForm = (): TenantFormState => ({
   name: '',
@@ -48,6 +58,10 @@ const emptyForm = (): TenantFormState => ({
   idType: 'Aadhaar Card',
   idNumber: '',
   idDocument: null,
+  customRoomNumber: '',
+  customRoomBeds: 1,
+  customRoomType: 'single',
+  customBedLabel: '',
   joinDate: new Date().toISOString().split('T')[0],
   status: 'active',
 });
@@ -63,6 +77,7 @@ export function Tenants({ onViewTenant }: TenantsProps) {
   const [error, setError] = useState('');
   const [formData, setFormData] = useState<TenantFormState>(emptyForm());
 
+  const toDigits = (value: string, maxLength = PHONE_LENGTH): string => value.replace(/\D/g, '').slice(0, maxLength);
   const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 
   const selectedPropertyRooms = useMemo(() => {
@@ -80,12 +95,25 @@ export function Tenants({ onViewTenant }: TenantsProps) {
     [selectedPropertyRooms, formData.room, formData.floor],
   );
 
-  const availableBeds = useMemo(() => {
+  const isCustomRoomSelected = formData.room === CUSTOM_ROOM_OPTION;
+  const isCustomBedSelected = formData.bed === CUSTOM_BED_OPTION;
+
+  const resolvedRoomCapacity = useMemo(() => {
+    if (isCustomRoomSelected) {
+      return Math.max(1, Number(formData.customRoomBeds) || 1);
+    }
     if (!selectedRoom) {
+      return 0;
+    }
+    return selectedRoom.beds;
+  }, [formData.customRoomBeds, isCustomRoomSelected, selectedRoom]);
+
+  const availableBeds = useMemo(() => {
+    if (resolvedRoomCapacity <= 0) {
       return [] as string[];
     }
-    return Array.from({ length: selectedRoom.beds }, (_, index) => String(index + 1));
-  }, [selectedRoom]);
+    return Array.from({ length: resolvedRoomCapacity }, (_, index) => String(index + 1));
+  }, [resolvedRoomCapacity]);
 
   const loadTenants = useCallback(async () => {
     setIsLoading(true);
@@ -150,6 +178,11 @@ export function Tenants({ onViewTenant }: TenantsProps) {
   };
 
   const openEditModal = (tenant: TenantRecord) => {
+    const property = properties.find((entry) => entry.id === tenant.propertyId);
+    const roomRecord = property?.rooms.find((room) => room.floor === tenant.floor && room.number === tenant.room);
+    const inferredKnownBeds = roomRecord ? Array.from({ length: roomRecord.beds }, (_, index) => String(index + 1)) : [];
+    const usesCustomBed = tenant.bed !== '' && !inferredKnownBeds.includes(tenant.bed);
+
     setEditingTenant(tenant);
     setFormData({
       name: tenant.name,
@@ -158,8 +191,8 @@ export function Tenants({ onViewTenant }: TenantsProps) {
       photo: null,
       propertyId: tenant.propertyId,
       floor: tenant.floor,
-      room: tenant.room,
-      bed: tenant.bed,
+      room: roomRecord ? tenant.room : CUSTOM_ROOM_OPTION,
+      bed: usesCustomBed ? CUSTOM_BED_OPTION : tenant.bed,
       monthlyRent: tenant.rent,
       securityDeposit: tenant.securityDeposit,
       rentDueDate: tenant.rentDueDate,
@@ -168,6 +201,10 @@ export function Tenants({ onViewTenant }: TenantsProps) {
       idType: tenant.idType,
       idNumber: tenant.idNumber,
       idDocument: null,
+      customRoomNumber: roomRecord ? '' : tenant.room,
+      customRoomBeds: roomRecord?.beds ?? Math.max(1, Number(tenant.bed) || 1),
+      customRoomType: roomRecord?.type ?? 'single',
+      customBedLabel: usesCustomBed ? tenant.bed : '',
       joinDate: tenant.joinDate,
       status: tenant.status,
     });
@@ -180,44 +217,94 @@ export function Tenants({ onViewTenant }: TenantsProps) {
     setFormData(emptyForm());
   };
 
-  const toTenantInput = (): TenantCreateInput => ({
+  const toTenantInput = (resolvedRoom: string, resolvedBed: string): TenantCreateInput => ({
     name: formData.name.trim(),
-    phone: formData.phone.replace(/\D/g, ''),
+    phone: toDigits(formData.phone),
     email: formData.email.trim().toLowerCase(),
     propertyId: formData.propertyId,
     floor: formData.floor,
-    room: formData.room,
-    bed: formData.bed,
+    room: resolvedRoom,
+    bed: resolvedBed,
     monthlyRent: Number(formData.monthlyRent),
     securityDeposit: Number(formData.securityDeposit),
     rentDueDate: Number(formData.rentDueDate),
-    parentName: formData.parentName,
-    parentPhone: formData.parentPhone,
-    idType: formData.idType,
-    idNumber: formData.idNumber,
+    parentName: formData.parentName.trim(),
+    parentPhone: toDigits(formData.parentPhone),
+    idType: formData.idType.trim(),
+    idNumber: formData.idNumber.trim(),
     joinDate: formData.joinDate,
     status: formData.status,
     photo: formData.photo,
     idDocument: formData.idDocument,
   });
 
+  const resolveRoomAndBed = (): {
+    room: string;
+    bed: string;
+    roomBeds: number;
+    shouldCreateCustomRoom: boolean;
+    error?: string;
+  } => {
+    const isCustomRoom = formData.room === CUSTOM_ROOM_OPTION;
+    const room = isCustomRoom ? formData.customRoomNumber.trim() : formData.room;
+
+    if (!room) {
+      return { room: '', bed: '', roomBeds: 0, shouldCreateCustomRoom: false, error: 'Room number is required.' };
+    }
+
+    const roomBeds = isCustomRoom
+      ? Math.max(1, Number(formData.customRoomBeds) || 0)
+      : (selectedRoom?.beds ?? 0);
+
+    if (isCustomRoom && roomBeds <= 0) {
+      return { room, bed: '', roomBeds: 0, shouldCreateCustomRoom: false, error: 'Custom room must have at least 1 bed.' };
+    }
+
+    const bed = formData.bed === CUSTOM_BED_OPTION ? formData.customBedLabel.trim() : formData.bed;
+    if (!bed) {
+      return { room, bed: '', roomBeds, shouldCreateCustomRoom: false, error: 'Bed value is required.' };
+    }
+
+    const bedAsNumber = Number(bed);
+    if (Number.isFinite(bedAsNumber) && roomBeds > 0 && bedAsNumber > roomBeds) {
+      return { room, bed, roomBeds, shouldCreateCustomRoom: false, error: 'Selected bed exceeds room bed capacity.' };
+    }
+
+    const matchingRoom = selectableRooms.find((entry) => entry.number.toLowerCase() === room.toLowerCase());
+    return {
+      room,
+      bed,
+      roomBeds,
+      shouldCreateCustomRoom: isCustomRoom && !matchingRoom,
+    };
+  };
+
   const validateTenantForm = (): string => {
     const cleanName = formData.name.trim();
     const cleanEmail = formData.email.trim().toLowerCase();
-    const cleanPhone = formData.phone.replace(/\D/g, '');
-    const cleanParentPhone = formData.parentPhone.replace(/\D/g, '');
+    const cleanPhone = toDigits(formData.phone);
+    const cleanParentPhone = toDigits(formData.parentPhone);
 
     if (!cleanName || cleanName.length < 2) return 'Enter a valid tenant name.';
+    if (cleanName.length > NAME_MAX_LENGTH) return 'Tenant name is too long.';
     if (!cleanEmail || !isValidEmail(cleanEmail)) return 'Enter a valid tenant email address.';
-    if (!cleanPhone || cleanPhone.length !== 10) return 'Enter a valid 10-digit tenant phone number.';
+    if (!cleanPhone || cleanPhone.length !== PHONE_LENGTH) return 'Enter a valid 10-digit tenant phone number.';
     if (!formData.propertyId) return 'Select a property before saving tenant.';
-    if (!formData.room) return 'Select a room number from the dropdown.';
-    if (!formData.bed) return 'Select a bed from the dropdown.';
+    if (formData.floor < 1) return 'Select a valid floor.';
+    if (!formData.room) return 'Select room number.';
+    if (!formData.bed) return 'Select bed.';
     if (!formData.monthlyRent || formData.monthlyRent <= 0) return 'Monthly rent must be greater than zero.';
     if (!formData.parentName.trim()) return 'Parent name is required.';
-    if (!cleanParentPhone || cleanParentPhone.length !== 10) return 'Enter a valid 10-digit parent phone number.';
+    if (!cleanParentPhone || cleanParentPhone.length !== PHONE_LENGTH) return 'Enter a valid 10-digit parent phone number.';
     if (!formData.idType.trim()) return 'ID type is required.';
     if (!formData.idNumber.trim()) return 'ID number is required.';
+    if (formData.idNumber.trim().length > ID_NUMBER_MAX_LENGTH) return 'ID number is too long.';
+    if (formData.rentDueDate < 1 || formData.rentDueDate > 31) return 'Rent due date must be between 1 and 31.';
+
+    const allocation = resolveRoomAndBed();
+    if (allocation.error) {
+      return allocation.error;
+    }
 
     const hasExistingIdDocument = Boolean(editingTenant?.idDocumentUrl);
     if (!formData.idDocument && !hasExistingIdDocument) {
@@ -241,7 +328,26 @@ export function Tenants({ onViewTenant }: TenantsProps) {
     setError('');
 
     try {
-      const payload = toTenantInput();
+      const allocation = resolveRoomAndBed();
+      if (allocation.error) {
+        setError(allocation.error);
+        toast.error(allocation.error);
+        return;
+      }
+
+      if (allocation.shouldCreateCustomRoom) {
+        await supabasePropertyApi.addRoom(formData.propertyId, {
+          number: allocation.room,
+          floor: formData.floor,
+          type: formData.customRoomType,
+          beds: allocation.roomBeds,
+          rent: Number(formData.monthlyRent) || 0,
+          status: 'vacant',
+          occupiedBeds: 0,
+        });
+      }
+
+      const payload = toTenantInput(allocation.room, allocation.bed);
       if (editingTenant) {
         await supabaseOwnerDataApi.updateTenant(editingTenant.id, payload);
         toast.success('Tenant updated');
@@ -251,9 +357,12 @@ export function Tenants({ onViewTenant }: TenantsProps) {
       }
       closeModal();
       await loadTenants();
-    } catch {
-      setError('Unable to save tenant. Please check required fields and try again.');
-      toast.error('Failed to save tenant');
+    } catch (saveError) {
+      const message = saveError instanceof Error
+        ? saveError.message
+        : 'Unable to save tenant. Please check required fields and try again.';
+      setError(message);
+      toast.error(message);
     } finally {
       setIsSaving(false);
     }
@@ -416,11 +525,11 @@ export function Tenants({ onViewTenant }: TenantsProps) {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <label className="text-sm text-gray-500">Name *</label>
-                  <input required value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} className="w-full px-4 py-2 border border-gray-300 rounded-lg" />
+                  <input required value={formData.name} maxLength={NAME_MAX_LENGTH} onChange={(e) => setFormData({ ...formData, name: e.target.value })} className="w-full px-4 py-2 border border-gray-300 rounded-lg" />
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm text-gray-500">Phone *</label>
-                  <input required value={formData.phone} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} className="w-full px-4 py-2 border border-gray-300 rounded-lg" />
+                  <input required value={formData.phone} inputMode="numeric" maxLength={PHONE_LENGTH} onChange={(e) => setFormData({ ...formData, phone: toDigits(e.target.value) })} className="w-full px-4 py-2 border border-gray-300 rounded-lg" />
                 </div>
                 <div className="space-y-2 md:col-span-2">
                   <label className="text-sm text-gray-500">Email *</label>
@@ -432,7 +541,7 @@ export function Tenants({ onViewTenant }: TenantsProps) {
                   <select
                     required
                     value={formData.propertyId}
-                    onChange={(e) => setFormData({ ...formData, propertyId: e.target.value, floor: 1, room: '', bed: '' })}
+                    onChange={(e) => setFormData({ ...formData, propertyId: e.target.value, floor: 1, room: '', bed: '', customRoomNumber: '', customRoomBeds: 1, customRoomType: 'single', customBedLabel: '' })}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg"
                   >
                     <option value="">Select Property</option>
@@ -447,7 +556,7 @@ export function Tenants({ onViewTenant }: TenantsProps) {
                   <select
                     required
                     value={formData.floor}
-                    onChange={(e) => setFormData({ ...formData, floor: Number(e.target.value), room: '', bed: '' })}
+                    onChange={(e) => setFormData({ ...formData, floor: Number(e.target.value), room: '', bed: '', customRoomNumber: '', customRoomBeds: 1, customRoomType: 'single', customBedLabel: '' })}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg"
                   >
                     {availableFloors.map((floor) => (
@@ -462,11 +571,26 @@ export function Tenants({ onViewTenant }: TenantsProps) {
                     value={formData.room}
                     onChange={(e) => {
                       const roomNumber = e.target.value;
+                      if (roomNumber === CUSTOM_ROOM_OPTION) {
+                        setFormData({
+                          ...formData,
+                          room: roomNumber,
+                          bed: '',
+                          customRoomNumber: '',
+                          customRoomBeds: 1,
+                          customRoomType: 'single',
+                          customBedLabel: '',
+                        });
+                        return;
+                      }
+
                       const room = selectableRooms.find((entry) => entry.number === roomNumber);
                       setFormData({
                         ...formData,
                         room: roomNumber,
                         bed: room ? '1' : '',
+                        customRoomNumber: '',
+                        customBedLabel: '',
                       });
                     }}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg"
@@ -477,25 +601,75 @@ export function Tenants({ onViewTenant }: TenantsProps) {
                         {room.number} ({room.type}, {room.beds} bed{room.beds > 1 ? 's' : ''})
                       </option>
                     ))}
+                    <option value={CUSTOM_ROOM_OPTION}>Other (add new room)</option>
                   </select>
                   {formData.propertyId && selectableRooms.length === 0 && (
                     <p className="text-xs text-amber-600">No rooms available on this floor. Add rooms first from Properties.</p>
                   )}
                 </div>
+
+                {isCustomRoomSelected && (
+                  <>
+                    <div className="space-y-2">
+                      <label className="text-sm text-gray-500">Custom Room Number *</label>
+                      <input
+                        required
+                        value={formData.customRoomNumber}
+                        onChange={(e) => setFormData({ ...formData, customRoomNumber: e.target.value })}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                        placeholder="e.g. 305A"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-sm text-gray-500">Total Beds in New Room *</label>
+                      <input
+                        required
+                        type="number"
+                        min="1"
+                        max="20"
+                        value={formData.customRoomBeds}
+                        onChange={(e) => setFormData({ ...formData, customRoomBeds: Math.max(1, Number(e.target.value) || 1), bed: '', customBedLabel: '' })}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                      />
+                    </div>
+                    <div className="space-y-2 md:col-span-2">
+                      <label className="text-sm text-gray-500">Room Type *</label>
+                      <select
+                        value={formData.customRoomType}
+                        onChange={(e) => setFormData({ ...formData, customRoomType: e.target.value as 'single' | 'double' | 'triple' })}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                      >
+                        <option value="single">Single</option>
+                        <option value="double">Double</option>
+                        <option value="triple">Triple</option>
+                      </select>
+                    </div>
+                  </>
+                )}
                 <div className="space-y-2">
                   <label className="text-sm text-gray-500">Bed *</label>
                   <select
                     required
                     value={formData.bed}
-                    onChange={(e) => setFormData({ ...formData, bed: e.target.value })}
+                    onChange={(e) => setFormData({ ...formData, bed: e.target.value, customBedLabel: e.target.value === CUSTOM_BED_OPTION ? formData.customBedLabel : '' })}
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg"
-                    disabled={!selectedRoom}
+                    disabled={!selectedRoom && !isCustomRoomSelected}
                   >
                     <option value="">Select bed</option>
                     {availableBeds.map((bed) => (
                       <option key={bed} value={bed}>Bed {bed}</option>
                     ))}
+                    <option value={CUSTOM_BED_OPTION}>Other (type custom bed)</option>
                   </select>
+                  {isCustomBedSelected && (
+                    <input
+                      required
+                      value={formData.customBedLabel}
+                      onChange={(e) => setFormData({ ...formData, customBedLabel: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                      placeholder="e.g. A1"
+                    />
+                  )}
                 </div>
 
                 <div className="space-y-2">
@@ -517,7 +691,7 @@ export function Tenants({ onViewTenant }: TenantsProps) {
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm text-gray-500">Parent Phone *</label>
-                  <input required value={formData.parentPhone} onChange={(e) => setFormData({ ...formData, parentPhone: e.target.value })} className="w-full px-4 py-2 border border-gray-300 rounded-lg" />
+                  <input required value={formData.parentPhone} inputMode="numeric" maxLength={PHONE_LENGTH} onChange={(e) => setFormData({ ...formData, parentPhone: toDigits(e.target.value) })} className="w-full px-4 py-2 border border-gray-300 rounded-lg" />
                 </div>
 
                 <div className="space-y-2">
@@ -526,7 +700,7 @@ export function Tenants({ onViewTenant }: TenantsProps) {
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm text-gray-500">ID Number *</label>
-                  <input required value={formData.idNumber} onChange={(e) => setFormData({ ...formData, idNumber: e.target.value })} className="w-full px-4 py-2 border border-gray-300 rounded-lg" />
+                  <input required value={formData.idNumber} maxLength={ID_NUMBER_MAX_LENGTH} onChange={(e) => setFormData({ ...formData, idNumber: e.target.value })} className="w-full px-4 py-2 border border-gray-300 rounded-lg" />
                 </div>
 
                 <div className="space-y-2">

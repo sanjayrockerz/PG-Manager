@@ -3,6 +3,7 @@ import { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 
 type TableName =
+  | 'profiles'
   | 'properties'
   | 'rooms'
   | 'tenants'
@@ -11,7 +12,11 @@ type TableName =
   | 'maintenance_tickets'
   | 'maintenance_notes'
   | 'announcements'
-  | 'notifications';
+  | 'notifications'
+  | 'owner_user_property_scopes'
+  | 'owner_subscriptions'
+  | 'support_tickets'
+  | 'support_ticket_comments';
 
 interface UseRealtimeRefreshOptions {
   key: string;
@@ -73,12 +78,20 @@ export function useRealtimeRefresh({
       );
     });
 
+    const handleManualRefresh = () => {
+      runRefresh();
+    };
+
+    window.addEventListener('owner-data-updated', handleManualRefresh);
+
     channel.subscribe();
 
     return () => {
       if (debounceRef.current) {
         window.clearTimeout(debounceRef.current);
       }
+
+      window.removeEventListener('owner-data-updated', handleManualRefresh);
 
       if (channelRef.current) {
         void supabase.removeChannel(channelRef.current);

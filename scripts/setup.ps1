@@ -54,7 +54,7 @@ function Invoke-Run([string]$command, [string[]]$arguments) {
   }
 }
 
-function Require-Command([string]$name) {
+function Assert-CommandAvailable([string]$name) {
   if (-not (Get-Command $name -ErrorAction SilentlyContinue)) {
     throw "Missing command '$name'. Install it and re-run setup."
   }
@@ -163,8 +163,8 @@ function Set-VercelEnvVar([string]$name, [string]$value, [string]$target, [strin
 Write-Step "Preflight checks (mode: $Mode)"
 
 $env:CI = '1'
-Require-Command 'node'
-Require-Command 'npm'
+Assert-CommandAvailable 'node'
+Assert-CommandAvailable 'npm'
 
 $supabaseCommand = Resolve-SupabaseCommand
 Invoke-Run $supabaseCommand @('--version')
@@ -191,7 +191,7 @@ if ($Mode -eq 'local') {
   exit 0
 }
 
-Require-Command 'vercel'
+Assert-CommandAvailable 'vercel'
 
 Confirm-Or-Throw -promptMessage "About to perform remote writes in $Mode mode" -expectedText 'APPLY' -preApproved:$ConfirmRemoteWrite
 if ($Mode -eq 'production') {

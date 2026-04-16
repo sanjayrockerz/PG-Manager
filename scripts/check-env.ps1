@@ -25,7 +25,7 @@ function Write-Err([string]$message) {
   Write-Host $message -ForegroundColor Red
 }
 
-function Check-Command([string]$name) {
+function Test-CommandAvailable([string]$name) {
   if (Get-Command $name -ErrorAction SilentlyContinue) {
     Write-Info "[OK] Command available: $name"
     return $true
@@ -57,7 +57,7 @@ if ($Mode -ne 'local') {
 
 $allCommandsOk = $true
 foreach ($cmd in $commands) {
-  if (-not (Check-Command $cmd)) {
+  if (-not (Test-CommandAvailable $cmd)) {
     $allCommandsOk = $false
   }
 }
@@ -102,7 +102,8 @@ if ($Mode -eq 'preview' -or $Mode -eq 'production') {
     'VERCEL_PROJECT_NAME',
     'SUPABASE_ACCESS_TOKEN',
     'VITE_SUPABASE_URL',
-    'VITE_SUPABASE_ANON_KEY'
+    'VITE_SUPABASE_ANON_KEY',
+    'VITE_SITE_URL'
   )
 }
 

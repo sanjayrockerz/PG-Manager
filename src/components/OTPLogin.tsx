@@ -8,9 +8,6 @@ interface OTPLoginProps {
 
 const OTP_LENGTH = Number((import.meta as any).env?.VITE_SUPABASE_OTP_LENGTH ?? 6);
 const EMAIL_MAX_LENGTH = 254;
-const OWNER_DEMO_EMAIL = 'owner.demo@pgmanager.app';
-const ADMIN_DEMO_EMAIL = 'admin.demo@pgmanager.app';
-const TENANT_DEMO_EMAIL = 'tenant.demo@pgmanager.app';
 const EMPTY_OTP = Array.from({ length: OTP_LENGTH }, () => '');
 
 export function OTPLogin({ onSwitchToSignup }: OTPLoginProps) {
@@ -270,28 +267,10 @@ export function OTPLogin({ onSwitchToSignup }: OTPLoginProps) {
                   </button>
                 </form>
 
-                <div className="mt-4">
-                  <p className="text-xs text-slate-500 mb-2">Quick email presets</p>
-                  <div className="flex flex-wrap items-center gap-2">
-                    {[OWNER_DEMO_EMAIL, ADMIN_DEMO_EMAIL, TENANT_DEMO_EMAIL].map((preset) => (
-                      <button
-                        key={preset}
-                        type="button"
-                        onClick={() => setEmail(preset)}
-                        className="px-2.5 py-1 text-xs border border-[#E5E7EB] rounded-lg text-slate-600 hover:text-slate-800 hover:bg-slate-50"
-                      >
-                        {preset}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="mt-2 flex flex-wrap gap-3 text-xs">
-                    <a href={`/?email=${encodeURIComponent(ADMIN_DEMO_EMAIL)}`} className="text-[#6366F1] hover:text-[#4F46E5] underline">
-                      Admin login link
-                    </a>
-                    <a href={`/?email=${encodeURIComponent(TENANT_DEMO_EMAIL)}`} className="text-[#6366F1] hover:text-[#4F46E5] underline">
-                      Tenant login link
-                    </a>
-                  </div>
+                <div className="mt-4 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2">
+                  <p className="text-xs text-blue-700">
+                    Use your real email or Google sign-in. After login, open Portal Sections in the sidebar to access Admin Panel and Tenant Portal.
+                  </p>
                 </div>
 
                 <div className="flex items-center justify-between mt-4 text-sm">
@@ -441,6 +420,7 @@ export function OTPLogin({ onSwitchToSignup }: OTPLoginProps) {
             </div>
 
             <p className="mt-4 text-center text-xs text-slate-500">Please enter the OTP sent to your registered email address</p>
+            <p className="mt-1 text-center text-[11px] text-slate-400">If your email includes a magic link, you can open it to sign in directly in the same browser.</p>
           </div>
         )}
       </div>

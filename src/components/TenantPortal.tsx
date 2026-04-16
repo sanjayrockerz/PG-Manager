@@ -21,6 +21,7 @@ import {
 } from '../services/supabaseData';
 import { useRealtimeRefresh } from '../hooks/useRealtimeRefresh';
 import { LiveStatusBadge } from './LiveStatusBadge';
+import { useLocalization } from '../contexts/LocalizationContext';
 
 type TenantView =
   | 'dashboard'
@@ -52,6 +53,7 @@ function formatAmount(value: number): string {
 }
 
 export function TenantPortal() {
+  const { t } = useLocalization();
   const [currentView, setCurrentView] = useState<TenantView>('dashboard');
   const [snapshot, setSnapshot] = useState<TenantPortalSnapshot | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -169,8 +171,8 @@ export function TenantPortal() {
   const renderDashboard = () => (
     <div className="space-y-6">
       <div>
-        <h1 className="text-gray-900">Welcome, {snapshot.profile.name.split(' ')[0]}</h1>
-        <p className="text-gray-600 mt-1">Live tenant portal for your stay details and updates.</p>
+        <h1 className="text-gray-900">{t('tenant.title', `Welcome, ${snapshot.profile.name.split(' ')[0]}`)}</h1>
+        <p className="text-gray-600 mt-1">{t('tenant.subtitle', 'Live tenant portal for your stay details and updates.')}</p>
       </div>
 
       <div className="bg-white rounded-xl p-6 border border-gray-200">

@@ -18,6 +18,13 @@ export interface Property {
   id: string;
   name: string;
   address: string;
+  addressLine1?: string;
+  addressLine2?: string;
+  locality?: string;
+  landmark?: string;
+  formattedAddress?: string;
+  latitude?: number | null;
+  longitude?: number | null;
   city: string;
   state: string;
   pincode: string;

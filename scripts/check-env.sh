@@ -101,6 +101,7 @@ if [[ "$MODE" == "preview" || "$MODE" == "production" ]]; then
     SUPABASE_ACCESS_TOKEN
     VITE_SUPABASE_URL
     VITE_SUPABASE_ANON_KEY
+    VITE_SITE_URL
   )
 fi
 

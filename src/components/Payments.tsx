@@ -324,20 +324,15 @@ export function Payments() {
                     <td className="px-4 py-3 text-sm text-gray-900">Rs {payment.totalAmount.toLocaleString()}</td>
                     <td className="px-4 py-3 text-sm text-gray-600">{payment.dueDate}</td>
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <select
-                          value={payment.status}
-                          onChange={(e) => void handleStatusChange(payment.id, e.target.value as 'paid' | 'pending' | 'overdue')}
-                          className="px-3 py-1 rounded-lg text-xs border border-gray-300 bg-white text-gray-700 cursor-pointer"
-                        >
-                          <option value="paid">Paid</option>
-                          <option value="pending">Pending</option>
-                          <option value="overdue">Overdue</option>
-                        </select>
-                        <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium ${getStatusClasses(payment.status)}`}>
-                          {payment.status}
-                        </span>
-                      </div>
+                      <select
+                        value={payment.status}
+                        onChange={(e) => void handleStatusChange(payment.id, e.target.value as 'paid' | 'pending' | 'overdue')}
+                        className={`px-3 py-1 rounded-lg text-xs border border-gray-300 cursor-pointer font-medium ${getStatusClasses(payment.status)}`}
+                      >
+                        <option value="paid">Paid</option>
+                        <option value="pending">Pending</option>
+                        <option value="overdue">Overdue</option>
+                      </select>
                     </td>
                     <td className="px-4 py-3">
                       <button onClick={() => handleAddCharge(payment)} className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs hover:bg-blue-700 transition-colors flex items-center gap-1">

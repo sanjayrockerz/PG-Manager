@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { NotificationRecord, supabaseNotificationApi } from '../services/supabaseData';
 import { useRealtimeRefresh } from '../hooks/useRealtimeRefresh';
+import { isPlatformAdminRole } from '../utils/roles';
 
 interface HeaderProps {
   setSidebarOpen: (open: boolean) => void;
@@ -17,13 +18,15 @@ export function Header({ setSidebarOpen, currentPage, onNotificationClick }: Hea
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
+
+  const isPlatformAdmin = isPlatformAdminRole(user?.role);
   
   const currentProperty = selectedProperty === 'all' 
     ? null 
     : properties.find(p => p.id === selectedProperty);
 
   // Hide property selector on properties page and tenant portal role.
-  const showPropertySelector = currentPage !== 'properties' && user?.role !== 'tenant';
+  const showPropertySelector = currentPage !== 'properties' && user?.role !== 'tenant' && !isPlatformAdmin;
 
   const handleLogout = () => {
     if (confirm('Are you sure you want to logout?')) {
