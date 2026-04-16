@@ -1,23 +1,22 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Activity,
   AlertCircle,
-  BarChart3,
   Building2,
-  Clock,
   CreditCard,
   DollarSign,
   HeadphonesIcon,
+  Package,
   Shield,
   Users,
-  Wrench,
 } from 'lucide-react';
-import { supabaseAdminDataApi } from '../services/supabaseData';
+import { toast } from 'sonner';
+import { SupportTicketStatus, supabaseAdminDataApi } from '../services/supabaseData';
 import { useRealtimeRefresh } from '../hooks/useRealtimeRefresh';
 import { LiveStatusBadge } from './LiveStatusBadge';
+import { useLocalization } from '../contexts/LocalizationContext';
 
-type AdminView = 'dashboard' | 'users' | 'analytics' | 'support';
-
+export type AdminView = 'dashboard' | 'owners' | 'subscriptions' | 'support' | 'activity';
 type AdminSummary = Awaited<ReturnType<typeof supabaseAdminDataApi.getAdminSummary>>;
 
 function formatAmount(value: number): string {
@@ -39,11 +38,21 @@ function formatDate(value: string): string {
   });
 }
 
-export function AdminSection() {
-  const [currentView, setCurrentView] = useState<AdminView>('dashboard');
+interface AdminSectionProps {
+  view: AdminView;
+  onNavigate?: (view: AdminView) => void;
+}
+
+export function AdminSection({ view, onNavigate }: AdminSectionProps) {
+  const { t } = useLocalization();
   const [summary, setSummary] = useState<AdminSummary | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
+
+  // Drill-down states
+  const [selectedOwnerId, setSelectedOwnerId] = useState<string | null>(null);
+  const [detailedOwner, setDetailedOwner] = useState<any>(null);
+  const [isDetailLoading, setIsDetailLoading] = useState(false);
 
   const loadSummary = useCallback(async () => {
     setIsLoading(true);
@@ -65,31 +74,72 @@ export function AdminSection() {
   }, [loadSummary]);
 
   const { lastUpdatedAt, isSyncing } = useRealtimeRefresh({
-    key: 'admin-summary',
-    tables: ['properties', 'rooms', 'tenants', 'payments', 'payment_charges', 'maintenance_tickets', 'maintenance_notes', 'announcements', 'notifications'],
+    key: 'platform-admin-summary',
+    tables: [
+      'profiles',
+      'properties',
+      'tenants',
+      'payments',
+      'owner_subscriptions',
+      'support_tickets',
+      'support_ticket_comments',
+    ],
     onChange: loadSummary,
   });
 
-  const occupancyMetrics = useMemo(() => {
-    const total = summary?.tenants.length ?? 0;
-    const active = (summary?.tenants ?? []).filter((tenant) => tenant.status === 'active').length;
-    const inactive = Math.max(0, total - active);
-    const occupancyRate = total === 0 ? 0 : Math.round((active / total) * 100);
+  useEffect(() => {
+    if (selectedOwnerId) {
+      setIsDetailLoading(true);
+      supabaseAdminDataApi.getAdminOwnerDetailedView(selectedOwnerId)
+        .then(setDetailedOwner)
+        .catch((e) => toast.error('Failed to load owner details: ' + e.message))
+        .finally(() => setIsDetailLoading(false));
+    } else {
+      setDetailedOwner(null);
+    }
+  }, [selectedOwnerId]);
 
-    return {
-      total,
-      active,
-      inactive,
-      occupancyRate,
-    };
-  }, [summary]);
+  const handleDeleteOwner = async (ownerId: string, name: string) => {
+    if (!confirm(`WARNING: Are you absolutely sure you want to permanently delete the entire organization account for ${name}?\n\nThis will instantly wipe ALL their properties, tenants, billing data, and configuration natively from the system. This action CANNOT be reversed.`)) {
+      return;
+    }
+    
+    try {
+      await supabaseAdminDataApi.deleteOwnerProfile(ownerId);
+      toast.success('Organization data permanently wiped.');
+      setSelectedOwnerId(null);
+      await loadSummary();
+    } catch (e) {
+      toast.error('Failed to delete user: ' + (e as Error).message);
+    }
+  };
+
+  const handleSubscriptionStatusChange = async (ownerId: string, status: 'trialing' | 'active' | 'past_due' | 'cancelled') => {
+    try {
+      await supabaseAdminDataApi.updateOwnerSubscription(ownerId, { status });
+      toast.success('Subscription status updated');
+      await loadSummary();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to update subscription.');
+    }
+  };
+
+  const handleSupportStatusChange = async (ticketId: string, status: SupportTicketStatus) => {
+    try {
+      await supabaseAdminDataApi.updateSupportTicketStatus(ticketId, status);
+      toast.success('Support ticket updated');
+      await loadSummary();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to update support ticket.');
+    }
+  };
 
   if (isLoading) {
     return (
       <div className="min-h-[60vh] flex items-center justify-center">
         <div className="text-center">
           <div className="w-8 h-8 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin mx-auto mb-3" />
-          <p className="text-sm text-gray-600">Loading admin analytics...</p>
+          <p className="text-sm text-gray-600">Loading platform control center...</p>
         </div>
       </div>
     );
@@ -116,103 +166,75 @@ export function AdminSection() {
   const renderDashboard = () => (
     <div className="space-y-6">
       <div>
-        <h1 className="text-gray-900">Admin Panel</h1>
-        <p className="text-gray-600 mt-1">Live platform metrics sourced from Supabase.</p>
+        <h1 className="text-gray-900">{t('admin.title', 'Platform Admin')}</h1>
+        <p className="text-gray-600 mt-1">{t('admin.subtitle', 'SaaS control center for owners, plans, support, and operations.')}</p>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
         <div className="bg-white rounded-xl p-5 border border-gray-200">
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-xs text-gray-600 uppercase tracking-wide">Properties</p>
-            <Building2 className="w-5 h-5 text-gray-500" />
-          </div>
-          <p className="text-2xl text-gray-900">{summary.stats.totalProperties}</p>
+          <p className="text-xs text-gray-500 uppercase tracking-wide">Owners</p>
+          <p className="text-2xl text-gray-900 mt-2">{summary.stats.totalOwners}</p>
         </div>
-
         <div className="bg-white rounded-xl p-5 border border-gray-200">
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-xs text-gray-600 uppercase tracking-wide">Tenants</p>
-            <Users className="w-5 h-5 text-gray-500" />
-          </div>
-          <p className="text-2xl text-gray-900">{summary.stats.totalTenants}</p>
+          <p className="text-xs text-gray-500 uppercase tracking-wide">Properties</p>
+          <p className="text-2xl text-gray-900 mt-2">{summary.stats.totalProperties}</p>
         </div>
-
         <div className="bg-white rounded-xl p-5 border border-gray-200">
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-xs text-gray-600 uppercase tracking-wide">Pending Payments</p>
-            <CreditCard className="w-5 h-5 text-gray-500" />
-          </div>
-          <p className="text-2xl text-gray-900">{summary.stats.pendingPayments}</p>
+          <p className="text-xs text-gray-500 uppercase tracking-wide">Tenants</p>
+          <p className="text-2xl text-gray-900 mt-2">{summary.stats.totalTenants}</p>
         </div>
-
         <div className="bg-white rounded-xl p-5 border border-gray-200">
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-xs text-gray-600 uppercase tracking-wide">Monthly Revenue</p>
-            <DollarSign className="w-5 h-5 text-gray-500" />
-          </div>
-          <p className="text-2xl text-gray-900">{formatAmount(summary.stats.monthlyRevenue)}</p>
+          <p className="text-xs text-gray-500 uppercase tracking-wide">Active Plans</p>
+          <p className="text-2xl text-gray-900 mt-2">{summary.stats.activeSubscriptions}</p>
+        </div>
+        <div className="bg-white rounded-xl p-5 border border-gray-200">
+          <p className="text-xs text-gray-500 uppercase tracking-wide">Open Support</p>
+          <p className="text-2xl text-gray-900 mt-2">{summary.stats.openSupportTickets}</p>
+        </div>
+        <div className="bg-white rounded-xl p-5 border border-gray-200">
+          <p className="text-xs text-gray-500 uppercase tracking-wide">Monthly Revenue</p>
+          <p className="text-xl text-gray-900 mt-2">{formatAmount(summary.stats.monthlyRevenue)}</p>
         </div>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <div className="bg-white rounded-xl border border-gray-200">
-          <div className="p-5 border-b border-gray-200 flex items-center justify-between">
-            <h2 className="text-gray-900">Recent Tenant Entries</h2>
-            <button onClick={() => setCurrentView('users')} className="text-sm text-blue-600 hover:text-blue-700">
-              View All
-            </button>
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-gray-900">Top Owner Accounts</h2>
+            <button onClick={() => onNavigate?.('owners')} className="text-sm text-blue-600 hover:text-blue-700">View all</button>
           </div>
-          <div className="p-5 space-y-3">
-            {summary.tenants.slice(0, 5).map((tenant) => (
-              <div key={tenant.id} className="flex items-center justify-between gap-3">
+          <div className="space-y-3">
+            {summary.owners.slice(0, 6).map((owner) => (
+              <div key={owner.id} className="flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-sm font-semibold text-gray-900">{tenant.name}</p>
-                  <p className="text-xs text-gray-500">Room {tenant.room} • {tenant.phone || tenant.email || '-'}</p>
+                  <p className="text-sm text-gray-900 font-semibold">{owner.name}</p>
+                  <p className="text-xs text-gray-500">{owner.propertyCount} properties • {owner.tenantCount} tenants</p>
                 </div>
-                <span
-                  className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                    tenant.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'
-                  }`}
-                >
-                  {tenant.status}
-                </span>
+                <span className="px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-700">{owner.planCode}</span>
               </div>
             ))}
-            {summary.tenants.length === 0 && (
-              <p className="text-sm text-gray-500">No tenants found for current admin scope.</p>
-            )}
           </div>
         </div>
 
-        <div className="bg-white rounded-xl border border-gray-200">
-          <div className="p-5 border-b border-gray-200 flex items-center justify-between">
-            <h2 className="text-gray-900">Open Support Queue</h2>
-            <button onClick={() => setCurrentView('support')} className="text-sm text-blue-600 hover:text-blue-700">
-              Open Support
-            </button>
+        <div className="bg-white rounded-xl border border-gray-200 p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-gray-900">Support Queue</h2>
+            <button onClick={() => onNavigate?.('support')} className="text-sm text-blue-600 hover:text-blue-700">Open queue</button>
           </div>
-          <div className="p-5 space-y-3">
-            {summary.maintenance.slice(0, 5).map((ticket) => (
-              <div key={ticket.id} className="flex items-start justify-between gap-3">
+          <div className="space-y-3">
+            {summary.support.slice(0, 6).map((ticket) => (
+              <div key={ticket.id} className="flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-sm font-semibold text-gray-900">{ticket.issue}</p>
-                  <p className="text-xs text-gray-500">{ticket.tenant} • Room {ticket.room}</p>
+                  <p className="text-sm text-gray-900 font-semibold">{ticket.subject}</p>
+                  <p className="text-xs text-gray-500">{ticket.category} • {formatDate(ticket.createdAt)}</p>
                 </div>
-                <span
-                  className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                    ticket.status === 'resolved'
-                      ? 'bg-green-100 text-green-700'
-                      : ticket.status === 'in-progress'
-                        ? 'bg-blue-100 text-blue-700'
-                        : 'bg-yellow-100 text-yellow-700'
-                  }`}
-                >
+                <span className={`px-2 py-1 rounded-full text-xs ${ticket.status === 'open' ? 'bg-red-100 text-red-700' : ticket.status === 'in_progress' ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'}`}>
                   {ticket.status}
                 </span>
               </div>
             ))}
-            {summary.maintenance.length === 0 && (
-              <p className="text-sm text-gray-500">No support tickets available.</p>
+            {summary.support.length === 0 && (
+              <p className="text-sm text-gray-500">No support tickets in the queue.</p>
             )}
           </div>
         </div>
@@ -220,128 +242,151 @@ export function AdminSection() {
     </div>
   );
 
-  const renderUsers = () => (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+  const renderOwners = () => {
+    if (selectedOwnerId) {
+      const parentOwner = summary.owners.find(o => o.id === selectedOwnerId);
+      if (!parentOwner) return null;
+
+      return (
+        <div className="space-y-6">
+          <button onClick={() => setSelectedOwnerId(null)} className="text-sm font-semibold text-blue-600 hover:text-blue-800 flex items-center gap-2">
+            ← Back to All Owners
+          </button>
+          
+          <div className="bg-white rounded-xl border border-gray-200 p-6 relative overflow-hidden">
+             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 to-purple-600"></div>
+             <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
+                <div>
+                  <h1 className="text-2xl font-bold text-gray-900">{parentOwner.name}</h1>
+                  <p className="text-sm text-gray-500">{parentOwner.email} • {parentOwner.role}</p>
+                  <div className="mt-4 flex gap-4 text-sm text-gray-600">
+                     <div><span className="font-semibold text-gray-900">City:</span> {parentOwner.city || '-'}</div>
+                     <div><span className="font-semibold text-gray-900">Brand:</span> {parentOwner.pgName || '-'}</div>
+                     <div><span className="font-semibold text-gray-900">Phone:</span> {parentOwner.phone || '-'}</div>
+                  </div>
+                </div>
+                <div className="flex flex-col gap-2 min-w-[200px]">
+                   <button onClick={() => handleDeleteOwner(parentOwner.id, parentOwner.name)} className="px-4 py-2 bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 rounded-lg text-sm font-semibold transition-colors w-full text-center">
+                     Destruct / Wipe Account
+                   </button>
+                </div>
+             </div>
+          </div>
+
+          {isDetailLoading ? (
+            <div className="w-full text-center py-10"><div className="w-8 h-8 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin mx-auto"></div></div>
+          ) : detailedOwner ? (
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+               <div className="bg-white rounded-xl border border-gray-200 p-5">
+                 <h2 className="text-gray-900 font-semibold mb-3 border-b pb-2">Hardware Nodes (Properties) [{detailedOwner.properties.length}]</h2>
+                 {detailedOwner.properties.length === 0 ? <p className="text-sm text-gray-500">No properties deployed.</p> : (
+                   <div className="space-y-3">
+                     {detailedOwner.properties.map((p: any) => (
+                       <div key={p.id} className="bg-gray-50 p-3 rounded-lg border border-gray-100">
+                          <p className="font-semibold text-sm text-gray-900">{p.name}</p>
+                          <p className="text-xs text-gray-500 truncate">{p.address_line1}, {p.city} {p.pincode}</p>
+                       </div>
+                     ))}
+                   </div>
+                 )}
+               </div>
+
+               <div className="bg-white rounded-xl border border-gray-200 p-5">
+                 <h2 className="text-gray-900 font-semibold mb-3 border-b pb-2">Active Profiles (Tenants) [{detailedOwner.tenants.length}]</h2>
+                 {detailedOwner.tenants.length === 0 ? <p className="text-sm text-gray-500">No tenants housed.</p> : (
+                   <div className="space-y-3 max-h-96 overflow-y-auto">
+                     {detailedOwner.tenants.map((t: any) => (
+                       <div key={t.id} className="bg-gray-50 p-3 rounded-lg border border-gray-100 flex justify-between items-center">
+                          <div>
+                            <p className="font-semibold text-sm text-gray-900">{t.name}</p>
+                            <p className="text-xs text-gray-500">{t.email || t.phone}</p>
+                          </div>
+                          <p className="text-sm font-semibold text-green-700">₹{t.rent_amount}</p>
+                       </div>
+                     ))}
+                   </div>
+                 )}
+               </div>
+            </div>
+          ) : null}
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-6">
         <div>
-          <h1 className="text-gray-900">User Registry</h1>
-          <p className="text-gray-600 mt-1">Live tenant records visible to this admin profile.</p>
+          <h1 className="text-gray-900">Owner Accounts</h1>
+          <p className="text-gray-600 mt-1">Tenant and property footprint by owner organization.</p>
         </div>
-        <div className="px-3 py-2 rounded-lg bg-gray-100 text-sm text-gray-700">
-          {summary.tenants.length} records
-        </div>
-      </div>
-
-      <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
-        <table className="w-full min-w-[780px]">
-          <thead className="bg-gray-50 border-b border-gray-200">
-            <tr>
-              <th className="px-5 py-3 text-left text-xs text-gray-500 uppercase tracking-wide">Tenant</th>
-              <th className="px-5 py-3 text-left text-xs text-gray-500 uppercase tracking-wide">Contact</th>
-              <th className="px-5 py-3 text-left text-xs text-gray-500 uppercase tracking-wide">Room</th>
-              <th className="px-5 py-3 text-left text-xs text-gray-500 uppercase tracking-wide">Rent</th>
-              <th className="px-5 py-3 text-left text-xs text-gray-500 uppercase tracking-wide">Joined</th>
-              <th className="px-5 py-3 text-left text-xs text-gray-500 uppercase tracking-wide">Status</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-200">
-            {summary.tenants.map((tenant) => (
-              <tr key={tenant.id} className="hover:bg-gray-50">
-                <td className="px-5 py-4 text-sm text-gray-900 font-medium">{tenant.name}</td>
-                <td className="px-5 py-4 text-sm text-gray-600">{tenant.phone || tenant.email || '-'}</td>
-                <td className="px-5 py-4 text-sm text-gray-600">{tenant.room}</td>
-                <td className="px-5 py-4 text-sm text-gray-600">{formatAmount(tenant.rent)}</td>
-                <td className="px-5 py-4 text-sm text-gray-600">{formatDate(tenant.joinDate)}</td>
-                <td className="px-5 py-4 text-sm">
-                  <span
-                    className={`px-2 py-1 rounded-full text-xs font-semibold ${
-                      tenant.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'
-                    }`}
-                  >
-                    {tenant.status}
-                  </span>
-                </td>
+        <div className="bg-white rounded-xl border border-gray-200 overflow-x-auto">
+          <table className="w-full min-w-[820px]">
+            <thead className="bg-gray-50 border-b border-gray-200">
+              <tr>
+                <th className="px-4 py-3 text-left text-xs text-gray-500 uppercase tracking-wide">Owner</th>
+                <th className="px-4 py-3 text-left text-xs text-gray-500 uppercase tracking-wide">PG</th>
+                <th className="px-4 py-3 text-left text-xs text-gray-500 uppercase tracking-wide">City</th>
+                <th className="px-4 py-3 text-left text-xs text-gray-500 uppercase tracking-wide">Properties</th>
+                <th className="px-4 py-3 text-left text-xs text-gray-500 uppercase tracking-wide">Tenants</th>
+                <th className="px-4 py-3 text-left text-xs text-gray-500 uppercase tracking-wide">Plan</th>
+                <th className="px-4 py-3 text-right text-xs text-gray-500 uppercase tracking-wide">Actions</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {summary.owners.map((owner) => (
+                <tr key={owner.id} className="hover:bg-gray-50 transition-colors">
+                  <td className="px-4 py-3">
+                    <p className="text-sm text-gray-900 font-semibold">{owner.name}</p>
+                    <p className="text-xs text-gray-500">{owner.email}</p>
+                  </td>
+                  <td className="px-4 py-3 text-sm text-gray-700">{owner.pgName || '-'}</td>
+                  <td className="px-4 py-3 text-sm text-gray-700">{owner.city || '-'}</td>
+                  <td className="px-4 py-3 text-sm text-gray-700">{owner.propertyCount}</td>
+                  <td className="px-4 py-3 text-sm text-gray-700">{owner.tenantCount}</td>
+                  <td className="px-4 py-3 text-sm">
+                    <span className="px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-700">{owner.planCode}</span>
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <button onClick={() => setSelectedOwnerId(owner.id)} className="text-sm text-blue-600 font-semibold hover:text-blue-800">Inspect</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
-  const renderAnalytics = () => (
+  const renderSubscriptions = () => (
     <div className="space-y-6">
       <div>
-        <h1 className="text-gray-900">Platform Analytics</h1>
-        <p className="text-gray-600 mt-1">Operational health for the current month.</p>
+        <h1 className="text-gray-900">Subscriptions</h1>
+        <p className="text-gray-600 mt-1">Manage plan lifecycle and billing status for each owner.</p>
       </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-white rounded-xl p-5 border border-gray-200">
-          <div className="flex items-center gap-3 mb-2">
-            <Activity className="w-5 h-5 text-blue-600" />
-            <p className="text-sm text-gray-600">Occupancy Rate</p>
-          </div>
-          <p className="text-3xl text-gray-900">{occupancyMetrics.occupancyRate}%</p>
-          <p className="text-xs text-gray-500 mt-2">
-            {occupancyMetrics.active} active out of {occupancyMetrics.total} visible tenants
-          </p>
-        </div>
-
-        <div className="bg-white rounded-xl p-5 border border-gray-200">
-          <div className="flex items-center gap-3 mb-2">
-            <BarChart3 className="w-5 h-5 text-green-600" />
-            <p className="text-sm text-gray-600">Collections</p>
-          </div>
-          <p className="text-3xl text-gray-900">{formatAmount(summary.stats.monthlyRevenue)}</p>
-          <p className="text-xs text-gray-500 mt-2">Current-month paid rent collection</p>
-        </div>
-
-        <div className="bg-white rounded-xl p-5 border border-gray-200">
-          <div className="flex items-center gap-3 mb-2">
-            <Clock className="w-5 h-5 text-orange-600" />
-            <p className="text-sm text-gray-600">Open Tickets</p>
-          </div>
-          <p className="text-3xl text-gray-900">{summary.stats.openTickets}</p>
-          <p className="text-xs text-gray-500 mt-2">Maintenance issues still in queue</p>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-xl border border-gray-200 p-5">
-        <h2 className="text-gray-900 mb-4">Status Breakdown</h2>
-        <div className="space-y-4">
-          <div>
-            <div className="flex items-center justify-between text-sm mb-1">
-              <span className="text-gray-600">Tenant Activity</span>
-              <span className="text-gray-900">{occupancyMetrics.active}/{occupancyMetrics.total}</span>
+      <div className="space-y-3">
+        {summary.owners.map((owner) => (
+          <div key={owner.id} className="bg-white rounded-xl border border-gray-200 p-4 flex flex-col md:flex-row md:items-center gap-3 md:justify-between">
+            <div>
+              <p className="text-sm text-gray-900 font-semibold">{owner.name}</p>
+              <p className="text-xs text-gray-500">{owner.email}</p>
             </div>
-            <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-green-500"
-                style={{ width: `${Math.min(100, occupancyMetrics.occupancyRate)}%` }}
-              />
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-gray-600">Plan: {owner.planCode}</span>
+              <select
+                value={owner.subscriptionStatus === 'not_configured' ? 'trialing' : owner.subscriptionStatus}
+                onChange={(event) => void handleSubscriptionStatusChange(owner.id, event.target.value as 'trialing' | 'active' | 'past_due' | 'cancelled')}
+                className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
+              >
+                <option value="trialing">Trialing</option>
+                <option value="active">Active</option>
+                <option value="past_due">Past Due</option>
+                <option value="cancelled">Cancelled</option>
+              </select>
             </div>
           </div>
-
-          <div>
-            <div className="flex items-center justify-between text-sm mb-1">
-              <span className="text-gray-600">Payment Dues</span>
-              <span className="text-gray-900">{summary.stats.pendingPayments} pending</span>
-            </div>
-            <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-yellow-500"
-                style={{
-                  width: `${
-                    summary.stats.totalTenants === 0
-                      ? 0
-                      : Math.min(100, Math.round((summary.stats.pendingPayments / summary.stats.totalTenants) * 100))
-                  }%`,
-                }}
-              />
-            </div>
-          </div>
-        </div>
+        ))}
+        {summary.owners.length === 0 && <p className="text-sm text-gray-500">No owner accounts found.</p>}
       </div>
     </div>
   );
@@ -349,55 +394,67 @@ export function AdminSection() {
   const renderSupport = () => (
     <div className="space-y-6">
       <div>
-        <h1 className="text-gray-900">Support Queue</h1>
-        <p className="text-gray-600 mt-1">Live maintenance issues routed as support tickets.</p>
+        <h1 className="text-gray-900">Support</h1>
+        <p className="text-gray-600 mt-1">Platform-level support queue across all owners.</p>
       </div>
-
       <div className="space-y-3">
-        {summary.maintenance.map((ticket) => (
-          <div key={ticket.id} className="bg-white rounded-xl border border-gray-200 p-5">
-            <div className="flex items-start justify-between gap-3">
+        {summary.support.map((ticket) => (
+          <div key={ticket.id} className="bg-white rounded-xl border border-gray-200 p-4">
+            <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
               <div>
-                <p className="text-gray-900 font-semibold">{ticket.issue}</p>
+                <p className="text-sm text-gray-900 font-semibold">{ticket.subject}</p>
                 <p className="text-sm text-gray-600 mt-1">{ticket.description}</p>
-                <p className="text-xs text-gray-500 mt-2">
-                  {ticket.tenant} • Room {ticket.room} • {formatDate(ticket.date)}
-                </p>
+                <p className="text-xs text-gray-500 mt-2">{ticket.category} • {ticket.priority} • {formatDate(ticket.createdAt)}</p>
               </div>
-              <span
-                className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                  ticket.status === 'resolved'
-                    ? 'bg-green-100 text-green-700'
-                    : ticket.status === 'in-progress'
-                      ? 'bg-blue-100 text-blue-700'
-                      : 'bg-yellow-100 text-yellow-700'
-                }`}
+              <select
+                value={ticket.status}
+                onChange={(event) => void handleSupportStatusChange(ticket.id, event.target.value as SupportTicketStatus)}
+                className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm"
               >
-                {ticket.status}
-              </span>
+                <option value="open">Open</option>
+                <option value="in_progress">In Progress</option>
+                <option value="resolved">Resolved</option>
+                <option value="closed">Closed</option>
+              </select>
             </div>
           </div>
         ))}
+        {summary.support.length === 0 && <p className="text-sm text-gray-500">No support tickets available.</p>}
+      </div>
+    </div>
+  );
 
-        {summary.maintenance.length === 0 && (
-          <div className="bg-white rounded-xl border border-gray-200 p-6 text-sm text-gray-500">
-            No support tickets are currently available.
+  const renderActivity = () => (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-gray-900">Activity</h1>
+        <p className="text-gray-600 mt-1">Recent platform events and ticket activity.</p>
+      </div>
+      <div className="bg-white rounded-xl border border-gray-200 divide-y divide-gray-200">
+        {summary.activity.map((entry) => (
+          <div key={entry.id} className="px-4 py-3">
+            <p className="text-sm text-gray-900 font-semibold">{entry.label}</p>
+            <p className="text-sm text-gray-600 mt-0.5">{entry.detail}</p>
+            <p className="text-xs text-gray-500 mt-1">{formatDate(entry.createdAt)}</p>
           </div>
-        )}
+        ))}
+        {summary.activity.length === 0 && <p className="px-4 py-6 text-sm text-gray-500">No recent activity.</p>}
       </div>
     </div>
   );
 
   const renderView = () => {
-    switch (currentView) {
+    switch (view) {
       case 'dashboard':
         return renderDashboard();
-      case 'users':
-        return renderUsers();
-      case 'analytics':
-        return renderAnalytics();
+      case 'owners':
+        return renderOwners();
+      case 'subscriptions':
+        return renderSubscriptions();
       case 'support':
         return renderSupport();
+      case 'activity':
+        return renderActivity();
       default:
         return renderDashboard();
     }
@@ -409,62 +466,30 @@ export function AdminSection() {
         <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-sm text-red-700">{errorMessage}</div>
       )}
 
-      <div className="flex flex-wrap gap-2">
-        <button
-          onClick={() => setCurrentView('dashboard')}
-          className={`px-3 py-2 rounded-lg text-sm flex items-center gap-2 ${
-            currentView === 'dashboard' ? 'bg-gray-900 text-white' : 'bg-white border border-gray-200 text-gray-700'
-          }`}
-        >
-          <Shield className="w-4 h-4" />
-          Dashboard
-        </button>
-        <button
-          onClick={() => setCurrentView('users')}
-          className={`px-3 py-2 rounded-lg text-sm flex items-center gap-2 ${
-            currentView === 'users' ? 'bg-gray-900 text-white' : 'bg-white border border-gray-200 text-gray-700'
-          }`}
-        >
-          <Users className="w-4 h-4" />
-          Users
-        </button>
-        <button
-          onClick={() => setCurrentView('analytics')}
-          className={`px-3 py-2 rounded-lg text-sm flex items-center gap-2 ${
-            currentView === 'analytics' ? 'bg-gray-900 text-white' : 'bg-white border border-gray-200 text-gray-700'
-          }`}
-        >
-          <BarChart3 className="w-4 h-4" />
-          Analytics
-        </button>
-        <button
-          onClick={() => setCurrentView('support')}
-          className={`px-3 py-2 rounded-lg text-sm flex items-center gap-2 ${
-            currentView === 'support' ? 'bg-gray-900 text-white' : 'bg-white border border-gray-200 text-gray-700'
-          }`}
-        >
-          <HeadphonesIcon className="w-4 h-4" />
-          Support
-        </button>
+      <div className="flex items-center justify-between">
+        <LiveStatusBadge lastUpdatedAt={lastUpdatedAt} isSyncing={isSyncing} label="Platform telemetry live" />
       </div>
-
-      <LiveStatusBadge lastUpdatedAt={lastUpdatedAt} isSyncing={isSyncing} label="Admin telemetry live" />
 
       {renderView()}
 
-      <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-start gap-3">
-        <AlertCircle className="w-5 h-5 text-blue-600 mt-0.5" />
-        <div>
-          <p className="text-sm text-blue-900 font-semibold">Admin data source</p>
-          <p className="text-xs text-blue-700 mt-1">
-            This panel now reads live property, tenant, payment, and maintenance tables from Supabase.
-          </p>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-blue-600 mt-0.5" />
+          <div>
+            <p className="text-sm text-blue-900 font-semibold">SaaS administration mode</p>
+            <p className="text-xs text-blue-700 mt-1">Owners, subscriptions, and support tickets are now managed from one control plane.</p>
+          </div>
         </div>
-      </div>
-
-      <div className="bg-white border border-gray-200 rounded-xl p-4 flex items-center gap-3 text-sm text-gray-600">
-        <Wrench className="w-4 h-4 text-gray-500" />
-        Signed in as {summary.profile.name} ({summary.profile.role})
+        <div className="bg-white border border-gray-200 rounded-xl p-4 flex items-center gap-3 text-sm text-gray-600">
+          <Building2 className="w-4 h-4 text-gray-500" />
+          Signed in as {summary.profile.name} ({summary.profile.role})
+          <span className="mx-2 text-gray-300">|</span>
+          <CreditCard className="w-4 h-4 text-gray-500" />
+          {summary.stats.activeSubscriptions} active plans
+          <span className="mx-2 text-gray-300">|</span>
+          <DollarSign className="w-4 h-4 text-gray-500" />
+          {formatAmount(summary.stats.monthlyRevenue)}
+        </div>
       </div>
     </div>
   );

@@ -1,11 +1,16 @@
 import { supabase } from '../lib/supabase';
 import type { Property, Room } from '../contexts/PropertyContext';
+import { isPlatformAdminRole, isScopedOwnerRole } from '../utils/roles';
 
+export type UserRole = 'owner' | 'owner_manager' | 'staff' | 'tenant' | 'platform_admin' | 'admin' | 'super_admin';
 export type TenantStatus = 'active' | 'inactive';
 export type PaymentStatus = 'paid' | 'pending' | 'overdue';
 export type MaintenanceStatus = 'open' | 'in-progress' | 'resolved';
 export type MaintenancePriority = 'low' | 'medium' | 'high';
 export type AnnouncementCategory = 'maintenance' | 'payment' | 'rules' | 'general';
+export type SupportTicketStatus = 'open' | 'in_progress' | 'resolved' | 'closed';
+export type SupportTicketPriority = 'low' | 'medium' | 'high' | 'urgent';
+export type SupportTicketCategory = 'billing' | 'technical' | 'operations' | 'tenant' | 'other';
 
 const TENANT_FILES_BUCKET = 'tenant-files';
 
@@ -16,9 +21,12 @@ interface ProfileRow {
   email: string | null;
   full_name: string | null;
   phone: string | null;
-  role: 'owner' | 'admin' | 'tenant' | 'super_admin';
+  role: UserRole;
+  owner_scope_id: string | null;
   pg_name: string | null;
   city: string | null;
+  created_at?: string;
+  updated_at?: string;
 }
 
 interface PropertyRow {
@@ -26,6 +34,13 @@ interface PropertyRow {
   owner_id: string;
   name: string;
   address: string;
+  address_line1: string | null;
+  address_line2: string | null;
+  locality: string | null;
+  landmark: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  formatted_address: string | null;
   city: string;
   state: string;
   pincode: string;
@@ -137,6 +152,62 @@ interface NotificationRow {
   created_at: string;
 }
 
+interface OwnerUserPropertyScopeRow {
+  id: string;
+  owner_id: string;
+  user_id: string;
+  property_id: string;
+  can_manage_properties: boolean;
+  can_manage_tenants: boolean;
+  can_manage_payments: boolean;
+  can_manage_maintenance: boolean;
+  can_manage_announcements: boolean;
+  created_at: string;
+}
+
+interface OwnerSubscriptionRow {
+  id: string;
+  owner_id: string;
+  plan_code: string;
+  status: 'trialing' | 'active' | 'past_due' | 'cancelled';
+  billing_cycle: 'monthly' | 'yearly';
+  amount: number | string;
+  currency: string;
+  seats: number;
+  started_at: string;
+  trial_ends_at: string | null;
+  renews_at: string | null;
+  last_payment_at: string | null;
+  metadata: JsonValue;
+  updated_at: string;
+}
+
+interface SupportTicketRow {
+  id: string;
+  owner_id: string;
+  property_id: string | null;
+  created_by: string;
+  assigned_to: string | null;
+  subject: string;
+  description: string;
+  category: SupportTicketCategory;
+  priority: SupportTicketPriority;
+  status: SupportTicketStatus;
+  visibility: 'owner' | 'property' | 'platform';
+  resolved_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface SupportTicketCommentRow {
+  id: string;
+  ticket_id: string;
+  author_id: string;
+  message: string;
+  internal_note: boolean;
+  created_at: string;
+}
+
 interface OwnerSettingsRow {
   owner_id: string;
   pg_rules: JsonValue;
@@ -148,7 +219,8 @@ export interface AppUser {
   name: string;
   email: string;
   phone: string;
-  role: 'owner' | 'admin' | 'tenant' | 'super_admin';
+  role: UserRole;
+  ownerScopeId: string | null;
   pgName: string;
   city: string;
 }
@@ -251,6 +323,72 @@ export interface NotificationRecord {
   createdAt: string;
 }
 
+export interface TeamScopeRecord {
+  id: string;
+  ownerId: string;
+  userId: string;
+  propertyId: string;
+  canManageProperties: boolean;
+  canManageTenants: boolean;
+  canManagePayments: boolean;
+  canManageMaintenance: boolean;
+  canManageAnnouncements: boolean;
+  createdAt: string;
+}
+
+export interface TeamMemberRecord {
+  id: string;
+  email: string;
+  name: string;
+  phone: string;
+  role: UserRole;
+  ownerScopeId: string | null;
+  scopes: TeamScopeRecord[];
+}
+
+export interface OwnerSubscriptionRecord {
+  id: string;
+  ownerId: string;
+  planCode: string;
+  status: 'trialing' | 'active' | 'past_due' | 'cancelled';
+  billingCycle: 'monthly' | 'yearly';
+  amount: number;
+  currency: string;
+  seats: number;
+  startedAt: string;
+  trialEndsAt: string;
+  renewsAt: string;
+  lastPaymentAt: string;
+  updatedAt: string;
+}
+
+export interface SupportTicketRecord {
+  id: string;
+  ownerId: string;
+  propertyId: string | null;
+  createdBy: string;
+  assignedTo: string | null;
+  subject: string;
+  description: string;
+  category: SupportTicketCategory;
+  priority: SupportTicketPriority;
+  status: SupportTicketStatus;
+  visibility: 'owner' | 'property' | 'platform';
+  resolvedAt: string;
+  createdAt: string;
+  updatedAt: string;
+  comments: SupportTicketCommentRecord[];
+}
+
+export interface SupportTicketCommentRecord {
+  id: string;
+  ticketId: string;
+  authorId: string;
+  message: string;
+  internalNote: boolean;
+  createdAt: string;
+}
+
 export interface TenantPortalSnapshot {
   profile: AppUser;
   tenant: TenantRecord;
@@ -279,11 +417,38 @@ export interface OwnerSettingsRecord {
     };
     complaintUpdate: {
       enabled: boolean;
+      template: string;
       notifyOnCreate: boolean;
       notifyOnProgress: boolean;
       notifyOnResolve: boolean;
     };
   };
+  notifications: {
+    paymentNotifications: boolean;
+    maintenanceAlerts: boolean;
+    tenantUpdates: boolean;
+    emailNotifications: boolean;
+  };
+  security: {
+    twoFactorAuthentication: boolean;
+  };
+  paymentSettings: {
+    upiId: string;
+    bankAccount: string;
+    latePaymentFee: number;
+  };
+  additionalSettings: {
+    language: string;
+    timezone: string;
+    currency: string;
+  };
+}
+
+export interface ProfileUpdateInput {
+  name?: string;
+  phone?: string;
+  pgName?: string;
+  city?: string;
 }
 
 export interface DashboardSnapshot {
@@ -330,26 +495,113 @@ function normalizeError(error: unknown): Error {
   return new Error('Unknown Supabase error');
 }
 
-async function getOwnerId(): Promise<string> {
+function isMissingColumnError(error: unknown, candidateColumns: string[]): boolean {
+  const message = String((error as { message?: string } | null)?.message ?? '').toLowerCase();
+  if (!message.includes('column')) {
+    return false;
+  }
+  return candidateColumns.some((column) => message.includes(column.toLowerCase()));
+}
+
+function isMissingRelationError(error: unknown, relation: string): boolean {
+  const message = String((error as { message?: string } | null)?.message ?? '').toLowerCase();
+  return message.includes('relation') && message.includes(relation.toLowerCase()) && message.includes('does not exist');
+}
+
+interface CurrentUserContext {
+  userId: string;
+  role: UserRole;
+  ownerId: string;
+  ownerScopeId: string | null;
+  isPlatformAdmin: boolean;
+}
+
+async function getCurrentUserContext(): Promise<CurrentUserContext> {
   const { data, error } = await supabase.auth.getUser();
   if (error) {
     throw error;
   }
 
-  if (data.user?.id) {
-    return data.user.id;
+  const userId = data.user?.id;
+  if (!userId) {
+    throw new Error('No authenticated user found. Please log in again.');
   }
 
-  throw new Error('No authenticated user found. Please log in again.');
+  let { data: profile, error: profileError } = await supabase
+    .from('profiles')
+    .select('id,role,owner_scope_id')
+    .eq('id', userId)
+    .maybeSingle<Pick<ProfileRow, 'id' | 'role' | 'owner_scope_id'>>();
+
+  if (profileError && isMissingColumnError(profileError, ['owner_scope_id'])) {
+    const legacy = await supabase
+      .from('profiles')
+      .select('id,role')
+      .eq('id', userId)
+      .maybeSingle<Pick<ProfileRow, 'id' | 'role'>>();
+
+    profileError = legacy.error;
+    profile = legacy.data ? { ...legacy.data, owner_scope_id: null } : null;
+  }
+
+  if (profileError) {
+    throw profileError;
+  }
+
+  if (!profile) {
+    throw new Error('Profile not found for authenticated user.');
+  }
+
+  const role = profile.role;
+  const ownerScopeId = profile.owner_scope_id ?? null;
+  const ownerId = role === 'owner'
+    ? profile.id
+    : (isScopedOwnerRole(role) ? (ownerScopeId ?? profile.id) : profile.id);
+
+  return {
+    userId: profile.id,
+    role,
+    ownerId,
+    ownerScopeId,
+    isPlatformAdmin: isPlatformAdminRole(role),
+  };
+}
+
+async function getOwnerId(): Promise<string> {
+  const context = await getCurrentUserContext();
+  return context.ownerId;
 }
 
 async function getCurrentProfile(): Promise<AppUser> {
-  const ownerId = await getOwnerId();
-  const profile = await supabaseAuthDataApi.getProfileById(ownerId);
+  const context = await getCurrentUserContext();
+  const profile = await supabaseAuthDataApi.getProfileById(context.userId);
   if (!profile) {
     throw new Error('Profile not found for authenticated user.');
   }
   return profile;
+}
+
+async function listScopedPropertyIds(context: CurrentUserContext): Promise<string[] | null> {
+  if (context.isPlatformAdmin || context.role === 'owner') {
+    return null;
+  }
+
+  if (!isScopedOwnerRole(context.role)) {
+    return null;
+  }
+
+  const { data, error } = await supabase
+    .from('owner_user_property_scopes')
+    .select('property_id')
+    .eq('owner_id', context.ownerId)
+    .eq('user_id', context.userId)
+    .returns<Array<{ property_id: string }>>();
+
+  if (error) {
+    throw error;
+  }
+
+  return (data ?? []).map((row) => row.property_id);
 }
 
 async function createOwnerNotification(
@@ -373,6 +625,75 @@ async function createOwnerNotification(
   if (error) {
     throw error;
   }
+}
+
+function emitOwnerDataUpdated(): void {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('owner-data-updated'));
+  }
+}
+
+async function syncRoomOccupancyForProperty(ownerId: string, propertyId: string): Promise<void> {
+  if (!propertyId) {
+    return;
+  }
+
+  const [{ data: roomRows, error: roomError }, { data: tenantRows, error: tenantError }] = await Promise.all([
+    supabase
+      .from('rooms')
+      .select('id,number,floor,beds,status')
+      .eq('property_id', propertyId)
+      .returns<Array<{ id: string; number: string; floor: number; beds: number; status: 'occupied' | 'vacant' | 'maintenance' }>>(),
+    supabase
+      .from('tenants')
+      .select('id,room,floor,status')
+      .eq('owner_id', ownerId)
+      .eq('property_id', propertyId)
+      .returns<Array<{ id: string; room: string; floor: number; status: TenantStatus }>>(),
+  ]);
+
+  if (roomError) {
+    throw roomError;
+  }
+  if (tenantError) {
+    throw tenantError;
+  }
+
+  const activeTenants = (tenantRows ?? []).filter((tenant) => tenant.status === 'active');
+  const tenantIndex = new Map<string, Array<{ id: string }>>();
+
+  activeTenants.forEach((tenant) => {
+    const key = `${tenant.floor}::${tenant.room.toLowerCase()}`;
+    const list = tenantIndex.get(key) ?? [];
+    list.push({ id: tenant.id });
+    tenantIndex.set(key, list);
+  });
+
+  await Promise.all((roomRows ?? []).map(async (room) => {
+    const key = `${room.floor}::${room.number.toLowerCase()}`;
+    const assignedTenants = tenantIndex.get(key) ?? [];
+    const occupiedBeds = Math.min(assignedTenants.length, room.beds);
+    const primaryTenantId = assignedTenants[0]?.id ?? null;
+
+    const nextStatus: 'occupied' | 'vacant' | 'maintenance' =
+      occupiedBeds > 0
+        ? 'occupied'
+        : (room.status === 'maintenance' ? 'maintenance' : 'vacant');
+
+    const { error: updateError } = await supabase
+      .from('rooms')
+      .update({
+        occupied_beds: occupiedBeds,
+        tenant_id: primaryTenantId,
+        status: nextStatus,
+      })
+      .eq('id', room.id)
+      .eq('property_id', propertyId);
+
+    if (updateError) {
+      throw updateError;
+    }
+  }));
 }
 
 async function resolveTenantContextForCurrentUser(): Promise<{
@@ -427,6 +748,26 @@ async function resolveTenantContextForCurrentUser(): Promise<{
     row = await fetchTenantByPhone(phone);
   }
 
+  if (!row && (profile.role === 'owner' || isScopedOwnerRole(profile.role) || isPlatformAdminRole(profile.role))) {
+    let fallbackQuery = supabase
+      .from('tenants')
+      .select('*')
+      .order('status', { ascending: false })
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    if (!isPlatformAdminRole(profile.role)) {
+      fallbackQuery = fallbackQuery.eq('owner_id', profile.ownerScopeId ?? profile.id);
+    }
+
+    const { data: fallbackRows, error: fallbackError } = await fallbackQuery.returns<TenantRow[]>();
+    if (fallbackError) {
+      throw fallbackError;
+    }
+
+    row = fallbackRows?.[0] ?? null;
+  }
+
   if (!row) {
     throw new Error('No tenant record found for this account.');
   }
@@ -466,6 +807,13 @@ function mapProperty(row: PropertyRow, rooms: Room[]): Property {
     id: row.id,
     name: row.name,
     address: row.address,
+    addressLine1: row.address_line1 ?? row.address,
+    addressLine2: row.address_line2 ?? undefined,
+    locality: row.locality ?? row.city,
+    landmark: row.landmark ?? undefined,
+    formattedAddress: row.formatted_address ?? row.address,
+    latitude: row.latitude,
+    longitude: row.longitude,
     city: row.city,
     state: row.state,
     pincode: row.pincode,
@@ -570,6 +918,72 @@ function mapNotification(row: NotificationRow): NotificationRecord {
   };
 }
 
+function mapTeamScope(row: OwnerUserPropertyScopeRow): TeamScopeRecord {
+  return {
+    id: row.id,
+    ownerId: row.owner_id,
+    userId: row.user_id,
+    propertyId: row.property_id,
+    canManageProperties: row.can_manage_properties,
+    canManageTenants: row.can_manage_tenants,
+    canManagePayments: row.can_manage_payments,
+    canManageMaintenance: row.can_manage_maintenance,
+    canManageAnnouncements: row.can_manage_announcements,
+    createdAt: row.created_at,
+  };
+}
+
+function mapOwnerSubscription(row: OwnerSubscriptionRow): OwnerSubscriptionRecord {
+  return {
+    id: row.id,
+    ownerId: row.owner_id,
+    planCode: row.plan_code,
+    status: row.status,
+    billingCycle: row.billing_cycle,
+    amount: toNumber(row.amount),
+    currency: row.currency,
+    seats: row.seats,
+    startedAt: row.started_at,
+    trialEndsAt: row.trial_ends_at ?? '',
+    renewsAt: row.renews_at ?? '',
+    lastPaymentAt: row.last_payment_at ?? '',
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapSupportComment(row: SupportTicketCommentRow): SupportTicketCommentRecord {
+  return {
+    id: row.id,
+    ticketId: row.ticket_id,
+    authorId: row.author_id,
+    message: row.message,
+    internalNote: row.internal_note,
+    createdAt: row.created_at,
+  };
+}
+
+function mapSupportTicket(row: SupportTicketRow, comments: SupportTicketCommentRow[]): SupportTicketRecord {
+  return {
+    id: row.id,
+    ownerId: row.owner_id,
+    propertyId: row.property_id,
+    createdBy: row.created_by,
+    assignedTo: row.assigned_to,
+    subject: row.subject,
+    description: row.description,
+    category: row.category,
+    priority: row.priority,
+    status: row.status,
+    visibility: row.visibility,
+    resolvedAt: row.resolved_at ?? '',
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    comments: comments
+      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+      .map(mapSupportComment),
+  };
+}
+
 const defaultSettings: OwnerSettingsRecord = {
   pgRules: [],
   whatsappSettings: {
@@ -588,10 +1002,30 @@ const defaultSettings: OwnerSettingsRecord = {
     },
     complaintUpdate: {
       enabled: true,
+      template: 'Your complaint status has been updated. We will keep you posted until it is resolved.',
       notifyOnCreate: true,
       notifyOnProgress: true,
       notifyOnResolve: true,
     },
+  },
+  notifications: {
+    paymentNotifications: true,
+    maintenanceAlerts: true,
+    tenantUpdates: true,
+    emailNotifications: false,
+  },
+  security: {
+    twoFactorAuthentication: false,
+  },
+  paymentSettings: {
+    upiId: 'yourname@upi',
+    bankAccount: 'Account number',
+    latePaymentFee: 100,
+  },
+  additionalSettings: {
+    language: 'English',
+    timezone: 'IST (UTC+5:30)',
+    currency: 'INR (Rs)',
   },
 };
 
@@ -603,6 +1037,10 @@ function parseOwnerSettings(row: OwnerSettingsRow | null): OwnerSettingsRecord {
   const pgRules = Array.isArray(row.pg_rules) ? row.pg_rules.filter((entry) => typeof entry === 'string') as string[] : [];
 
   const ws = (row.whatsapp_settings ?? {}) as Record<string, unknown>;
+  const wsNotifications = (ws.notifications as Record<string, unknown> | undefined) ?? {};
+  const wsSecurity = (ws.security as Record<string, unknown> | undefined) ?? {};
+  const wsPayment = (ws.paymentSettings as Record<string, unknown> | undefined) ?? {};
+  const wsAdditional = (ws.additionalSettings as Record<string, unknown> | undefined) ?? {};
 
   return {
     pgRules,
@@ -622,10 +1060,30 @@ function parseOwnerSettings(row: OwnerSettingsRow | null): OwnerSettingsRecord {
       },
       complaintUpdate: {
         enabled: Boolean((ws.complaintUpdate as Record<string, unknown> | undefined)?.enabled ?? true),
+        template: String((ws.complaintUpdate as Record<string, unknown> | undefined)?.template ?? defaultSettings.whatsappSettings.complaintUpdate.template),
         notifyOnCreate: Boolean((ws.complaintUpdate as Record<string, unknown> | undefined)?.notifyOnCreate ?? true),
         notifyOnProgress: Boolean((ws.complaintUpdate as Record<string, unknown> | undefined)?.notifyOnProgress ?? true),
         notifyOnResolve: Boolean((ws.complaintUpdate as Record<string, unknown> | undefined)?.notifyOnResolve ?? true),
       },
+    },
+    notifications: {
+      paymentNotifications: Boolean(wsNotifications.paymentNotifications ?? defaultSettings.notifications.paymentNotifications),
+      maintenanceAlerts: Boolean(wsNotifications.maintenanceAlerts ?? defaultSettings.notifications.maintenanceAlerts),
+      tenantUpdates: Boolean(wsNotifications.tenantUpdates ?? defaultSettings.notifications.tenantUpdates),
+      emailNotifications: Boolean(wsNotifications.emailNotifications ?? defaultSettings.notifications.emailNotifications),
+    },
+    security: {
+      twoFactorAuthentication: Boolean(wsSecurity.twoFactorAuthentication ?? defaultSettings.security.twoFactorAuthentication),
+    },
+    paymentSettings: {
+      upiId: String(wsPayment.upiId ?? defaultSettings.paymentSettings.upiId),
+      bankAccount: String(wsPayment.bankAccount ?? defaultSettings.paymentSettings.bankAccount),
+      latePaymentFee: Number(wsPayment.latePaymentFee ?? defaultSettings.paymentSettings.latePaymentFee),
+    },
+    additionalSettings: {
+      language: String(wsAdditional.language ?? defaultSettings.additionalSettings.language),
+      timezone: String(wsAdditional.timezone ?? defaultSettings.additionalSettings.timezone),
+      currency: String(wsAdditional.currency ?? defaultSettings.additionalSettings.currency),
     },
   };
 }
@@ -664,6 +1122,10 @@ async function uploadTenantFile(ownerId: string, tenantName: string, file: File,
     .upload(path, file, { upsert: false });
 
   if (error) {
+    const message = String(error.message ?? '').toLowerCase();
+    if (message.includes('bucket') || message.includes('policy') || message.includes('permission') || message.includes('not found')) {
+      throw new Error('File upload failed. Configure Supabase storage bucket tenant-files and storage policies, then try again.');
+    }
     throw error;
   }
 
@@ -673,11 +1135,27 @@ async function uploadTenantFile(ownerId: string, tenantName: string, file: File,
 
 export const supabaseAuthDataApi = {
   async getProfileById(userId: string): Promise<AppUser | null> {
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('profiles')
-      .select('id,email,full_name,phone,role,pg_name,city')
+      .select('id,email,full_name,phone,role,owner_scope_id,pg_name,city')
       .eq('id', userId)
       .maybeSingle<ProfileRow>();
+
+    if (error && isMissingColumnError(error, ['owner_scope_id'])) {
+      const legacy = await supabase
+        .from('profiles')
+        .select('id,email,full_name,phone,role,pg_name,city')
+        .eq('id', userId)
+        .maybeSingle<Omit<ProfileRow, 'owner_scope_id'>>();
+
+      error = legacy.error;
+      data = legacy.data
+        ? {
+          ...legacy.data,
+          owner_scope_id: null,
+        }
+        : null;
+    }
 
     if (error) {
       throw error;
@@ -693,6 +1171,7 @@ export const supabaseAuthDataApi = {
       email: data.email ?? '',
       phone: data.phone ?? '',
       role: data.role,
+      ownerScopeId: data.owner_scope_id,
       pgName: data.pg_name ?? '',
       city: data.city ?? '',
     };
@@ -703,13 +1182,17 @@ export const supabaseAuthDataApi = {
     email: string;
     name: string;
     phone: string;
-    role?: 'owner' | 'admin' | 'tenant' | 'super_admin';
+    role?: UserRole;
     pgName: string;
     city: string;
+    ownerScopeId?: string | null;
   }): Promise<void> {
     const profileRole = payload.role ?? 'owner';
+    const ownerScopeId = profileRole === 'owner'
+      ? payload.userId
+      : (payload.ownerScopeId ?? null);
 
-    const { error } = await supabase
+    let { error } = await supabase
       .from('profiles')
       .upsert({
         id: payload.userId,
@@ -717,9 +1200,26 @@ export const supabaseAuthDataApi = {
         full_name: payload.name,
         phone: payload.phone,
         role: profileRole,
+        owner_scope_id: ownerScopeId,
         pg_name: payload.pgName,
         city: payload.city,
       }, { onConflict: 'id' });
+
+    if (error && isMissingColumnError(error, ['owner_scope_id'])) {
+      const legacy = await supabase
+        .from('profiles')
+        .upsert({
+          id: payload.userId,
+          email: payload.email,
+          full_name: payload.name,
+          phone: payload.phone,
+          role: profileRole,
+          pg_name: payload.pgName,
+          city: payload.city,
+        }, { onConflict: 'id' });
+
+      error = legacy.error;
+    }
 
     if (error) {
       throw error;
@@ -729,28 +1229,87 @@ export const supabaseAuthDataApi = {
       return;
     }
 
-    const { error: settingsError } = await supabase
-      .from('owner_settings')
-      .upsert({
-        owner_id: payload.userId,
-      }, { onConflict: 'owner_id' });
+    const [{ error: settingsError }, { error: subscriptionError }] = await Promise.all([
+      supabase
+        .from('owner_settings')
+        .upsert({
+          owner_id: payload.userId,
+        }, { onConflict: 'owner_id' }),
+      supabase
+        .from('owner_subscriptions')
+        .upsert({
+          owner_id: payload.userId,
+          plan_code: 'starter',
+          status: 'trialing',
+          billing_cycle: 'monthly',
+          amount: 0,
+          currency: 'INR',
+          seats: 1,
+          trial_ends_at: new Date(Date.now() + (14 * 24 * 60 * 60 * 1000)).toISOString(),
+          renews_at: new Date(Date.now() + (30 * 24 * 60 * 60 * 1000)).toISOString(),
+        }, { onConflict: 'owner_id' }),
+    ]);
 
     if (settingsError) {
       throw settingsError;
     }
+
+    if (subscriptionError && !isMissingRelationError(subscriptionError, 'owner_subscriptions')) {
+      throw subscriptionError;
+    }
+  },
+
+  async updateCurrentProfile(input: ProfileUpdateInput): Promise<AppUser> {
+    const context = await getCurrentUserContext();
+    const payload: Record<string, unknown> = {};
+
+    if (input.name !== undefined) payload.full_name = input.name;
+    if (input.phone !== undefined) payload.phone = input.phone;
+    if (input.pgName !== undefined) payload.pg_name = input.pgName;
+    if (input.city !== undefined) payload.city = input.city;
+
+    const { error } = await supabase
+      .from('profiles')
+      .update(payload)
+      .eq('id', context.userId);
+
+    if (error) {
+      throw error;
+    }
+
+    const refreshed = await this.getProfileById(context.userId);
+    if (!refreshed) {
+      throw new Error('Updated profile could not be loaded.');
+    }
+
+    emitOwnerDataUpdated();
+    return refreshed;
   },
 };
 
 export const supabasePropertyApi = {
   async list(): Promise<Property[]> {
-    const ownerId = await getOwnerId();
+    const context = await getCurrentUserContext();
 
-    const { data: propertyRows, error } = await supabase
+    let query = supabase
       .from('properties')
       .select('*')
-      .eq('owner_id', ownerId)
-      .order('created_at', { ascending: false })
-      .returns<PropertyRow[]>();
+      .order('created_at', { ascending: false });
+
+    if (!context.isPlatformAdmin) {
+      query = query.eq('owner_id', context.ownerId);
+    }
+
+    const scopedPropertyIds = await listScopedPropertyIds(context);
+    if (scopedPropertyIds && scopedPropertyIds.length === 0) {
+      return [];
+    }
+
+    if (scopedPropertyIds) {
+      query = query.in('id', scopedPropertyIds);
+    }
+
+    const { data: propertyRows, error } = await query.returns<PropertyRow[]>();
 
     if (error) {
       throw error;
@@ -788,29 +1347,65 @@ export const supabasePropertyApi = {
   async create(input: Omit<Property, 'id' | 'createdAt' | 'rooms'>): Promise<Property> {
     const ownerId = await getOwnerId();
 
+    const basePayload = {
+      owner_id: ownerId,
+      name: input.name,
+      address: input.address,
+      city: input.city,
+      state: input.state,
+      pincode: input.pincode,
+      floors: input.floors,
+      total_rooms: input.totalRooms,
+      contact_name: input.contactName,
+      contact_phone: input.contactPhone,
+      contact_email: input.contactEmail,
+    };
+
+    const extendedPayload = {
+      ...basePayload,
+      address_line1: input.addressLine1 ?? input.address,
+      address_line2: input.addressLine2 ?? null,
+      locality: input.locality ?? input.city,
+      landmark: input.landmark ?? null,
+      latitude: input.latitude ?? null,
+      longitude: input.longitude ?? null,
+      formatted_address: input.formattedAddress ?? input.address,
+    };
+
+    let createdRow: PropertyRow | null = null;
+
     const { data, error } = await supabase
       .from('properties')
-      .insert({
-        owner_id: ownerId,
-        name: input.name,
-        address: input.address,
-        city: input.city,
-        state: input.state,
-        pincode: input.pincode,
-        floors: input.floors,
-        total_rooms: input.totalRooms,
-        contact_name: input.contactName,
-        contact_phone: input.contactPhone,
-        contact_email: input.contactEmail,
-      })
+      .insert(extendedPayload)
       .select('*')
       .single<PropertyRow>();
 
-    if (error) {
-      throw error;
+    if (!error && data) {
+      createdRow = data;
     }
 
-    return mapProperty(data, []);
+    if (error && isMissingColumnError(error, ['address_line1', 'formatted_address', 'latitude', 'longitude', 'locality', 'landmark'])) {
+      const { data: fallbackData, error: fallbackError } = await supabase
+        .from('properties')
+        .insert(basePayload)
+        .select('*')
+        .single<PropertyRow>();
+
+      if (fallbackError) {
+        throw fallbackError;
+      }
+
+      createdRow = fallbackData;
+    }
+
+    if (!createdRow) {
+      if (error) {
+        throw error;
+      }
+      throw new Error('Property could not be created.');
+    }
+
+    return mapProperty(createdRow, []);
   },
 
   async update(id: string, input: Partial<Property>): Promise<Property> {
@@ -827,15 +1422,48 @@ export const supabasePropertyApi = {
     if (input.contactPhone !== undefined) payload.contact_phone = input.contactPhone;
     if (input.contactEmail !== undefined) payload.contact_email = input.contactEmail;
 
+    const extendedPayload: Record<string, unknown> = { ...payload };
+    if (input.addressLine1 !== undefined) extendedPayload.address_line1 = input.addressLine1;
+    if (input.addressLine2 !== undefined) extendedPayload.address_line2 = input.addressLine2;
+    if (input.locality !== undefined) extendedPayload.locality = input.locality;
+    if (input.landmark !== undefined) extendedPayload.landmark = input.landmark;
+    if (input.latitude !== undefined) extendedPayload.latitude = input.latitude;
+    if (input.longitude !== undefined) extendedPayload.longitude = input.longitude;
+    if (input.formattedAddress !== undefined) extendedPayload.formatted_address = input.formattedAddress;
+
+    let updatedRow: PropertyRow | null = null;
+
     const { data, error } = await supabase
       .from('properties')
-      .update(payload)
+      .update(extendedPayload)
       .eq('id', id)
       .select('*')
       .single<PropertyRow>();
 
-    if (error) {
-      throw error;
+    if (!error && data) {
+      updatedRow = data;
+    }
+
+    if (error && isMissingColumnError(error, ['address_line1', 'formatted_address', 'latitude', 'longitude', 'locality', 'landmark'])) {
+      const { data: fallbackData, error: fallbackError } = await supabase
+        .from('properties')
+        .update(payload)
+        .eq('id', id)
+        .select('*')
+        .single<PropertyRow>();
+
+      if (fallbackError) {
+        throw fallbackError;
+      }
+
+      updatedRow = fallbackData;
+    }
+
+    if (!updatedRow) {
+      if (error) {
+        throw error;
+      }
+      throw new Error('Property could not be updated.');
     }
 
     const { data: roomRows, error: roomError } = await supabase
@@ -850,7 +1478,7 @@ export const supabasePropertyApi = {
       throw roomError;
     }
 
-    return mapProperty(data, (roomRows ?? []).map(mapRoom));
+    return mapProperty(updatedRow, (roomRows ?? []).map(mapRoom));
   },
 
   async remove(id: string): Promise<void> {
@@ -927,13 +1555,25 @@ export const supabasePropertyApi = {
 
 export const supabaseOwnerDataApi = {
   async listTenants(propertyId: string | 'all' = 'all'): Promise<TenantRecord[]> {
-    const ownerId = await getOwnerId();
+    const context = await getCurrentUserContext();
 
     let query = supabase
       .from('tenants')
       .select('*')
-      .eq('owner_id', ownerId)
       .order('created_at', { ascending: false });
+
+    if (!context.isPlatformAdmin) {
+      query = query.eq('owner_id', context.ownerId);
+    }
+
+    const scopedPropertyIds = await listScopedPropertyIds(context);
+    if (scopedPropertyIds && scopedPropertyIds.length === 0) {
+      return [];
+    }
+
+    if (scopedPropertyIds) {
+      query = query.in('property_id', scopedPropertyIds);
+    }
 
     if (propertyId !== 'all') {
       query = query.eq('property_id', propertyId);
@@ -948,20 +1588,33 @@ export const supabaseOwnerDataApi = {
   },
 
   async getTenantById(tenantId: string): Promise<TenantRecord | null> {
-    const ownerId = await getOwnerId();
+    const context = await getCurrentUserContext();
 
-    const { data, error } = await supabase
+    let query = supabase
       .from('tenants')
       .select('*')
-      .eq('id', tenantId)
-      .eq('owner_id', ownerId)
-      .maybeSingle<TenantRow>();
+      .eq('id', tenantId);
+
+    if (!context.isPlatformAdmin) {
+      query = query.eq('owner_id', context.ownerId);
+    }
+
+    const { data, error } = await query.maybeSingle<TenantRow>();
 
     if (error) {
       throw error;
     }
 
-    return data ? mapTenant(data) : null;
+    if (!data) {
+      return null;
+    }
+
+    const scopedPropertyIds = await listScopedPropertyIds(context);
+    if (scopedPropertyIds && !scopedPropertyIds.includes(data.property_id)) {
+      return null;
+    }
+
+    return mapTenant(data);
   },
 
   async createTenant(input: TenantCreateInput): Promise<TenantRecord> {
@@ -1017,11 +1670,25 @@ export const supabaseOwnerDataApi = {
       // Notification should not block tenant creation.
     });
 
+    await syncRoomOccupancyForProperty(ownerId, created.propertyId);
+    emitOwnerDataUpdated();
+
     return created;
   },
 
   async updateTenant(tenantId: string, input: Partial<TenantCreateInput>): Promise<TenantRecord> {
     const ownerId = await getOwnerId();
+
+    const { data: existingTenant, error: existingTenantError } = await supabase
+      .from('tenants')
+      .select('property_id')
+      .eq('id', tenantId)
+      .eq('owner_id', ownerId)
+      .maybeSingle<{ property_id: string }>();
+
+    if (existingTenantError) {
+      throw existingTenantError;
+    }
 
     const payload: Record<string, unknown> = {};
 
@@ -1042,13 +1709,6 @@ export const supabaseOwnerDataApi = {
     if (input.joinDate !== undefined) payload.join_date = input.joinDate;
     if (input.status !== undefined) payload.status = input.status;
 
-    if (input.photo) {
-      payload.photo_url = await uploadTenantFile(ownerId, input.name ?? 'tenant', input.photo, 'photo');
-    }
-    if (input.idDocument) {
-      payload.id_document_url = await uploadTenantFile(ownerId, input.name ?? 'tenant', input.idDocument, 'document');
-    }
-
     const { data, error } = await supabase
       .from('tenants')
       .update(payload)
@@ -1061,7 +1721,38 @@ export const supabaseOwnerDataApi = {
       throw error;
     }
 
-    const updatedTenant = mapTenant(data);
+    const filePayload: Record<string, unknown> = {};
+    if (input.photo) {
+      try {
+        filePayload.photo_url = await uploadTenantFile(ownerId, input.name ?? data.name ?? 'tenant', input.photo, 'photo');
+      } catch (uploadError) {
+        console.warn('Tenant photo upload failed during update:', uploadError);
+      }
+    }
+    if (input.idDocument) {
+      try {
+        filePayload.id_document_url = await uploadTenantFile(ownerId, input.name ?? data.name ?? 'tenant', input.idDocument, 'document');
+      } catch (uploadError) {
+        console.warn('Tenant ID document upload failed during update:', uploadError);
+      }
+    }
+
+    let tenantRow = data;
+    if (Object.keys(filePayload).length > 0) {
+      const { data: fileUpdatedTenant, error: fileUpdateError } = await supabase
+        .from('tenants')
+        .update(filePayload)
+        .eq('id', tenantId)
+        .eq('owner_id', ownerId)
+        .select('*')
+        .single<TenantRow>();
+
+      if (!fileUpdateError && fileUpdatedTenant) {
+        tenantRow = fileUpdatedTenant;
+      }
+    }
+
+    const updatedTenant = mapTenant(tenantRow);
 
     const paymentPayload: Record<string, unknown> = {};
     if (input.name !== undefined) {
@@ -1095,7 +1786,7 @@ export const supabaseOwnerDataApi = {
         .select('id, extra_charges')
         .eq('tenant_id', tenantId)
         .eq('owner_id', ownerId)
-        .returns<Array<{ id: string; extra_charges: number }>>();
+        .returns<Array<{ id: string; extra_charges: number | string | null }>>();
 
       if (tenantPaymentsError) {
         throw tenantPaymentsError;
@@ -1116,11 +1807,32 @@ export const supabaseOwnerDataApi = {
       }
     }
 
+    const propertyIdsToSync = new Set<string>();
+    if (existingTenant?.property_id) {
+      propertyIdsToSync.add(existingTenant.property_id);
+    }
+    propertyIdsToSync.add(updatedTenant.propertyId);
+
+    await Promise.all(Array.from(propertyIdsToSync).map((propertyId) => syncRoomOccupancyForProperty(ownerId, propertyId)));
+    emitOwnerDataUpdated();
+
     return updatedTenant;
   },
 
   async deleteTenant(tenantId: string): Promise<void> {
     const ownerId = await getOwnerId();
+
+    const { data: existingTenant, error: existingTenantError } = await supabase
+      .from('tenants')
+      .select('property_id')
+      .eq('id', tenantId)
+      .eq('owner_id', ownerId)
+      .maybeSingle<{ property_id: string }>();
+
+    if (existingTenantError) {
+      throw existingTenantError;
+    }
+
     const { error } = await supabase
       .from('tenants')
       .delete()
@@ -1130,16 +1842,33 @@ export const supabaseOwnerDataApi = {
     if (error) {
       throw error;
     }
+
+    if (existingTenant?.property_id) {
+      await syncRoomOccupancyForProperty(ownerId, existingTenant.property_id);
+    }
+    emitOwnerDataUpdated();
   },
 
   async listPayments(propertyId: string | 'all' = 'all'): Promise<PaymentRecord[]> {
-    const ownerId = await getOwnerId();
+    const context = await getCurrentUserContext();
 
     let query = supabase
       .from('payments')
       .select('*')
-      .eq('owner_id', ownerId)
       .order('due_date', { ascending: false });
+
+    if (!context.isPlatformAdmin) {
+      query = query.eq('owner_id', context.ownerId);
+    }
+
+    const scopedPropertyIds = await listScopedPropertyIds(context);
+    if (scopedPropertyIds && scopedPropertyIds.length === 0) {
+      return [];
+    }
+
+    if (scopedPropertyIds) {
+      query = query.in('property_id', scopedPropertyIds);
+    }
 
     if (propertyId !== 'all') {
       query = query.eq('property_id', propertyId);
@@ -1154,15 +1883,28 @@ export const supabaseOwnerDataApi = {
   },
 
   async listPaymentsForTenant(tenantId: string): Promise<PaymentRecord[]> {
-    const ownerId = await getOwnerId();
+    const context = await getCurrentUserContext();
 
-    const { data, error } = await supabase
+    let query = supabase
       .from('payments')
       .select('*')
-      .eq('owner_id', ownerId)
       .eq('tenant_id', tenantId)
-      .order('due_date', { ascending: false })
-      .returns<PaymentRow[]>();
+      .order('due_date', { ascending: false });
+
+    if (!context.isPlatformAdmin) {
+      query = query.eq('owner_id', context.ownerId);
+    }
+
+    const scopedPropertyIds = await listScopedPropertyIds(context);
+    if (scopedPropertyIds && scopedPropertyIds.length === 0) {
+      return [];
+    }
+
+    if (scopedPropertyIds) {
+      query = query.in('property_id', scopedPropertyIds);
+    }
+
+    const { data, error } = await query.returns<PaymentRow[]>();
 
     if (error) {
       throw error;
@@ -1206,6 +1948,8 @@ export const supabaseOwnerDataApi = {
       // Notification should not block payment updates.
     });
 
+    emitOwnerDataUpdated();
+
     return updated;
   },
 
@@ -1241,17 +1985,31 @@ export const supabaseOwnerDataApi = {
       throw paymentError;
     }
 
+    emitOwnerDataUpdated();
+
     return mapPayment(data);
   },
 
   async listMaintenanceTickets(propertyId: string | 'all' = 'all'): Promise<MaintenanceTicketRecord[]> {
-    const ownerId = await getOwnerId();
+    const context = await getCurrentUserContext();
 
     let query = supabase
       .from('maintenance_tickets')
       .select('*')
-      .eq('owner_id', ownerId)
       .order('created_at', { ascending: false });
+
+    if (!context.isPlatformAdmin) {
+      query = query.eq('owner_id', context.ownerId);
+    }
+
+    const scopedPropertyIds = await listScopedPropertyIds(context);
+    if (scopedPropertyIds && scopedPropertyIds.length === 0) {
+      return [];
+    }
+
+    if (scopedPropertyIds) {
+      query = query.in('property_id', scopedPropertyIds);
+    }
 
     if (propertyId !== 'all') {
       query = query.eq('property_id', propertyId);
@@ -1292,7 +2050,8 @@ export const supabaseOwnerDataApi = {
   },
 
   async listMaintenanceForTenant(tenantId: string, tenantName?: string): Promise<MaintenanceTicketRecord[]> {
-    const ownerId = await getOwnerId();
+    const context = await getCurrentUserContext();
+    const ownerId = context.ownerId;
 
     const { data: idTicketRows, error } = await supabase
       .from('maintenance_tickets')
@@ -1329,9 +2088,15 @@ export const supabaseOwnerDataApi = {
       dedupedTickets.set(ticket.id, ticket);
     });
 
-    const tickets = Array.from(dedupedTickets.values()).sort(
+    let tickets = Array.from(dedupedTickets.values()).sort(
       (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
     );
+
+    const scopedPropertyIds = await listScopedPropertyIds(context);
+    if (scopedPropertyIds && scopedPropertyIds.length > 0) {
+      tickets = tickets.filter((ticket) => scopedPropertyIds.includes(ticket.property_id));
+    }
+
     if (tickets.length === 0) {
       return [];
     }
@@ -1446,14 +2211,17 @@ export const supabaseOwnerDataApi = {
   },
 
   async listAnnouncements(propertyId: string | 'all' = 'all'): Promise<AnnouncementRecord[]> {
-    const ownerId = await getOwnerId();
+    const context = await getCurrentUserContext();
 
     let query = supabase
       .from('announcements')
       .select('*')
-      .eq('owner_id', ownerId)
       .order('is_pinned', { ascending: false })
       .order('created_at', { ascending: false });
+
+    if (!context.isPlatformAdmin) {
+      query = query.eq('owner_id', context.ownerId);
+    }
 
     if (propertyId !== 'all') {
       query = query.or(`property_id.eq.${propertyId},property_id.is.null`);
@@ -1465,7 +2233,12 @@ export const supabaseOwnerDataApi = {
       throw error;
     }
 
-    return (data ?? []).map(mapAnnouncement);
+    const scopedPropertyIds = await listScopedPropertyIds(context);
+    const rows = scopedPropertyIds
+      ? (data ?? []).filter((row) => row.property_id === null || scopedPropertyIds.includes(row.property_id))
+      : (data ?? []);
+
+    return rows.map(mapAnnouncement);
   },
 
   async createAnnouncement(input: {
@@ -1579,6 +2352,421 @@ export const supabaseOwnerDataApi = {
     }
   },
 
+  async getOwnerSubscription(): Promise<OwnerSubscriptionRecord> {
+    const ownerId = await getOwnerId();
+
+    const defaultSubscription: OwnerSubscriptionRecord = {
+      id: `local-${ownerId}`,
+      ownerId,
+      planCode: 'starter',
+      status: 'trialing',
+      billingCycle: 'monthly',
+      amount: 0,
+      currency: 'INR',
+      seats: 1,
+      startedAt: new Date().toISOString(),
+      trialEndsAt: new Date(Date.now() + (14 * 24 * 60 * 60 * 1000)).toISOString(),
+      renewsAt: new Date(Date.now() + (30 * 24 * 60 * 60 * 1000)).toISOString(),
+      lastPaymentAt: '',
+      updatedAt: new Date().toISOString(),
+    };
+
+    const { data, error } = await supabase
+      .from('owner_subscriptions')
+      .select('*')
+      .eq('owner_id', ownerId)
+      .maybeSingle<OwnerSubscriptionRow>();
+
+    if (error) {
+      if (isMissingRelationError(error, 'owner_subscriptions')) {
+        return defaultSubscription;
+      }
+      throw error;
+    }
+
+    if (!data) {
+      const { data: inserted, error: insertError } = await supabase
+        .from('owner_subscriptions')
+        .insert({
+          owner_id: ownerId,
+          plan_code: defaultSubscription.planCode,
+          status: defaultSubscription.status,
+          billing_cycle: defaultSubscription.billingCycle,
+          amount: defaultSubscription.amount,
+          currency: defaultSubscription.currency,
+          seats: defaultSubscription.seats,
+          trial_ends_at: defaultSubscription.trialEndsAt,
+          renews_at: defaultSubscription.renewsAt,
+        })
+        .select('*')
+        .single<OwnerSubscriptionRow>();
+
+      if (insertError) {
+        if (isMissingRelationError(insertError, 'owner_subscriptions')) {
+          return defaultSubscription;
+        }
+        throw insertError;
+      }
+
+      return mapOwnerSubscription(inserted);
+    }
+
+    return mapOwnerSubscription(data);
+  },
+
+  async updateOwnerSubscription(input: {
+    planCode?: string;
+    status?: OwnerSubscriptionRecord['status'];
+    billingCycle?: OwnerSubscriptionRecord['billingCycle'];
+    amount?: number;
+    currency?: string;
+    seats?: number;
+    renewsAt?: string;
+  }): Promise<OwnerSubscriptionRecord> {
+    const ownerId = await getOwnerId();
+
+    const payload: Record<string, unknown> = {};
+    if (input.planCode !== undefined) payload.plan_code = input.planCode;
+    if (input.status !== undefined) payload.status = input.status;
+    if (input.billingCycle !== undefined) payload.billing_cycle = input.billingCycle;
+    if (input.amount !== undefined) payload.amount = input.amount;
+    if (input.currency !== undefined) payload.currency = input.currency;
+    if (input.seats !== undefined) payload.seats = input.seats;
+    if (input.renewsAt !== undefined) payload.renews_at = input.renewsAt;
+
+    const { data, error } = await supabase
+      .from('owner_subscriptions')
+      .update(payload)
+      .eq('owner_id', ownerId)
+      .select('*')
+      .single<OwnerSubscriptionRow>();
+
+    if (error) {
+      if (isMissingRelationError(error, 'owner_subscriptions')) {
+        return this.getOwnerSubscription();
+      }
+      throw error;
+    }
+
+    return mapOwnerSubscription(data);
+  },
+
+  async listSupportTickets(propertyId: string | 'all' = 'all'): Promise<SupportTicketRecord[]> {
+    const context = await getCurrentUserContext();
+    const scopedPropertyIds = await listScopedPropertyIds(context);
+
+    if (propertyId !== 'all' && scopedPropertyIds && !scopedPropertyIds.includes(propertyId)) {
+      return [];
+    }
+
+    let query = supabase
+      .from('support_tickets')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (!context.isPlatformAdmin) {
+      query = query.eq('owner_id', context.ownerId);
+    }
+
+    if (propertyId !== 'all') {
+      query = query.eq('property_id', propertyId);
+    }
+
+    const { data: ticketRows, error } = await query.returns<SupportTicketRow[]>();
+    if (error) {
+      if (isMissingRelationError(error, 'support_tickets')) {
+        return [];
+      }
+      throw error;
+    }
+
+    const tickets = scopedPropertyIds
+      ? (ticketRows ?? []).filter((ticket) => ticket.property_id === null || scopedPropertyIds.includes(ticket.property_id))
+      : (ticketRows ?? []);
+    if (tickets.length === 0) {
+      return [];
+    }
+
+    const ids = tickets.map((ticket) => ticket.id);
+    const { data: comments, error: commentError } = await supabase
+      .from('support_ticket_comments')
+      .select('*')
+      .in('ticket_id', ids)
+      .order('created_at', { ascending: true })
+      .returns<SupportTicketCommentRow[]>();
+
+    if (commentError) {
+      if (isMissingRelationError(commentError, 'support_ticket_comments')) {
+        return tickets.map((ticket) => mapSupportTicket(ticket, []));
+      }
+      throw commentError;
+    }
+
+    const commentMap = new Map<string, SupportTicketCommentRow[]>();
+    (comments ?? []).forEach((comment) => {
+      const list = commentMap.get(comment.ticket_id) ?? [];
+      list.push(comment);
+      commentMap.set(comment.ticket_id, list);
+    });
+
+    return tickets.map((ticket) => mapSupportTicket(ticket, commentMap.get(ticket.id) ?? []));
+  },
+
+  async createSupportTicket(input: {
+    subject: string;
+    description: string;
+    category: SupportTicketCategory;
+    priority: SupportTicketPriority;
+    propertyId?: string | null;
+    visibility?: 'owner' | 'property' | 'platform';
+  }): Promise<SupportTicketRecord> {
+    const context = await getCurrentUserContext();
+
+    const { data, error } = await supabase
+      .from('support_tickets')
+      .insert({
+        owner_id: context.ownerId,
+        property_id: input.propertyId ?? null,
+        created_by: context.userId,
+        subject: input.subject,
+        description: input.description,
+        category: input.category,
+        priority: input.priority,
+        status: 'open',
+        visibility: input.visibility ?? (input.propertyId ? 'property' : 'owner'),
+      })
+      .select('*')
+      .single<SupportTicketRow>();
+
+    if (error) {
+      throw error;
+    }
+
+    return mapSupportTicket(data, []);
+  },
+
+  async updateSupportTicketStatus(ticketId: string, status: SupportTicketStatus): Promise<SupportTicketRecord> {
+    const resolvedAt = status === 'resolved' || status === 'closed'
+      ? new Date().toISOString()
+      : null;
+
+    const { data, error } = await supabase
+      .from('support_tickets')
+      .update({
+        status,
+        resolved_at: resolvedAt,
+      })
+      .eq('id', ticketId)
+      .select('*')
+      .single<SupportTicketRow>();
+
+    if (error) {
+      throw error;
+    }
+
+    const { data: comments, error: commentError } = await supabase
+      .from('support_ticket_comments')
+      .select('*')
+      .eq('ticket_id', ticketId)
+      .order('created_at', { ascending: true })
+      .returns<SupportTicketCommentRow[]>();
+
+    if (commentError) {
+      throw commentError;
+    }
+
+    return mapSupportTicket(data, comments ?? []);
+  },
+
+  async addSupportTicketComment(ticketId: string, message: string, internalNote = false): Promise<void> {
+    const context = await getCurrentUserContext();
+
+    const { error } = await supabase
+      .from('support_ticket_comments')
+      .insert({
+        ticket_id: ticketId,
+        author_id: context.userId,
+        message,
+        internal_note: internalNote,
+      });
+
+    if (error) {
+      throw error;
+    }
+  },
+
+  async listTeamMembers(): Promise<TeamMemberRecord[]> {
+    const context = await getCurrentUserContext();
+    const ownerId = context.ownerId;
+
+    let profilesQuery = supabase
+      .from('profiles')
+      .select('id,email,full_name,phone,role,owner_scope_id')
+      .eq('owner_scope_id', ownerId)
+      .neq('id', ownerId)
+      .order('full_name', { ascending: true });
+
+    let { data: teamProfiles, error: profileError } = await profilesQuery.returns<ProfileRow[]>();
+
+    if (profileError && isMissingColumnError(profileError, ['owner_scope_id'])) {
+      const legacyResult = await supabase
+        .from('profiles')
+        .select('id,email,full_name,phone,role')
+        .neq('id', ownerId)
+        .order('full_name', { ascending: true })
+        .returns<Array<Omit<ProfileRow, 'owner_scope_id'>>>();
+
+      profileError = legacyResult.error;
+      teamProfiles = (legacyResult.data ?? [])
+        .filter((profile) => profile.role === 'owner_manager' || profile.role === 'staff')
+        .map((profile) => ({ ...profile, owner_scope_id: ownerId }));
+    }
+
+    if (profileError) {
+      throw profileError;
+    }
+
+    const members = teamProfiles ?? [];
+    if (members.length === 0) {
+      return [];
+    }
+
+    const memberIds = members.map((profile) => profile.id);
+    const { data: scopeRows, error: scopeError } = await supabase
+      .from('owner_user_property_scopes')
+      .select('*')
+      .eq('owner_id', ownerId)
+      .in('user_id', memberIds)
+      .returns<OwnerUserPropertyScopeRow[]>();
+
+    if (scopeError) {
+      if (isMissingRelationError(scopeError, 'owner_user_property_scopes')) {
+        return members.map((profile) => ({
+          id: profile.id,
+          email: profile.email ?? '',
+          name: profile.full_name ?? profile.email ?? 'Team Member',
+          phone: profile.phone ?? '',
+          role: profile.role,
+          ownerScopeId: profile.owner_scope_id,
+          scopes: [],
+        }));
+      }
+      throw scopeError;
+    }
+
+    const scopeMap = new Map<string, TeamScopeRecord[]>();
+    (scopeRows ?? []).forEach((row) => {
+      const list = scopeMap.get(row.user_id) ?? [];
+      list.push(mapTeamScope(row));
+      scopeMap.set(row.user_id, list);
+    });
+
+    return members.map((profile) => ({
+      id: profile.id,
+      email: profile.email ?? '',
+      name: profile.full_name ?? profile.email ?? 'Team Member',
+      phone: profile.phone ?? '',
+      role: profile.role,
+      ownerScopeId: profile.owner_scope_id,
+      scopes: scopeMap.get(profile.id) ?? [],
+    }));
+  },
+
+  async upsertTeamMemberAccess(input: {
+    email: string;
+    role: 'owner_manager' | 'staff';
+    scopes: Array<{
+      propertyId: string;
+      canManageProperties: boolean;
+      canManageTenants: boolean;
+      canManagePayments: boolean;
+      canManageMaintenance: boolean;
+      canManageAnnouncements: boolean;
+    }>;
+  }): Promise<void> {
+    const context = await getCurrentUserContext();
+    const ownerId = context.ownerId;
+
+    if (context.role !== 'owner') {
+      throw new Error('Only owner accounts can manage team access.');
+    }
+
+    const normalizedEmail = input.email.trim().toLowerCase();
+
+    const { data: targetProfile, error: targetProfileError } = await supabase
+      .from('profiles')
+      .select('id,email')
+      .ilike('email', normalizedEmail)
+      .maybeSingle<{ id: string; email: string | null }>();
+
+    if (targetProfileError) {
+      throw targetProfileError;
+    }
+
+    if (!targetProfile?.id) {
+      throw new Error('No existing user account found for this email. Ask the user to sign up first.');
+    }
+
+    const { error: profileUpdateError } = await supabase
+      .from('profiles')
+      .update({
+        role: input.role,
+        owner_scope_id: ownerId,
+      })
+      .eq('id', targetProfile.id);
+
+    if (profileUpdateError) {
+      if (!isMissingColumnError(profileUpdateError, ['owner_scope_id'])) {
+        throw profileUpdateError;
+      }
+
+      const { error: fallbackRoleError } = await supabase
+        .from('profiles')
+        .update({ role: input.role })
+        .eq('id', targetProfile.id);
+
+      if (fallbackRoleError) {
+        throw fallbackRoleError;
+      }
+    }
+
+    const { error: clearError } = await supabase
+      .from('owner_user_property_scopes')
+      .delete()
+      .eq('owner_id', ownerId)
+      .eq('user_id', targetProfile.id);
+
+    if (clearError && !isMissingRelationError(clearError, 'owner_user_property_scopes')) {
+      throw clearError;
+    }
+
+    if (input.scopes.length === 0) {
+      return;
+    }
+
+    const { error: insertError } = await supabase
+      .from('owner_user_property_scopes')
+      .insert(
+        input.scopes.map((scope) => ({
+          owner_id: ownerId,
+          user_id: targetProfile.id,
+          property_id: scope.propertyId,
+          can_manage_properties: scope.canManageProperties,
+          can_manage_tenants: scope.canManageTenants,
+          can_manage_payments: scope.canManagePayments,
+          can_manage_maintenance: scope.canManageMaintenance,
+          can_manage_announcements: scope.canManageAnnouncements,
+        })),
+      );
+
+    if (insertError) {
+      if (isMissingRelationError(insertError, 'owner_user_property_scopes')) {
+        throw new Error('Team property scopes are unavailable until the latest migration is applied.');
+      }
+      throw insertError;
+    }
+  },
+
   async getOwnerSettings(): Promise<OwnerSettingsRecord> {
     const ownerId = await getOwnerId();
 
@@ -1610,11 +2798,19 @@ export const supabaseOwnerDataApi = {
   async updateOwnerSettings(settings: OwnerSettingsRecord): Promise<OwnerSettingsRecord> {
     const ownerId = await getOwnerId();
 
+    const serializedSettings = {
+      ...settings.whatsappSettings,
+      notifications: settings.notifications,
+      security: settings.security,
+      paymentSettings: settings.paymentSettings,
+      additionalSettings: settings.additionalSettings,
+    };
+
     const { error } = await supabase
       .from('owner_settings')
       .update({
         pg_rules: settings.pgRules,
-        whatsapp_settings: settings.whatsappSettings,
+        whatsapp_settings: serializedSettings,
       })
       .eq('owner_id', ownerId);
 
@@ -1622,7 +2818,168 @@ export const supabaseOwnerDataApi = {
       throw error;
     }
 
+    emitOwnerDataUpdated();
+
     return settings;
+  },
+
+  async exportOwnerData(): Promise<Record<string, unknown>> {
+    const ownerId = await getOwnerId();
+    const [profile, settings, properties, tenants, payments, maintenance, announcements, notifications, subscription, support, team] = await Promise.all([
+      supabaseAuthDataApi.getProfileById(ownerId),
+      this.getOwnerSettings(),
+      supabasePropertyApi.list(),
+      this.listTenants('all'),
+      this.listPayments('all'),
+      this.listMaintenanceTickets('all'),
+      this.listAnnouncements('all'),
+      supabaseNotificationApi.listForCurrentUser(),
+      this.getOwnerSubscription(),
+      this.listSupportTickets('all'),
+      this.listTeamMembers(),
+    ]);
+
+    return {
+      exportedAt: new Date().toISOString(),
+      profile,
+      settings,
+      properties,
+      tenants,
+      payments,
+      maintenance,
+      announcements,
+      notifications,
+      subscription,
+      support,
+      team,
+    };
+  },
+
+  async clearOwnerData(): Promise<void> {
+    const ownerId = await getOwnerId();
+
+    const [
+      { data: paymentRows, error: paymentListError },
+      { data: ticketRows, error: ticketListError },
+      { data: propertyRows, error: propertyListError },
+      { data: supportRows, error: supportListError },
+    ] = await Promise.all([
+      supabase.from('payments').select('id').eq('owner_id', ownerId).returns<Array<{ id: string }>>(),
+      supabase.from('maintenance_tickets').select('id').eq('owner_id', ownerId).returns<Array<{ id: string }>>(),
+      supabase.from('properties').select('id').eq('owner_id', ownerId).returns<Array<{ id: string }>>(),
+      supabase.from('support_tickets').select('id').eq('owner_id', ownerId).returns<Array<{ id: string }>>(),
+    ]);
+
+    if (paymentListError) throw paymentListError;
+    if (ticketListError) throw ticketListError;
+    if (propertyListError) throw propertyListError;
+    if (supportListError && !isMissingRelationError(supportListError, 'support_tickets')) throw supportListError;
+
+    const paymentIds = (paymentRows ?? []).map((row) => row.id);
+    const ticketIds = (ticketRows ?? []).map((row) => row.id);
+    const propertyIds = (propertyRows ?? []).map((row) => row.id);
+    const supportIds = (supportRows ?? []).map((row) => row.id);
+
+    const { error: notificationsError } = await supabase.from('notifications').delete().eq('owner_id', ownerId);
+    if (notificationsError) throw notificationsError;
+
+    if (supportIds.length > 0) {
+      const { error: supportCommentError } = await supabase
+        .from('support_ticket_comments')
+        .delete()
+        .in('ticket_id', supportIds);
+
+      if (supportCommentError && !isMissingRelationError(supportCommentError, 'support_ticket_comments')) {
+        throw supportCommentError;
+      }
+    }
+
+    const { error: supportTicketError } = await supabase
+      .from('support_tickets')
+      .delete()
+      .eq('owner_id', ownerId);
+
+    if (supportTicketError && !isMissingRelationError(supportTicketError, 'support_tickets')) {
+      throw supportTicketError;
+    }
+
+    const { error: teamScopesError } = await supabase
+      .from('owner_user_property_scopes')
+      .delete()
+      .eq('owner_id', ownerId);
+
+    if (teamScopesError && !isMissingRelationError(teamScopesError, 'owner_user_property_scopes')) {
+      throw teamScopesError;
+    }
+
+    if (ticketIds.length > 0) {
+      const { error: notesError } = await supabase.from('maintenance_notes').delete().in('ticket_id', ticketIds);
+      if (notesError) throw notesError;
+    }
+
+    const { error: ticketsError } = await supabase.from('maintenance_tickets').delete().eq('owner_id', ownerId);
+    if (ticketsError) throw ticketsError;
+
+    if (paymentIds.length > 0) {
+      const { error: chargesError } = await supabase.from('payment_charges').delete().in('payment_id', paymentIds);
+      if (chargesError) throw chargesError;
+    }
+
+    const { error: paymentsError } = await supabase.from('payments').delete().eq('owner_id', ownerId);
+    if (paymentsError) throw paymentsError;
+
+    const { error: tenantsError } = await supabase.from('tenants').delete().eq('owner_id', ownerId);
+    if (tenantsError) throw tenantsError;
+
+    if (propertyIds.length > 0) {
+      const { error: roomsError } = await supabase.from('rooms').delete().in('property_id', propertyIds);
+      if (roomsError) throw roomsError;
+    }
+
+    const { error: announcementsError } = await supabase.from('announcements').delete().eq('owner_id', ownerId);
+    if (announcementsError) throw announcementsError;
+
+    const { error: propertiesError } = await supabase.from('properties').delete().eq('owner_id', ownerId);
+    if (propertiesError) throw propertiesError;
+
+    const { error: subscriptionResetError } = await supabase
+      .from('owner_subscriptions')
+      .upsert({
+        owner_id: ownerId,
+        plan_code: 'starter',
+        status: 'trialing',
+        billing_cycle: 'monthly',
+        amount: 0,
+        currency: 'INR',
+        seats: 1,
+        trial_ends_at: new Date(Date.now() + (14 * 24 * 60 * 60 * 1000)).toISOString(),
+        renews_at: new Date(Date.now() + (30 * 24 * 60 * 60 * 1000)).toISOString(),
+        last_payment_at: null,
+      }, { onConflict: 'owner_id' });
+
+    if (subscriptionResetError && !isMissingRelationError(subscriptionResetError, 'owner_subscriptions')) {
+      throw subscriptionResetError;
+    }
+
+    const { error: resetSettingsError } = await supabase
+      .from('owner_settings')
+      .update({
+        pg_rules: defaultSettings.pgRules,
+        whatsapp_settings: {
+          ...defaultSettings.whatsappSettings,
+          notifications: defaultSettings.notifications,
+          security: defaultSettings.security,
+          paymentSettings: defaultSettings.paymentSettings,
+          additionalSettings: defaultSettings.additionalSettings,
+        },
+      })
+      .eq('owner_id', ownerId);
+
+    if (resetSettingsError) {
+      throw resetSettingsError;
+    }
+
+    emitOwnerDataUpdated();
   },
 
   async getDashboardSnapshot(propertyId: string | 'all'): Promise<DashboardSnapshot> {
@@ -1647,11 +3004,8 @@ export const supabaseOwnerDataApi = {
           if (payment.status !== 'paid') {
             return false;
           }
-          const paidDate = payment.paidDate ? new Date(payment.paidDate) : null;
-          if (!paidDate) {
-            return false;
-          }
-          return paidDate.getMonth() === currentMonth && paidDate.getFullYear() === currentYear;
+          const referenceDate = payment.paidDate ? new Date(payment.paidDate) : new Date(payment.dueDate);
+          return referenceDate.getMonth() === currentMonth && referenceDate.getFullYear() === currentYear;
         })
         .reduce((sum, payment) => sum + payment.totalAmount, 0);
 
@@ -1909,23 +3263,56 @@ export const supabaseAdminDataApi = {
   async getAdminSummary(): Promise<{
     profile: AppUser;
     stats: {
+      totalOwners: number;
       totalProperties: number;
       totalTenants: number;
-      pendingPayments: number;
-      openTickets: number;
+      activeSubscriptions: number;
+      openSupportTickets: number;
       monthlyRevenue: number;
     };
-    tenants: TenantRecord[];
-    maintenance: MaintenanceTicketRecord[];
+    owners: Array<{
+      id: string;
+      name: string;
+      email: string;
+      phone: string;
+      city: string;
+      pgName: string;
+      propertyCount: number;
+      tenantCount: number;
+      subscriptionStatus: OwnerSubscriptionRecord['status'] | 'not_configured';
+      planCode: string;
+    }>;
+    subscriptions: OwnerSubscriptionRecord[];
+    support: SupportTicketRecord[];
+    activity: Array<{
+      id: string;
+      label: string;
+      detail: string;
+      createdAt: string;
+    }>;
   }> {
+    const context = await getCurrentUserContext();
+    if (!context.isPlatformAdmin) {
+      throw new Error('Platform admin access is required.');
+    }
+
     const profile = await getCurrentProfile();
-    const [propertiesResult, tenantsResult, paymentsResult, maintenanceResult, notesResult] = await Promise.all([
+    const [ownersResult, propertiesResult, tenantsResult, paymentsResult, subscriptionsResult, supportTicketsResult] = await Promise.all([
+      supabase
+        .from('profiles')
+        .select('id,email,full_name,phone,role,owner_scope_id,pg_name,city,created_at')
+        .eq('role', 'owner')
+        .returns<ProfileRow[]>(),
       supabase.from('properties').select('*').returns<PropertyRow[]>(),
       supabase.from('tenants').select('*').returns<TenantRow[]>(),
       supabase.from('payments').select('*').returns<PaymentRow[]>(),
-      supabase.from('maintenance_tickets').select('*').returns<MaintenanceTicketRow[]>(),
-      supabase.from('maintenance_notes').select('*').returns<MaintenanceNoteRow[]>(),
+      supabase.from('owner_subscriptions').select('*').returns<OwnerSubscriptionRow[]>(),
+      supabase.from('support_tickets').select('*').returns<SupportTicketRow[]>(),
     ]);
+
+    if (ownersResult.error) {
+      throw ownersResult.error;
+    }
 
     if (propertiesResult.error) {
       throw propertiesResult.error;
@@ -1936,49 +3323,265 @@ export const supabaseAdminDataApi = {
     if (paymentsResult.error) {
       throw paymentsResult.error;
     }
-    if (maintenanceResult.error) {
-      throw maintenanceResult.error;
-    }
-    if (notesResult.error) {
-      throw notesResult.error;
+
+    let subscriptionRows: OwnerSubscriptionRow[] = [];
+    if (subscriptionsResult.error) {
+      if (!isMissingRelationError(subscriptionsResult.error, 'owner_subscriptions')) {
+        throw subscriptionsResult.error;
+      }
+    } else {
+      subscriptionRows = subscriptionsResult.data ?? [];
     }
 
+    let supportRows: SupportTicketRow[] = [];
+    if (supportTicketsResult.error) {
+      if (!isMissingRelationError(supportTicketsResult.error, 'support_tickets')) {
+        throw supportTicketsResult.error;
+      }
+    } else {
+      supportRows = supportTicketsResult.data ?? [];
+    }
+
+    let supportComments: SupportTicketCommentRow[] = [];
+    if (supportRows.length > 0) {
+      const ticketIds = supportRows.map((ticket) => ticket.id);
+      const commentsResult = await supabase
+        .from('support_ticket_comments')
+        .select('*')
+        .in('ticket_id', ticketIds)
+        .returns<SupportTicketCommentRow[]>();
+
+      if (commentsResult.error) {
+        if (!isMissingRelationError(commentsResult.error, 'support_ticket_comments')) {
+          throw commentsResult.error;
+        }
+      } else {
+        supportComments = commentsResult.data ?? [];
+      }
+    }
+
+    const owners = ownersResult.data ?? [];
     const properties = propertiesResult.data ?? [];
     const tenants = (tenantsResult.data ?? []).map(mapTenant);
     const payments = (paymentsResult.data ?? []).map(mapPayment);
-    const notesByTicket = new Map<string, MaintenanceNoteRow[]>();
-    (notesResult.data ?? []).forEach((note) => {
-      const current = notesByTicket.get(note.ticket_id) ?? [];
-      current.push(note);
-      notesByTicket.set(note.ticket_id, current);
+
+    const subscriptionRecords = subscriptionRows.map(mapOwnerSubscription);
+    const subscriptionsByOwner = new Map<string, OwnerSubscriptionRecord>();
+    subscriptionRecords.forEach((subscription) => {
+      subscriptionsByOwner.set(subscription.ownerId, subscription);
     });
-    const maintenance = (maintenanceResult.data ?? []).map((ticket) =>
-      mapMaintenanceTicket(ticket, notesByTicket.get(ticket.id) ?? []),
-    );
+
+    const propertyCountByOwner = new Map<string, number>();
+    properties.forEach((property) => {
+      propertyCountByOwner.set(property.owner_id, (propertyCountByOwner.get(property.owner_id) ?? 0) + 1);
+    });
+
+    const tenantCountByOwner = new Map<string, number>();
+    tenants.forEach((tenant) => {
+      tenantCountByOwner.set(tenant.ownerId, (tenantCountByOwner.get(tenant.ownerId) ?? 0) + 1);
+    });
+
+    const supportCommentMap = new Map<string, SupportTicketCommentRow[]>();
+    supportComments.forEach((comment) => {
+      const list = supportCommentMap.get(comment.ticket_id) ?? [];
+      list.push(comment);
+      supportCommentMap.set(comment.ticket_id, list);
+    });
+
+    const support = supportRows
+      .map((ticket) => mapSupportTicket(ticket, supportCommentMap.get(ticket.id) ?? []))
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
     const now = new Date();
     const month = now.getMonth();
     const year = now.getFullYear();
 
     const monthlyRevenue = payments
-      .filter((payment) => payment.status === 'paid' && payment.paidDate)
+      .filter((payment) => payment.status === 'paid')
       .filter((payment) => {
-        const paidDate = new Date(payment.paidDate);
-        return paidDate.getMonth() === month && paidDate.getFullYear() === year;
+        const referenceDate = payment.paidDate ? new Date(payment.paidDate) : new Date(payment.dueDate);
+        return referenceDate.getMonth() === month && referenceDate.getFullYear() === year;
       })
       .reduce((sum, payment) => sum + payment.totalAmount, 0);
+
+    const ownerCards = owners.map((owner) => {
+      const subscription = subscriptionsByOwner.get(owner.id);
+      const subscriptionStatus: OwnerSubscriptionRecord['status'] | 'not_configured' = subscription?.status ?? 'not_configured';
+      return {
+        id: owner.id,
+        name: owner.full_name ?? owner.email ?? 'Owner',
+        email: owner.email ?? '',
+        phone: owner.phone ?? '',
+        city: owner.city ?? '',
+        pgName: owner.pg_name ?? '',
+        propertyCount: propertyCountByOwner.get(owner.id) ?? 0,
+        tenantCount: tenantCountByOwner.get(owner.id) ?? 0,
+        subscriptionStatus,
+        planCode: subscription?.planCode ?? 'starter',
+      };
+    });
+
+    const activity = [
+      ...owners.map((owner) => ({
+        id: `owner-${owner.id}`,
+        label: 'Owner Account',
+        detail: `${owner.full_name ?? owner.email ?? 'Owner'} joined the platform`,
+        createdAt: owner.created_at ?? new Date().toISOString(),
+      })),
+      ...support.map((ticket) => ({
+        id: `support-${ticket.id}`,
+        label: 'Support Ticket',
+        detail: `${ticket.subject} (${ticket.status})`,
+        createdAt: ticket.createdAt,
+      })),
+    ]
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .slice(0, 40);
 
     return {
       profile,
       stats: {
+        totalOwners: owners.length,
         totalProperties: properties.length,
         totalTenants: tenants.length,
-        pendingPayments: payments.filter((payment) => payment.status !== 'paid').length,
-        openTickets: maintenance.filter((ticket) => ticket.status === 'open').length,
+        activeSubscriptions: subscriptionRecords.filter((subscription) => subscription.status === 'active' || subscription.status === 'trialing').length,
+        openSupportTickets: support.filter((ticket) => ticket.status === 'open' || ticket.status === 'in_progress').length,
         monthlyRevenue,
       },
-      tenants: tenants.slice(0, 8),
-      maintenance: maintenance.slice(0, 8),
+      owners: ownerCards,
+      subscriptions: subscriptionRecords,
+      support,
+      activity,
     };
+  },
+
+  async updateOwnerSubscription(ownerId: string, input: {
+    planCode?: string;
+    status?: OwnerSubscriptionRecord['status'];
+    billingCycle?: OwnerSubscriptionRecord['billingCycle'];
+    amount?: number;
+    currency?: string;
+    seats?: number;
+    renewsAt?: string;
+  }): Promise<OwnerSubscriptionRecord> {
+    const context = await getCurrentUserContext();
+    if (!context.isPlatformAdmin) {
+      throw new Error('Platform admin access is required.');
+    }
+
+    const payload: Record<string, unknown> = {};
+    if (input.planCode !== undefined) payload.plan_code = input.planCode;
+    if (input.status !== undefined) payload.status = input.status;
+    if (input.billingCycle !== undefined) payload.billing_cycle = input.billingCycle;
+    if (input.amount !== undefined) payload.amount = input.amount;
+    if (input.currency !== undefined) payload.currency = input.currency;
+    if (input.seats !== undefined) payload.seats = input.seats;
+    if (input.renewsAt !== undefined) payload.renews_at = input.renewsAt;
+
+    const { data, error } = await supabase
+      .from('owner_subscriptions')
+      .update(payload)
+      .eq('owner_id', ownerId)
+      .select('*')
+      .single<OwnerSubscriptionRow>();
+
+    if (error) {
+      throw error;
+    }
+
+    return mapOwnerSubscription(data);
+  },
+
+  async updateSupportTicketStatus(ticketId: string, status: SupportTicketStatus, assignedTo?: string | null): Promise<SupportTicketRecord> {
+    const context = await getCurrentUserContext();
+    if (!context.isPlatformAdmin) {
+      throw new Error('Platform admin access is required.');
+    }
+
+    const payload: Record<string, unknown> = {
+      status,
+      resolved_at: status === 'resolved' || status === 'closed' ? new Date().toISOString() : null,
+    };
+
+    if (assignedTo !== undefined) {
+      payload.assigned_to = assignedTo;
+    }
+
+    const { data, error } = await supabase
+      .from('support_tickets')
+      .update(payload)
+      .eq('id', ticketId)
+      .select('*')
+      .single<SupportTicketRow>();
+
+    if (error) {
+      throw error;
+    }
+
+    const { data: comments, error: commentError } = await supabase
+      .from('support_ticket_comments')
+      .select('*')
+      .eq('ticket_id', ticketId)
+      .order('created_at', { ascending: true })
+      .returns<SupportTicketCommentRow[]>();
+
+    if (commentError) {
+      throw commentError;
+    }
+
+    return mapSupportTicket(data, comments ?? []);
+  },
+
+  async getAdminOwnerDetailedView(ownerId: string) {
+    const context = await getCurrentUserContext();
+    if (!context.isPlatformAdmin) {
+      throw new Error('Platform admin access is required.');
+    }
+
+    // Fetch Properties
+    const { data: properties, error: propsError } = await supabase
+      .from('properties')
+      .select('*')
+      .eq('owner_id', ownerId)
+      .order('created_at', { ascending: false });
+
+    if (propsError) throw propsError;
+
+    // Fetch Tenants
+    const { data: tenants, error: tenantsError } = await supabase
+      .from('tenants')
+      .select('*')
+      .eq('owner_id', ownerId)
+      .order('created_at', { ascending: false });
+
+    if (tenantsError) throw tenantsError;
+
+    // Fetch Subscription State
+    const { data: subscription, error: subError } = await supabase
+      .from('owner_subscriptions')
+      .select('*')
+      .eq('owner_id', ownerId)
+      .maybeSingle();
+
+    // Do not throw on subError because it might legitimately be missing
+
+    return {
+      properties: properties ?? [],
+      tenants: tenants ?? [],
+      subscription: subscription || null,
+    };
+  },
+
+  async deleteOwnerProfile(ownerId: string): Promise<void> {
+    const context = await getCurrentUserContext();
+    if (!context.isPlatformAdmin) throw new Error('Platform admin access is required.');
+
+    // RLS and cascades handles the heavy lifting, deleting the profile natively purges properties/tenants via foreign keys.
+    const { error } = await supabase
+      .from('profiles')
+      .delete()
+      .eq('id', ownerId);
+
+    if (error) throw error;
   },
 };

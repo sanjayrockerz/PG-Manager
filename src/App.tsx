@@ -11,7 +11,8 @@ import { Settings } from './components/Settings';
 import { Properties } from './components/Properties';
 import { Notifications } from './components/Notifications';
 import { Pricing } from './components/Pricing';
-import { MobileMockup } from './components/MobileMockup';
+import { Subscriptions } from './components/Subscriptions';
+import { Support } from './components/Support';
 import { AdminSection } from './components/AdminSection';
 import { TenantPortal } from './components/TenantPortal';
 import { Sidebar } from './components/Sidebar';
@@ -19,6 +20,8 @@ import { MobileNav } from './components/MobileNav';
 import { Header } from './components/Header';
 import { OTPLogin } from './components/OTPLogin';
 import { OTPSignup } from './components/OTPSignup';
+import { LocalizationProvider } from './contexts/LocalizationContext';
+import { isPlatformAdminRole, isScopedOwnerRole } from './utils/roles';
 
 function AppContent() {
   const { user, isLoading } = useAuth();
@@ -37,20 +40,22 @@ function AppContent() {
       setSelectedTenantId(null);
     }
 
-    if ((user.role === 'admin' || user.role === 'super_admin') && activeTab !== 'admin-section' && activeTab !== 'tenant-portal') {
+    if (isPlatformAdminRole(user.role) && activeTab !== 'admin-section' && activeTab !== 'tenant-portal') {
       setActiveTab('admin-section');
       setSelectedTenantId(null);
     }
 
-    if (user.role === 'owner' && (activeTab === 'admin-section' || activeTab === 'tenant-portal')) {
-      setActiveTab('dashboard');
-      setSelectedTenantId(null);
-    }
   }, [user, activeTab]);
 
   const setActiveTabWithRoleGuard = (tab: string) => {
     if (!user) {
       setActiveTab(tab);
+      return;
+    }
+
+    if (tab === 'admin-section' && !isPlatformAdminRole(user.role)) {
+      setActiveTab('dashboard');
+      setSelectedTenantId(null);
       return;
     }
 
@@ -60,7 +65,7 @@ function AppContent() {
       return;
     }
 
-    if (user.role === 'admin' || user.role === 'super_admin') {
+    if (isPlatformAdminRole(user.role)) {
       if (tab === 'admin-section' || tab === 'tenant-portal' || tab === 'settings') {
         setActiveTab(tab);
       } else {
@@ -70,8 +75,9 @@ function AppContent() {
       return;
     }
 
-    if (user.role === 'owner' && (tab === 'admin-section' || tab === 'tenant-portal')) {
-      setActiveTab('dashboard');
+    if (isScopedOwnerRole(user.role)) {
+      const allowedTabs = new Set(['dashboard', 'properties', 'tenants', 'payments', 'maintenance', 'announcements', 'support', 'tenant-portal', 'notifications']);
+      setActiveTab(allowedTabs.has(tab) ? tab : 'dashboard');
       setSelectedTenantId(null);
       return;
     }
@@ -130,12 +136,22 @@ function AppContent() {
         return <Settings />;
       case 'notifications':
         return <Notifications onBack={() => setActiveTab('dashboard')} />;
-      case 'mobile-mockup':
-        return <MobileMockup />;
       case 'pricing':
         return <Pricing />;
-      case 'admin-section':
-        return <AdminSection />;
+      case 'subscriptions':
+        return <Subscriptions />;
+      case 'support':
+        return <Support />;
+      case 'admin-dashboard':
+        return isPlatformAdminRole(user.role) ? <AdminSection view="dashboard" onNavigate={(v) => setActiveTab(`admin-${v}`)} /> : <Dashboard />;
+      case 'admin-owners':
+        return isPlatformAdminRole(user.role) ? <AdminSection view="owners" onNavigate={(v) => setActiveTab(`admin-${v}`)} /> : <Dashboard />;
+      case 'admin-subscriptions':
+        return isPlatformAdminRole(user.role) ? <AdminSection view="subscriptions" onNavigate={(v) => setActiveTab(`admin-${v}`)} /> : <Dashboard />;
+      case 'admin-support':
+        return isPlatformAdminRole(user.role) ? <AdminSection view="support" onNavigate={(v) => setActiveTab(`admin-${v}`)} /> : <Dashboard />;
+      case 'admin-activity':
+        return isPlatformAdminRole(user.role) ? <AdminSection view="activity" onNavigate={(v) => setActiveTab(`admin-${v}`)} /> : <Dashboard />;
       case 'tenant-portal':
         return <TenantPortal />;
       default:
@@ -164,7 +180,7 @@ function AppContent() {
           />
           
           <main className="flex-1 overflow-y-auto pb-20 md:pb-0">
-            <div className={activeTab === 'mobile-mockup' ? '' : 'p-4 md:p-6 lg:p-8'}>
+            <div className="p-4 md:p-6 lg:p-8">
               {renderContent()}
             </div>
           </main>
@@ -180,7 +196,9 @@ function AppContent() {
 export default function App() {
   return (
     <AuthProvider>
-      <AppContent />
+      <LocalizationProvider>
+        <AppContent />
+      </LocalizationProvider>
     </AuthProvider>
   );
 }

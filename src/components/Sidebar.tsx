@@ -1,12 +1,14 @@
 import { useState } from 'react';
-import { Home, Users, CreditCard, Wrench, Bell, Settings, X, Building2, DollarSign, Smartphone, Shield, UserCircle, ChevronDown, ChevronRight } from 'lucide-react';
+import { Home, Users, CreditCard, Wrench, Bell, Settings, X, Building2, DollarSign, Shield, UserCircle, ChevronDown, ChevronRight, LifeBuoy, Package } from 'lucide-react';
+import { useLocalization } from '../contexts/LocalizationContext';
+import { isPlatformAdminRole, isScopedOwnerRole } from '../utils/roles';
 
 interface SidebarProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
   sidebarOpen: boolean;
   setSidebarOpen: (open: boolean) => void;
-  userRole?: 'owner' | 'admin' | 'tenant' | 'super_admin';
+  userRole?: 'owner' | 'owner_manager' | 'staff' | 'admin' | 'tenant' | 'super_admin' | 'platform_admin';
 }
 
 const ownerMenuItems = [
@@ -16,33 +18,53 @@ const ownerMenuItems = [
   { id: 'payments', label: 'Payments', icon: CreditCard },
   { id: 'maintenance', label: 'Maintenance', icon: Wrench },
   { id: 'announcements', label: 'Announcements', icon: Bell },
-  { id: 'mobile-mockup', label: 'Mobile Preview', icon: Smartphone },
+  { id: 'support', label: 'Support', icon: LifeBuoy },
+  { id: 'subscriptions', label: 'Subscriptions', icon: Package },
   { id: 'pricing', label: 'Pricing', icon: DollarSign },
 ];
 
+const staffMenuItems = [
+  { id: 'dashboard', label: 'Dashboard', icon: Home },
+  { id: 'properties', label: 'Properties', icon: Building2 },
+  { id: 'tenants', label: 'Tenants', icon: Users },
+  { id: 'payments', label: 'Payments', icon: CreditCard },
+  { id: 'maintenance', label: 'Maintenance', icon: Wrench },
+  { id: 'announcements', label: 'Announcements', icon: Bell },
+  { id: 'support', label: 'Support', icon: LifeBuoy },
+];
+
 const portalMenuItems = [
-  { id: 'admin-section', label: 'Admin Panel', icon: Shield },
   { id: 'tenant-portal', label: 'Tenant Portal', icon: UserCircle },
+];
+
+const adminMenuItems = [
+  { id: 'admin-dashboard', label: 'Platform Analytics', icon: Activity },
+  { id: 'admin-owners', label: 'All Owners', icon: Users },
+  { id: 'admin-subscriptions', label: 'Subscriptions', icon: Package },
+  { id: 'admin-support', label: 'Global Support', icon: LifeBuoy },
 ];
 
 export function Sidebar({ activeTab, setActiveTab, sidebarOpen, setSidebarOpen, userRole = 'owner' }: SidebarProps) {
   const [portalsExpanded, setPortalsExpanded] = useState(false);
+  const { t } = useLocalization();
 
-  const visibleMainMenuItems = userRole === 'owner' ? ownerMenuItems : [];
+  const isPlatformAdmin = isPlatformAdminRole(userRole);
+  const isScopedStaff = isScopedOwnerRole(userRole);
+
+  const visibleMainMenuItems = isPlatformAdmin 
+    ? adminMenuItems 
+    : (userRole === 'owner' ? ownerMenuItems : (isScopedStaff ? staffMenuItems : []));
 
   const visiblePortalMenuItems = portalMenuItems.filter((item) => {
-    if (item.id === 'admin-section') {
-      return userRole === 'admin' || userRole === 'super_admin';
-    }
     if (item.id === 'tenant-portal') {
-      return userRole === 'tenant' || userRole === 'admin' || userRole === 'super_admin';
+      return userRole === 'owner' || userRole === 'tenant' || isScopedStaff || isPlatformAdmin;
     }
     return false;
   });
 
   const showPortalSection = visiblePortalMenuItems.length > 0;
 
-  const isPortalActive = activeTab === 'admin-section' || activeTab === 'tenant-portal';
+  const isPortalActive = activeTab === 'tenant-portal';
 
   return (
     <>
@@ -100,7 +122,18 @@ export function Sidebar({ activeTab, setActiveTab, sidebarOpen, setSidebarOpen, 
                   `}
                 >
                   <Icon className="w-5 h-5" />
-                  <span>{item.label}</span>
+                  <span>{
+                    item.id === 'dashboard' ? t('nav.dashboard', item.label)
+                      : item.id === 'properties' ? t('nav.properties', item.label)
+                        : item.id === 'tenants' ? t('nav.tenants', item.label)
+                          : item.id === 'payments' ? t('nav.payments', item.label)
+                            : item.id === 'maintenance' ? t('nav.maintenance', item.label)
+                              : item.id === 'announcements' ? t('nav.announcements', item.label)
+                                : item.id === 'support' ? t('nav.support', item.label)
+                                  : item.id === 'subscriptions' ? t('nav.subscriptions', item.label)
+                                : item.id === 'pricing' ? t('nav.pricing', item.label)
+                                  : item.label
+                  }</span>
                 </button>
               );
             })}
@@ -124,7 +157,7 @@ export function Sidebar({ activeTab, setActiveTab, sidebarOpen, setSidebarOpen, 
                     `}
                   >
                     <Settings className="w-5 h-5" />
-                    <span className="flex-1 text-left">Portal Sections</span>
+                    <span className="flex-1 text-left">{t('nav.portalSections', 'Portal Sections')}</span>
                     {portalsExpanded ? (
                       <ChevronDown className="w-4 h-4" />
                     ) : (
@@ -156,7 +189,7 @@ export function Sidebar({ activeTab, setActiveTab, sidebarOpen, setSidebarOpen, 
                             `}
                           >
                             <Icon className="w-4 h-4" />
-                            <span>{item.label}</span>
+                            <span>{item.id === 'admin-section' ? t('nav.adminPanel', item.label) : t('nav.tenantPortal', item.label)}</span>
                           </button>
                         );
                       })}
@@ -167,23 +200,25 @@ export function Sidebar({ activeTab, setActiveTab, sidebarOpen, setSidebarOpen, 
             )}
 
             {/* Settings at bottom of menu */}
-            <button
-              onClick={() => {
-                setActiveTab('settings');
-                setSidebarOpen(false);
-              }}
-              className={`
-                w-full flex items-center gap-3 px-4 py-3 rounded-lg
-                transition-colors
-                ${activeTab === 'settings'
-                  ? 'bg-gray-100 text-gray-900 font-semibold' 
-                  : 'text-gray-600 hover:bg-gray-50'
-                }
-              `}
-            >
-              <Settings className="w-5 h-5" />
-              <span>Settings</span>
-            </button>
+            {(userRole === 'owner' || isPlatformAdmin || userRole === 'tenant') && (
+              <button
+                onClick={() => {
+                  setActiveTab('settings');
+                  setSidebarOpen(false);
+                }}
+                className={`
+                  w-full flex items-center gap-3 px-4 py-3 rounded-lg
+                  transition-colors
+                  ${activeTab === 'settings'
+                    ? 'bg-gray-100 text-gray-900 font-semibold' 
+                    : 'text-gray-600 hover:bg-gray-50'
+                  }
+                `}
+              >
+                <Settings className="w-5 h-5" />
+                <span>{t('nav.settings', 'Settings')}</span>
+              </button>
+            )}
           </nav>
 
           {/* Footer */}
