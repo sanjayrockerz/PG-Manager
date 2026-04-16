@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Home, Users, CreditCard, Wrench, Bell, Settings, X, Building2, DollarSign, Shield, UserCircle, ChevronDown, ChevronRight, LifeBuoy, Package } from 'lucide-react';
+import { Home, Users, CreditCard, Wrench, Bell, Settings, X, Building2, DollarSign, Shield, UserCircle, ChevronDown, ChevronRight, LifeBuoy, Package, Activity } from 'lucide-react';
 import { useLocalization } from '../contexts/LocalizationContext';
 import { isPlatformAdminRole, isScopedOwnerRole } from '../utils/roles';
 
