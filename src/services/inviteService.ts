@@ -117,9 +117,13 @@ export const inviteService = {
     const role = displayRoleToProfileRole(input.displayRole);
     const capabilities = capabilitiesToRow(input.displayRole, input.capabilities);
 
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('Not authenticated');
+
     const { data, error } = await supabase
       .from('owner_invites')
       .insert({
+        owner_id: user.id,
         invited_email: input.invitedEmail.trim().toLowerCase(),
         role,
         display_role: input.displayRole,
