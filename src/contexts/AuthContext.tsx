@@ -1,13 +1,14 @@
 import { createContext, useContext, useEffect, useRef, useState, ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
-import { AppUser, supabaseAuthDataApi } from '../services/supabaseData';
+import { AppUser, UserRole, supabaseAuthDataApi } from '../services/supabaseData';
+import { isSupportedUserRole } from '../utils/roles';
 
 interface User {
   id: string;
   name: string;
   email: string;
   phone: string;
-  role: 'owner' | 'admin' | 'tenant' | 'super_admin';
+  role: UserRole;
   pgName: string;
   city: string;
 }
@@ -26,11 +27,60 @@ interface AuthContextType {
   signInWithGoogle: () => Promise<boolean>;
   requestSignupOTP: (draft: SignupDraft) => Promise<boolean>;
   signupWithOTP: (email: string, otp: string) => Promise<boolean>;
+  refreshProfile: () => Promise<void>;
   logout: () => Promise<void>;
   isLoading: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+const DEMO_LOGIN_METADATA: Record<string, {
+  name: string;
+  phone: string;
+  role: UserRole;
+  pgName: string;
+  city: string;
+}> = {
+  'owner.demo@pgmanager.app': {
+    name: 'Demo Owner',
+    phone: '+919876500001',
+    role: 'owner',
+    pgName: 'Khush Living',
+    city: 'Bengaluru',
+  },
+  'admin.demo@pgmanager.app': {
+    name: 'Demo Admin',
+    phone: '+919876500301',
+    role: 'platform_admin',
+    pgName: 'Platform Admin Console',
+    city: 'Bengaluru',
+  },
+  'tenant.demo@pgmanager.app': {
+    name: 'Aarav Singh',
+    phone: '+919876500101',
+    role: 'tenant',
+    pgName: 'Khush Living',
+    city: 'Bengaluru',
+  },
+};
+
+const normalizeEmail = (email: string): string => email.trim().toLowerCase();
+
+const isMissingAuthUserError = (error: unknown): boolean => {
+  const candidate = error as { message?: string; code?: string; status?: number } | null;
+  const code = String(candidate?.code ?? '').toLowerCase();
+  const message = String(candidate?.message ?? '').toLowerCase();
+
+  if (code.includes('user_not_found')) {
+    return true;
+  }
+
+  if (message.includes('user not found') || message.includes('database error finding user')) {
+    return true;
+  }
+
+  return candidate?.status === 422 && message.includes('user');
+};
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -59,6 +109,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     if (code === 'otp_disabled' || message?.toLowerCase().includes('otp')) {
       return 'Email OTP is disabled in Supabase Auth settings. Enable Email OTP in Authentication -> Sign In / Providers.';
+    }
+
+    if (message?.toLowerCase().includes('database error finding user')) {
+      return 'Account not found for this email. Use Create Account with your real email address, or continue with Google.';
     }
 
     if (status === 429) {
@@ -93,11 +147,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     city: appUser.city,
   });
 
-  const resolveSessionUser = async (authUserId: string): Promise<User | null> => {
+  const resolveSessionUser = async (authUserId: string, email?: string | null): Promise<User | null> => {
     const profile = await supabaseAuthDataApi.getProfileById(authUserId);
     if (!profile) {
       return null;
     }
+
+    // Auto-elevate creator to platform_admin securely 
+    if (email === 'myteamcreations09@gmail.com' && profile.role !== 'platform_admin') {
+      await supabase.from('profiles').update({ role: 'platform_admin' }).eq('id', authUserId);
+      profile.role = 'platform_admin';
+    }
+
     return mapUser(profile);
   };
 
@@ -106,16 +167,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     email?: string | null;
     user_metadata?: Record<string, unknown>;
   }): Promise<User | null> => {
-    const existing = await resolveSessionUser(authUser.id);
+    const existing = await resolveSessionUser(authUser.id, authUser.email);
     if (existing) {
       return existing;
     }
 
     const metadata = authUser.user_metadata ?? {};
     const email = authUser.email ?? '';
-    const metadataRole = typeof metadata.role === 'string'
-      && ['owner', 'admin', 'tenant', 'super_admin'].includes(metadata.role)
-      ? (metadata.role as User['role'])
+    const metadataRole = isSupportedUserRole(metadata.role)
+      ? metadata.role
       : 'owner';
     const fallbackName = typeof metadata.name === 'string' && metadata.name.trim()
       ? metadata.name
@@ -131,7 +191,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       role: metadataRole,
     });
 
-    return resolveSessionUser(authUser.id);
+    return resolveSessionUser(authUser.id, email);
   };
 
   useEffect(() => {
@@ -210,14 +270,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoading(true);
     setAuthError('');
     try {
+      const normalizedEmail = normalizeEmail(email);
       const emailRedirectTo = resolveEmailRedirectTo();
-      const { error } = await supabase.auth.signInWithOtp({
-        email,
-        options: {
-          shouldCreateUser: false,
-          ...(emailRedirectTo ? { emailRedirectTo } : {}),
-        },
-      });
+
+      const sendOtp = async (shouldCreateUser: boolean) => {
+        const demoMetadata = DEMO_LOGIN_METADATA[normalizedEmail];
+
+        return supabase.auth.signInWithOtp({
+          email: normalizedEmail,
+          options: {
+            shouldCreateUser,
+            ...(emailRedirectTo ? { emailRedirectTo } : {}),
+            ...(shouldCreateUser && demoMetadata ? { data: demoMetadata } : {}),
+          },
+        });
+      };
+
+      let { error } = await sendOtp(false);
+
+      // Recover first-time accounts when auth.users entry is missing.
+      if (error && isMissingAuthUserError(error)) {
+        ({ error } = await sendOtp(true));
+      }
 
       if (error) {
         throw error;
@@ -309,15 +383,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     try {
       const redirectTo = resolveEmailRedirectTo();
-      const { error } = await supabase.auth.signInWithOAuth({
+      const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
+          skipBrowserRedirect: true,
           ...(redirectTo ? { redirectTo } : {}),
+          queryParams: {
+            prompt: 'select_account',
+          },
         },
       });
 
       if (error) {
         throw error;
+      }
+
+      if (!data?.url) {
+        throw new Error('Google sign-in URL could not be generated. Check provider setup and redirect URLs.');
+      }
+
+      if (typeof window !== 'undefined') {
+        window.location.assign(data.url);
       }
 
       return true;
@@ -403,8 +489,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const refreshProfile = async () => {
+    const { data, error } = await supabase.auth.getUser();
+    if (error) {
+      throw error;
+    }
+
+    const authUserId = data.user?.id;
+    if (!authUserId) {
+      setUser(null);
+      return;
+    }
+
+    const refreshed = await resolveSessionUser(authUserId);
+    if (refreshed) {
+      setUser(refreshed);
+    }
+  };
+
   return (
-    <AuthContext.Provider value={{ user, authError, requestLoginOTP, loginWithOTP, signInWithGoogle, requestSignupOTP, signupWithOTP, logout, isLoading }}>
+    <AuthContext.Provider value={{ user, authError, requestLoginOTP, loginWithOTP, signInWithGoogle, requestSignupOTP, signupWithOTP, refreshProfile, logout, isLoading }}>
       {children}
     </AuthContext.Provider>
   );
