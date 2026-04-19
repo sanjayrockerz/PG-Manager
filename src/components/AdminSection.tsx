@@ -39,11 +39,11 @@ function formatDate(value: string): string {
 }
 
 interface AdminSectionProps {
-  view: AdminView;
+  view?: AdminView;
   onNavigate?: (view: AdminView) => void;
 }
 
-export function AdminSection({ view, onNavigate }: AdminSectionProps) {
+export function AdminSection({ view = 'dashboard', onNavigate }: AdminSectionProps = {}) {
   const { t } = useLocalization();
   const [summary, setSummary] = useState<AdminSummary | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -299,7 +299,7 @@ export function AdminSection({ view, onNavigate }: AdminSectionProps) {
              <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
                 <div>
                   <h1 className="text-2xl font-bold text-gray-900">{parentOwner.name}</h1>
-                  <p className="text-sm text-gray-500">{parentOwner.email} • {parentOwner.role}</p>
+                  <p className="text-sm text-gray-500">{parentOwner.email}</p>
                   <div className="mt-4 flex gap-4 text-sm text-gray-600">
                      <div><span className="font-semibold text-gray-900">City:</span> {parentOwner.city || '-'}</div>
                      <div><span className="font-semibold text-gray-900">Brand:</span> {parentOwner.pgName || '-'}</div>
@@ -535,3 +535,5 @@ export function AdminSection({ view, onNavigate }: AdminSectionProps) {
     </div>
   );
 }
+
+

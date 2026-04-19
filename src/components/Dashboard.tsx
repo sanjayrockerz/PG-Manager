@@ -68,6 +68,23 @@ const formatDeltaPercent = (value: number): string => {
   return `${sign}${value.toFixed(1)}%`;
 };
 
+type StatTone = 'success' | 'warning' | 'error';
+type StatTrend = 'up' | 'down';
+
+interface DashboardStat {
+  label: string;
+  value: string;
+  context: string;
+  trend: StatTrend;
+  status: string;
+  statusTone: StatTone;
+  icon: typeof Users;
+  iconClassName: string;
+  iconWrapClassName: string;
+  accentClassName: string;
+  accentDotClassName: string;
+}
+
 const resolveActivityVisual = (action: string, detail: string) => {
   const combined = `${action} ${detail}`.toLowerCase();
 
@@ -183,7 +200,7 @@ export function Dashboard() {
   const pendingCount = snapshot.recentPayments.filter((payment) => payment.status !== 'paid').length;
   const overdueCount = snapshot.recentPayments.filter((payment) => payment.status === 'overdue').length;
 
-  const stats = [
+  const stats: DashboardStat[] = [
     {
       label: 'Monthly Revenue',
       value: formatCurrencyINR(snapshot.monthlyRevenue),
@@ -242,7 +259,7 @@ export function Dashboard() {
     },
   ];
 
-  const getStatusClass = (tone: 'success' | 'warning' | 'error') => {
+  const getStatusClass = (tone: StatTone) => {
     if (tone === 'success') {
       return 'bg-green-50 text-green-700';
     }

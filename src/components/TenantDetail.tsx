@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Phone, Mail, MapPin, Calendar, CreditCard, FileText, AlertCircle, Home } from 'lucide-react';
 import { useProperty } from '../contexts/PropertyContext';
 import { MaintenanceTicketRecord, PaymentRecord, TenantRecord, supabaseOwnerDataApi } from '../services/supabaseData';
+import { getPayments, getTenants, isDemoModeEnabled } from '../services/dataService';
 import { useRealtimeRefresh } from '../hooks/useRealtimeRefresh';
 import { LiveStatusBadge } from './LiveStatusBadge';
 
@@ -12,6 +13,7 @@ interface TenantDetailProps {
 
 export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
   const { properties } = useProperty();
+  const isDemoMode = isDemoModeEnabled();
   const [activeTab, setActiveTab] = useState('payments');
   const [tenant, setTenant] = useState<TenantRecord | null>(null);
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
@@ -23,16 +25,19 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
       setIsLoading(true);
       setError('');
       try {
-        const tenantData = await supabaseOwnerDataApi.getTenantById(tenantId);
+        const tenantList = await getTenants('all');
+        const tenantData = tenantList.find((entry) => entry.id === tenantId) ?? null;
         if (!tenantData) {
           setTenant(null);
           return;
         }
 
-        const [paymentData, maintenanceData] = await Promise.all([
-          supabaseOwnerDataApi.listPaymentsForTenant(tenantData.id),
-          supabaseOwnerDataApi.listMaintenanceForTenant(tenantData.id, tenantData.name),
-        ]);
+        const allPayments = await getPayments('all');
+        const paymentData = allPayments.filter((payment) => payment.tenantId === tenantData.id);
+
+        const maintenanceData = isDemoMode
+          ? []
+          : await supabaseOwnerDataApi.listMaintenanceForTenant(tenantData.id, tenantData.name);
 
         setTenant(tenantData);
         setPayments(paymentData);
@@ -42,7 +47,7 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
       } finally {
         setIsLoading(false);
       }
-    }, [tenantId]);
+    }, [isDemoMode, tenantId]);
 
   useEffect(() => {
     void loadTenantData();
@@ -52,6 +57,7 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
     key: `tenant-detail-${tenantId}`,
     tables: ['tenants', 'payments', 'payment_charges', 'maintenance_tickets', 'maintenance_notes', 'rooms'],
     onChange: loadTenantData,
+    enabled: !isDemoMode,
   });
 
   const property = useMemo(() => {
@@ -108,7 +114,7 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
           <h1 className="text-gray-900">Tenant Details</h1>
           <p className="text-gray-600 mt-1">{tenant.name}</p>
           <div className="mt-3">
-            <LiveStatusBadge lastUpdatedAt={lastUpdatedAt} isSyncing={isSyncing} label="Tenant snapshot live" />
+            <LiveStatusBadge lastUpdatedAt={lastUpdatedAt} isSyncing={isSyncing} label={isDemoMode ? 'Demo tenant snapshot' : 'Tenant snapshot live'} />
           </div>
         </div>
       </div>
