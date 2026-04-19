@@ -7,7 +7,6 @@
 
   🔗 https://khush-project.vercel.app
 
-  ---
 
   ## 🧪 Demo Mode Feature
 
