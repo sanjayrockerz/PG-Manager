@@ -2,12 +2,39 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Search, Download, Plus, IndianRupee, CheckCircle, Clock, XCircle, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useProperty } from '../contexts/PropertyContext';
-import { PaymentRecord, supabaseOwnerDataApi } from '../services/supabaseData';
+import type { PaymentRecord } from '../services/supabaseData';
+import { addPaymentChargeRecord, getPayments, isDemoModeEnabled, updatePaymentStatusRecord } from '../services/dataService';
 import { useRealtimeRefresh } from '../hooks/useRealtimeRefresh';
 import { LiveStatusBadge } from './LiveStatusBadge';
 
+const getPaymentsCacheKey = (selectedProperty: string | 'all'): string => `pg-manager:payments-cache:${isDemoModeEnabled() ? 'demo' : 'live'}:${selectedProperty}`;
+
+const readCachedPayments = (selectedProperty: string | 'all'): PaymentRecord[] | null => {
+  try {
+    const raw = localStorage.getItem(getPaymentsCacheKey(selectedProperty));
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw) as PaymentRecord[];
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
+const writeCachedPayments = (selectedProperty: string | 'all', payments: PaymentRecord[]): void => {
+  try {
+    localStorage.setItem(getPaymentsCacheKey(selectedProperty), JSON.stringify(payments));
+  } catch {
+    // Best-effort cache; ignore storage failures.
+  }
+};
+
+const formatCurrencyINR = (value: number): string => `Rs\u00A0${value.toLocaleString('en-IN')}`;
+
 export function Payments() {
   const { selectedProperty, properties } = useProperty();
+  const isDemoMode = isDemoModeEnabled();
   const [filterStatus, setFilterStatus] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [dateFilter, setDateFilter] = useState('current');
@@ -26,6 +53,14 @@ export function Payments() {
     amount: 0,
   });
 
+  const parseCurrencyInputValue = (value: string): number => {
+    const digits = value.replace(/\D/g, '');
+    if (!digits) {
+      return 0;
+    }
+    return Number(digits.replace(/^0+(?=\d)/, ''));
+  };
+
   const getStatusClasses = (status: 'paid' | 'pending' | 'overdue') => {
     if (status === 'paid') {
       return 'bg-green-100 text-green-700';
@@ -36,27 +71,54 @@ export function Payments() {
     return 'bg-red-100 text-red-700';
   };
 
-  const loadPayments = useCallback(async () => {
-    setIsLoading(true);
+  const getStatusOptionStyle = (status: 'paid' | 'pending' | 'overdue') => {
+    if (status === 'paid') {
+      return { backgroundColor: '#dcfce7', color: '#166534' };
+    }
+    if (status === 'pending') {
+      return { backgroundColor: '#fef9c3', color: '#a16207' };
+    }
+    return { backgroundColor: '#fee2e2', color: '#b91c1c' };
+  };
+
+  const loadPayments = useCallback(async (showLoader: boolean) => {
+    if (showLoader) {
+      setIsLoading(true);
+    }
     setError('');
     try {
-      const list = await supabaseOwnerDataApi.listPayments(selectedProperty);
+      const list = await getPayments(selectedProperty);
       setPayments(list);
     } catch {
-      setError('Unable to load payments. Please check Supabase setup.');
+      setError('Unable to load payments.');
     } finally {
-      setIsLoading(false);
+      if (showLoader) {
+        setIsLoading(false);
+      }
     }
   }, [selectedProperty]);
 
   useEffect(() => {
-    void loadPayments();
-  }, [loadPayments]);
+    const cached = readCachedPayments(selectedProperty);
+    if (cached) {
+      setPayments(cached);
+      setIsLoading(false);
+      void loadPayments(false);
+      return;
+    }
+
+    void loadPayments(true);
+  }, [loadPayments, selectedProperty]);
+
+  useEffect(() => {
+    writeCachedPayments(selectedProperty, payments);
+  }, [selectedProperty, payments]);
 
   const { lastUpdatedAt, isSyncing } = useRealtimeRefresh({
     key: `payments-${selectedProperty}`,
     tables: ['payments', 'payment_charges', 'tenants', 'notifications'],
-    onChange: loadPayments,
+    onChange: () => loadPayments(false),
+    enabled: !isDemoMode,
   });
 
   const getPropertyName = (propertyId: string) => {
@@ -107,12 +169,13 @@ export function Payments() {
   const handleStatusChange = async (paymentId: string, newStatus: 'paid' | 'pending' | 'overdue') => {
     setError('');
     try {
-      const updated = await supabaseOwnerDataApi.updatePaymentStatus(paymentId, newStatus);
+      const updated = await updatePaymentStatusRecord(paymentId, newStatus);
       setPayments((prev) => prev.map((entry) => (entry.id === paymentId ? updated : entry)));
       toast.success(`Payment marked ${newStatus}`);
-    } catch {
-      setError('Unable to update payment status.');
-      toast.error('Failed to update payment status');
+    } catch (saveError) {
+      const message = saveError instanceof Error ? saveError.message : 'Unable to update payment status.';
+      setError(message);
+      toast.error(message);
     }
   };
 
@@ -136,7 +199,7 @@ export function Payments() {
     setIsSaving(true);
     setError('');
     try {
-      const updated = await supabaseOwnerDataApi.addPaymentCharge(selectedPayment.id, {
+      const updated = await addPaymentChargeRecord(selectedPayment.id, {
         type: chargeFormData.type,
         customType: chargeFormData.type === 'custom' ? chargeFormData.customType : undefined,
         description: chargeFormData.description,
@@ -146,9 +209,10 @@ export function Payments() {
       setShowAddChargeModal(false);
       setSelectedPayment(null);
       toast.success('Charge added successfully');
-    } catch {
-      setError('Unable to add charge.');
-      toast.error('Failed to add charge');
+    } catch (saveError) {
+      const message = saveError instanceof Error ? saveError.message : 'Unable to add charge.';
+      setError(message);
+      toast.error(message);
     } finally {
       setIsSaving(false);
     }
@@ -177,15 +241,15 @@ export function Payments() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="flex flex-col gap-4 rounded-xl border border-gray-200 bg-white p-6 shadow-sm sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-gray-900">Payments</h1>
-          <p className="text-gray-600 mt-1">Track and manage rent payments and charges</p>
+          <h1 className="text-2xl font-semibold text-gray-900">Payments</h1>
+          <p className="mt-1 text-sm text-gray-500">Track and manage rent payments and charges</p>
           <div className="mt-3">
-            <LiveStatusBadge lastUpdatedAt={lastUpdatedAt} isSyncing={isSyncing} label="Payment stream" />
+            <LiveStatusBadge lastUpdatedAt={lastUpdatedAt} isSyncing={isSyncing} label={isDemoMode ? 'Demo data' : 'Payment stream'} />
           </div>
         </div>
-        <button onClick={exportCsv} className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+        <button onClick={exportCsv} className="flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-white transition-colors hover:bg-indigo-700">
           <Download className="w-5 h-5" />
           <span>Export</span>
         </button>
@@ -197,57 +261,57 @@ export function Payments() {
         </div>
       )}
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white rounded-xl p-4 lg:p-6 border border-gray-200">
-          <div className="flex items-start justify-between">
+      <div className="grid grid-cols-2 gap-6 lg:grid-cols-4">
+        <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md">
+          <div className="flex items-center justify-between gap-4">
             <div>
               <p className="text-gray-600 text-sm">Total Amount</p>
-              <p className="text-gray-900 mt-2">Rs {stats.total.toLocaleString()}</p>
+              <p className="text-gray-900 mt-2 text-[clamp(1.5rem,2.2vw,2rem)] leading-none font-semibold whitespace-nowrap tabular-nums">{formatCurrencyINR(stats.total)}</p>
             </div>
-            <div className="p-3 bg-blue-50 rounded-lg">
-              <IndianRupee className="w-5 h-5 text-blue-600" />
+            <div className="w-14 h-14 p-2 bg-blue-50 rounded-xl flex items-center justify-center">
+              <IndianRupee className="w-7 h-7 text-blue-600" />
             </div>
           </div>
         </div>
 
-        <div className="bg-white rounded-xl p-4 lg:p-6 border border-gray-200">
-          <div className="flex items-start justify-between">
+        <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md">
+          <div className="flex items-center justify-between gap-4">
             <div>
               <p className="text-gray-600 text-sm">Paid</p>
-              <p className="text-gray-900 mt-2">Rs {stats.paid.toLocaleString()}</p>
+              <p className="text-gray-900 mt-2 text-[clamp(1.5rem,2.2vw,2rem)] leading-none font-semibold whitespace-nowrap tabular-nums">{formatCurrencyINR(stats.paid)}</p>
             </div>
-            <div className="p-3 bg-green-50 rounded-lg">
-              <CheckCircle className="w-5 h-5 text-green-600" />
+            <div className="w-14 h-14 p-2 bg-green-50 rounded-xl flex items-center justify-center">
+              <CheckCircle className="w-7 h-7 text-green-600" />
             </div>
           </div>
         </div>
 
-        <div className="bg-white rounded-xl p-4 lg:p-6 border border-gray-200">
-          <div className="flex items-start justify-between">
+        <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md">
+          <div className="flex items-center justify-between gap-4">
             <div>
               <p className="text-gray-600 text-sm">Pending</p>
-              <p className="text-gray-900 mt-2">Rs {stats.pending.toLocaleString()}</p>
+              <p className="text-gray-900 mt-2 text-[clamp(1.5rem,2.2vw,2rem)] leading-none font-semibold whitespace-nowrap tabular-nums">{formatCurrencyINR(stats.pending)}</p>
             </div>
-            <div className="p-3 bg-yellow-50 rounded-lg">
-              <Clock className="w-5 h-5 text-yellow-600" />
+            <div className="w-14 h-14 p-2 bg-yellow-50 rounded-xl flex items-center justify-center">
+              <Clock className="w-7 h-7 text-yellow-600" />
             </div>
           </div>
         </div>
 
-        <div className="bg-white rounded-xl p-4 lg:p-6 border border-gray-200">
-          <div className="flex items-start justify-between">
+        <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md">
+          <div className="flex items-center justify-between gap-4">
             <div>
               <p className="text-gray-600 text-sm">Overdue</p>
-              <p className="text-gray-900 mt-2">Rs {stats.overdue.toLocaleString()}</p>
+              <p className="text-gray-900 mt-2 text-[clamp(1.5rem,2.2vw,2rem)] leading-none font-semibold whitespace-nowrap tabular-nums">{formatCurrencyINR(stats.overdue)}</p>
             </div>
-            <div className="p-3 bg-red-50 rounded-lg">
-              <XCircle className="w-5 h-5 text-red-600" />
+            <div className="w-14 h-14 p-2 bg-red-50 rounded-xl flex items-center justify-center">
+              <XCircle className="w-7 h-7 text-red-600" />
             </div>
           </div>
         </div>
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-4">
+      <div className="space-y-4 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
           <input
@@ -255,7 +319,7 @@ export function Payments() {
             placeholder="Search by tenant or property..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full rounded-lg border border-gray-300 py-2 pl-10 pr-4 focus:outline-none focus:ring-2 focus:ring-indigo-500"
           />
         </div>
 
@@ -264,7 +328,7 @@ export function Payments() {
             <button
               key={status}
               onClick={() => setFilterStatus(status)}
-              className={`px-4 py-2 rounded-lg text-sm whitespace-nowrap transition-colors ${filterStatus === status ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+              className={`whitespace-nowrap rounded-lg px-4 py-2 text-sm transition-colors ${filterStatus === status ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
             >
               {status.charAt(0).toUpperCase() + status.slice(1)}
             </button>
@@ -272,7 +336,7 @@ export function Payments() {
         </div>
 
         <div className="flex flex-col sm:flex-row gap-2">
-          <select value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} className="flex-1 px-4 py-2 border border-gray-300 rounded-lg bg-white">
+          <select value={dateFilter} onChange={(e) => setDateFilter(e.target.value)} className="flex-1 rounded-lg border border-gray-300 bg-white px-4 py-2">
             <option value="current">Current Month</option>
             <option value="last">Last Month</option>
             <option value="all">All Time</option>
@@ -281,61 +345,66 @@ export function Payments() {
 
           {dateFilter === 'custom' && (
             <>
-              <input type="date" value={customDateRange.start} onChange={(e) => setCustomDateRange({ ...customDateRange, start: e.target.value })} className="px-4 py-2 border border-gray-300 rounded-lg" />
-              <input type="date" value={customDateRange.end} onChange={(e) => setCustomDateRange({ ...customDateRange, end: e.target.value })} className="px-4 py-2 border border-gray-300 rounded-lg" />
+              <input type="date" value={customDateRange.start} onChange={(e) => setCustomDateRange({ ...customDateRange, start: e.target.value })} className="rounded-lg border border-gray-300 px-4 py-2" />
+              <input type="date" value={customDateRange.end} onChange={(e) => setCustomDateRange({ ...customDateRange, end: e.target.value })} className="rounded-lg border border-gray-300 px-4 py-2" />
             </>
           )}
         </div>
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                <th className="px-4 py-3 text-left text-xs text-gray-600">Tenant Name</th>
-                {selectedProperty === 'all' && <th className="px-4 py-3 text-left text-xs text-gray-600">Property</th>}
-                <th className="px-4 py-3 text-left text-xs text-gray-600">Room Number</th>
-                <th className="px-4 py-3 text-left text-xs text-gray-600">Monthly Rent</th>
-                <th className="px-4 py-3 text-left text-xs text-gray-600">Extra Charges</th>
-                <th className="px-4 py-3 text-left text-xs text-gray-600">Total Amount</th>
-                <th className="px-4 py-3 text-left text-xs text-gray-600">Due Date</th>
-                <th className="px-4 py-3 text-left text-xs text-gray-600">Status</th>
-                <th className="px-4 py-3 text-left text-xs text-gray-600">Actions</th>
+                <th className="px-4 py-3 text-left text-xs uppercase tracking-wide text-gray-500">Tenant Name</th>
+                {selectedProperty === 'all' && <th className="px-4 py-3 text-left text-xs uppercase tracking-wide text-gray-500">Property</th>}
+                <th className="px-4 py-3 text-left text-xs uppercase tracking-wide text-gray-500">Room Number</th>
+                <th className="px-4 py-3 text-right text-xs uppercase tracking-wide text-gray-500">Monthly Rent</th>
+                <th className="px-4 py-3 text-right text-xs uppercase tracking-wide text-gray-500">Extra Charges</th>
+                <th className="px-4 py-3 text-right text-xs uppercase tracking-wide text-gray-500">Total Amount</th>
+                <th className="px-4 py-3 text-right text-xs uppercase tracking-wide text-gray-500">Due Date</th>
+                <th className="px-4 py-3 text-left text-xs uppercase tracking-wide text-gray-500">Status</th>
+                <th className="px-4 py-3 text-left text-xs uppercase tracking-wide text-gray-500">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
               {isLoading ? (
                 <tr>
-                  <td colSpan={selectedProperty === 'all' ? 9 : 8} className="px-4 py-10 text-center text-sm text-gray-500">Loading payments...</td>
+                  <td colSpan={selectedProperty === 'all' ? 9 : 8} className="px-4 py-8 text-center text-sm text-gray-500">Loading payments...</td>
                 </tr>
               ) : filteredPayments.length === 0 ? (
                 <tr>
-                  <td colSpan={selectedProperty === 'all' ? 9 : 8} className="px-4 py-10 text-center text-sm text-gray-500">No payment records found.</td>
+                  <td colSpan={selectedProperty === 'all' ? 9 : 8} className="px-4 py-8 text-center text-sm text-gray-500">No payment records found.</td>
                 </tr>
               ) : (
                 filteredPayments.map((payment) => (
-                  <tr key={payment.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 text-sm text-gray-900">{payment.tenant}</td>
-                    {selectedProperty === 'all' && <td className="px-4 py-3 text-sm text-gray-900">{getPropertyName(payment.propertyId)}</td>}
-                    <td className="px-4 py-3 text-sm text-gray-600">{payment.room}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900">Rs {payment.monthlyRent.toLocaleString()}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600">Rs {payment.extraCharges.toLocaleString()}</td>
-                    <td className="px-4 py-3 text-sm text-gray-900">Rs {payment.totalAmount.toLocaleString()}</td>
-                    <td className="px-4 py-3 text-sm text-gray-600">{payment.dueDate}</td>
-                    <td className="px-4 py-3">
+                  <tr key={payment.id} className="hover:bg-gray-50 transition-colors">
+                    <td className="px-4 py-3.5 text-sm text-gray-900 align-top">
+                      <div className="flex min-w-0 flex-col gap-0.5">
+                        <span className="truncate font-medium text-gray-900">{payment.tenant}</span>
+                        <span className="truncate text-xs text-gray-500">Room {payment.room}</span>
+                      </div>
+                    </td>
+                    {selectedProperty === 'all' && <td className="px-4 py-3.5 text-sm text-gray-700 align-top">{getPropertyName(payment.propertyId)}</td>}
+                    <td className="px-4 py-3.5 text-sm text-gray-700 align-top">{payment.room}</td>
+                    <td className="px-4 py-3.5 text-right text-sm text-gray-900 align-top tabular-nums">₹{payment.monthlyRent.toLocaleString()}</td>
+                    <td className="px-4 py-3.5 text-right text-sm text-gray-600 align-top tabular-nums">₹{payment.extraCharges.toLocaleString()}</td>
+                    <td className="px-4 py-3.5 text-right text-sm text-gray-900 align-top tabular-nums">₹{payment.totalAmount.toLocaleString()}</td>
+                    <td className="px-4 py-3.5 text-right text-sm text-gray-600 align-top tabular-nums">{payment.dueDate}</td>
+                    <td className="px-4 py-3.5 align-top">
                       <select
                         value={payment.status}
                         onChange={(e) => void handleStatusChange(payment.id, e.target.value as 'paid' | 'pending' | 'overdue')}
-                        className={`px-3 py-1 rounded-lg text-xs border border-gray-300 cursor-pointer font-medium ${getStatusClasses(payment.status)}`}
+                        className={`px-3 py-1 rounded-full text-xs border border-gray-300 cursor-pointer font-medium ${getStatusClasses(payment.status)}`}
                       >
-                        <option value="paid">Paid</option>
-                        <option value="pending">Pending</option>
-                        <option value="overdue">Overdue</option>
+                        <option value="paid" style={getStatusOptionStyle('paid')}>Paid</option>
+                        <option value="pending" style={getStatusOptionStyle('pending')}>Pending</option>
+                        <option value="overdue" style={getStatusOptionStyle('overdue')}>Overdue</option>
                       </select>
                     </td>
-                    <td className="px-4 py-3">
-                      <button onClick={() => handleAddCharge(payment)} className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs hover:bg-blue-700 transition-colors flex items-center gap-1">
+                    <td className="px-4 py-3.5 align-top">
+                      <button onClick={() => handleAddCharge(payment)} className="flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs text-white transition-colors hover:bg-indigo-700">
                         <Plus className="w-3 h-3" />
                         <span>Add Charge</span>
                       </button>
@@ -349,14 +418,14 @@ export function Payments() {
       </div>
 
       {showAddChargeModal && selectedPayment && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={() => setShowAddChargeModal(false)}>
-          <div className="bg-white rounded-xl max-w-md w-full" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowAddChargeModal(false)}>
+          <div className="w-full max-w-md rounded-xl border border-gray-200 bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="p-6 border-b border-gray-200 flex items-center justify-between">
               <div>
-                <h2 className="text-gray-900">Add Extra Charge</h2>
-                <p className="text-sm text-gray-600 mt-1">{selectedPayment.tenant} - Room {selectedPayment.room}</p>
+                <h2 className="text-lg font-medium text-gray-900">Add Extra Charge</h2>
+                <p className="mt-1 text-sm text-gray-600">{selectedPayment.tenant} - Room {selectedPayment.room}</p>
               </div>
-              <button onClick={() => setShowAddChargeModal(false)} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
+              <button onClick={() => setShowAddChargeModal(false)} className="rounded-md p-2 transition-colors hover:bg-gray-100">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -364,7 +433,7 @@ export function Payments() {
             <form onSubmit={(e) => void submitCharge(e)} className="p-6 space-y-4">
               <div className="space-y-2">
                 <label className="text-sm text-gray-700">Charge Type *</label>
-                <select value={chargeFormData.type} onChange={(e) => setChargeFormData({ ...chargeFormData, type: e.target.value })} className="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                <select value={chargeFormData.type} onChange={(e) => setChargeFormData({ ...chargeFormData, type: e.target.value })} className="w-full rounded-lg border border-gray-300 px-4 py-2">
                   <option value="electricity">Electricity Bill</option>
                   <option value="water">Water Bill</option>
                   <option value="maintenance">Maintenance</option>
@@ -377,23 +446,30 @@ export function Payments() {
               {chargeFormData.type === 'custom' && (
                 <div className="space-y-2">
                   <label className="text-sm text-gray-700">Custom Charge Name *</label>
-                  <input type="text" required value={chargeFormData.customType} onChange={(e) => setChargeFormData({ ...chargeFormData, customType: e.target.value })} className="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="e.g., Late Fee" />
+                  <input type="text" required value={chargeFormData.customType} onChange={(e) => setChargeFormData({ ...chargeFormData, customType: e.target.value })} className="w-full rounded-lg border border-gray-300 px-4 py-2" placeholder="e.g., Late Fee" />
                 </div>
               )}
 
               <div className="space-y-2">
                 <label className="text-sm text-gray-700">Description</label>
-                <textarea value={chargeFormData.description} onChange={(e) => setChargeFormData({ ...chargeFormData, description: e.target.value })} className="w-full px-4 py-2 border border-gray-300 rounded-lg" rows={2} placeholder="Optional details" />
+                <textarea value={chargeFormData.description} onChange={(e) => setChargeFormData({ ...chargeFormData, description: e.target.value })} className="w-full rounded-lg border border-gray-300 px-4 py-2" rows={2} placeholder="Optional details" />
               </div>
 
               <div className="space-y-2">
                 <label className="text-sm text-gray-700">Amount *</label>
-                <input type="number" min="0" required value={chargeFormData.amount} onChange={(e) => setChargeFormData({ ...chargeFormData, amount: Number(e.target.value) })} className="w-full px-4 py-2 border border-gray-300 rounded-lg" />
+                <input
+                  type="number"
+                  min="0"
+                  required
+                  value={chargeFormData.amount === 0 ? '' : chargeFormData.amount}
+                  onChange={(e) => setChargeFormData({ ...chargeFormData, amount: parseCurrencyInputValue(e.target.value) })}
+                  className="w-full rounded-lg border border-gray-300 px-4 py-2"
+                />
               </div>
 
               <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-200">
-                <button type="button" onClick={() => setShowAddChargeModal(false)} className="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">Cancel</button>
-                <button type="submit" disabled={isSaving} className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60">
+                <button type="button" onClick={() => setShowAddChargeModal(false)} className="rounded-lg border border-gray-300 bg-white px-6 py-2.5 transition-colors hover:bg-gray-50">Cancel</button>
+                <button type="submit" disabled={isSaving} className="rounded-lg bg-indigo-600 px-6 py-2.5 text-white transition-colors hover:bg-indigo-700 disabled:opacity-60">
                   {isSaving ? 'Adding...' : 'Add Charge'}
                 </button>
               </div>

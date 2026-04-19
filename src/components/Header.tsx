@@ -5,6 +5,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { NotificationRecord, supabaseNotificationApi } from '../services/supabaseData';
 import { useRealtimeRefresh } from '../hooks/useRealtimeRefresh';
 import { isPlatformAdminRole } from '../utils/roles';
+import { isDemoModeEnabled } from '../services/dataService';
+import { ModeToggle } from './ModeToggle';
 
 interface HeaderProps {
   setSidebarOpen: (open: boolean) => void;
@@ -20,9 +22,13 @@ export function Header({ setSidebarOpen, currentPage, onNotificationClick }: Hea
   const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
 
   const isPlatformAdmin = isPlatformAdminRole(user?.role);
+  const isDemoMode = isDemoModeEnabled();
+  const configuredAdminEmail = String((import.meta as any).env?.VITE_MODE_TOGGLE_ADMIN_EMAIL ?? '').trim().toLowerCase();
+  const userEmail = String(user?.email ?? '').trim().toLowerCase();
+  const canToggleMode = isPlatformAdmin || (configuredAdminEmail ? userEmail === configuredAdminEmail : true);
   
-  const currentProperty = selectedProperty === 'all' 
-    ? null 
+  const currentProperty = selectedProperty === 'all'
+    ? null
     : properties.find(p => p.id === selectedProperty);
 
   // Hide property selector on properties page and tenant portal role.
@@ -45,7 +51,7 @@ export function Header({ setSidebarOpen, currentPage, onNotificationClick }: Hea
   };
 
   const loadNotifications = useCallback(async () => {
-    if (!user || user.role === 'tenant') {
+    if (isDemoMode || !user || user.role === 'tenant') {
       setNotifications([]);
       return;
     }
@@ -56,7 +62,7 @@ export function Header({ setSidebarOpen, currentPage, onNotificationClick }: Hea
     } catch {
       setNotifications([]);
     }
-  }, [user]);
+  }, [isDemoMode, user]);
 
   useEffect(() => {
     void loadNotifications();
@@ -72,7 +78,7 @@ export function Header({ setSidebarOpen, currentPage, onNotificationClick }: Hea
     key: 'header-notifications',
     tables: ['notifications'],
     onChange: loadNotifications,
-    enabled: !!user && user.role !== 'tenant',
+    enabled: !isDemoMode && !!user && user.role !== 'tenant',
   });
 
   const unreadCount = useMemo(() => notifications.filter((entry) => !entry.read).length, [notifications]);
@@ -128,65 +134,69 @@ export function Header({ setSidebarOpen, currentPage, onNotificationClick }: Hea
   };
 
   return (
-    <header className="bg-white border-b border-gray-200 px-4 md:px-6 py-4 flex items-center justify-between">
-      <div className="flex items-center gap-4 flex-1">
-        <button
-          onClick={() => setSidebarOpen(true)}
-          className="lg:hidden p-2 hover:bg-gray-100 rounded-lg transition-colors"
-        >
-          <Menu className="w-5 h-5" />
-        </button>
-        
-        {/* Property Selector Dropdown */}
-        {showPropertySelector && (
-          <div className="relative">
-            <select
-              value={selectedProperty}
-              onChange={(e) => setSelectedProperty(e.target.value)}
-              className="appearance-none bg-gradient-to-r from-blue-50 to-purple-50 border-2 border-blue-200 rounded-lg px-4 py-2 pr-10 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer hover:border-blue-300 transition-colors"
-            >
-              <option value="all">All Properties ({properties.length})</option>
-              {properties.map(property => (
-                <option key={property.id} value={property.id}>
-                  {property.name}
-                </option>
-              ))}
-            </select>
-            <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
-              <Building2 className="w-4 h-4 text-blue-600" />
-            </div>
-          </div>
-        )}
+    <header className="bg-white border-b border-gray-200 px-4 md:px-6 py-3">
+      <div className="flex items-center justify-between gap-4 flex-wrap md:flex-nowrap">
+        <div className="flex items-center gap-3 min-w-0">
+          <button
+            onClick={() => setSidebarOpen(true)}
+            className="lg:hidden p-2 hover:bg-gray-100 rounded-lg transition-colors"
+          >
+            <Menu className="w-5 h-5 text-gray-700" />
+          </button>
 
-        {/* Property Info Badge */}
-        {showPropertySelector && currentProperty && (
-          <div className="hidden xl:flex items-center gap-2 px-3 py-1.5 bg-blue-50 rounded-lg border border-blue-200">
-            <span className="text-xs text-gray-600">{currentProperty.city}</span>
-            <span className="text-xs text-gray-400">•</span>
-            <span className="text-xs text-gray-600">{currentProperty.floors} Floors</span>
-            <span className="text-xs text-gray-400">•</span>
-            <span className="text-xs text-gray-600">{currentProperty.totalRooms} Rooms</span>
-          </div>
-        )}
-        
-        <div className="hidden md:flex items-center flex-1 max-w-md">
+          {showPropertySelector && (
+            <div className="relative min-w-[220px]">
+              <select
+                value={selectedProperty}
+                onChange={(e) => setSelectedProperty(e.target.value)}
+                className="appearance-none w-full border border-gray-300 bg-white rounded-lg px-3 py-2.5 pr-20 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                <option value="all">All Properties ({properties.length})</option>
+                {properties.map((property) => (
+                  <option key={property.id} value={property.id}>
+                    {property.name}
+                  </option>
+                ))}
+              </select>
+              <div className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2 text-gray-400">
+                <Building2 className="w-4 h-4" />
+                <ChevronDown className="w-4 h-4" />
+              </div>
+            </div>
+          )}
+
+          {showPropertySelector && currentProperty && (
+            <div className="hidden xl:flex items-center gap-2 text-xs text-gray-500">
+              <span>{currentProperty.city}</span>
+              <span>•</span>
+              <span>{currentProperty.totalRooms} rooms</span>
+            </div>
+          )}
+        </div>
+
+        <div className="order-3 w-full md:order-none md:flex-1 md:max-w-xl">
           <div className="relative w-full">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
             <input
               type="text"
-              placeholder="Search tenants, rooms..."
-              className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="Search tenants, rooms, payments"
+              className="w-full pl-10 pr-4 py-2.5 text-sm border border-gray-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
           </div>
         </div>
-      </div>
 
-      <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 md:gap-3 ml-auto">
+        <ModeToggle canToggle={canToggleMode} />
+        {isDemoMode && (
+          <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-amber-700">
+            Demo Mode Enabled
+          </span>
+        )}
         {user?.role !== 'tenant' && (
           <div className="relative">
           <button
             onClick={handleNotificationClick}
-            className="relative p-2 hover:bg-gray-100 rounded-lg transition-colors"
+            className="relative p-2.5 border border-gray-300 bg-white hover:bg-gray-50 rounded-lg transition-colors"
           >
             <Bell className="w-5 h-5 text-gray-600" />
             {unreadCount > 0 && (
@@ -210,7 +220,7 @@ export function Header({ setSidebarOpen, currentPage, onNotificationClick }: Hea
                   {unreadCount > 0 && (
                     <button
                       onClick={() => void markAllRead()}
-                      className="text-xs text-blue-600 hover:text-blue-700"
+                      className="text-xs text-indigo-600 hover:text-indigo-700"
                     >
                       Mark all read
                     </button>
@@ -223,12 +233,12 @@ export function Header({ setSidebarOpen, currentPage, onNotificationClick }: Hea
                     notifications.slice(0, 6).map((notification) => (
                       <button
                         key={notification.id}
-                        className={`w-full text-left px-4 py-3 hover:bg-gray-50 cursor-pointer border-b border-gray-100 transition-colors ${notification.read ? '' : 'bg-blue-50'}`}
+                        className={`w-full text-left px-4 py-3 hover:bg-gray-50 cursor-pointer border-b border-gray-100 transition-colors ${notification.read ? '' : 'bg-gray-50'}`}
                         onClick={() => void openNotification(notification.id)}
                       >
                         <div className="flex items-start gap-3">
                           <div
-                            className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${notification.read ? 'bg-gray-300' : 'bg-blue-600'}`}
+                            className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${notification.read ? 'bg-gray-300' : 'bg-indigo-600'}`}
                           />
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-medium text-gray-900">{notification.title}</p>
@@ -243,7 +253,7 @@ export function Header({ setSidebarOpen, currentPage, onNotificationClick }: Hea
                 <div className="px-4 py-2 border-t border-gray-200">
                   <button
                     onClick={onNotificationClick}
-                    className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+                    className="text-xs text-indigo-600 hover:text-indigo-700 font-medium"
                   >
                     View all notifications
                   </button>
@@ -254,17 +264,17 @@ export function Header({ setSidebarOpen, currentPage, onNotificationClick }: Hea
         </div>
         )}
         
-        <div className="relative pl-3 border-l border-gray-200">
+        <div className="relative pl-2 md:pl-3 border-l border-gray-200">
           <button 
             onClick={() => setShowUserMenu(!showUserMenu)}
-            className="flex items-center gap-3 hover:bg-gray-50 rounded-lg p-1 transition-colors"
+            className="flex items-center gap-3 hover:bg-gray-50 rounded-lg p-1.5 transition-colors"
           >
             <div className="hidden sm:block text-right">
-              <p className="text-sm">{user?.name || 'Admin User'}</p>
+              <p className="text-sm font-medium text-gray-900">{user?.name || 'Admin User'}</p>
               <p className="text-xs text-gray-500">{user?.role?.replace('_', ' ') || 'Manager'}</p>
             </div>
-            <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-purple-600 rounded-full flex items-center justify-center">
-              <span className="text-white">{user?.name?.[0] || 'A'}</span>
+            <div className="w-9 h-9 bg-indigo-600 rounded-full flex items-center justify-center">
+              <span className="text-sm font-medium text-white">{user?.name?.[0] || 'A'}</span>
             </div>
           </button>
 
@@ -290,6 +300,7 @@ export function Header({ setSidebarOpen, currentPage, onNotificationClick }: Hea
               </div>
             </>
           )}
+        </div>
         </div>
       </div>
     </header>

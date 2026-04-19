@@ -3,6 +3,25 @@
 
   PG Management is a Supabase-backed property management app with owner, tenant, and admin role flows.
 
+  ## 🚀 Live Demo
+
+  🔗 https://khush-project.vercel.app
+
+  ---
+
+  ## 🧪 Demo Mode Feature
+
+  This application includes a **Demo Mode toggle** for preview purposes.
+
+  - Demo Mode -> Shows sample data (no backend interaction)
+  - Live Mode -> Shows real-time data from Supabase
+
+  This ensures:
+
+  - Safe demonstrations
+  - No data corruption
+  - Clean separation between demo and production data
+
   ## 1. Install
 
   Run:

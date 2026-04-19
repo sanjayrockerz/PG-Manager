@@ -1,6 +1,15 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { supabasePropertyApi } from '../services/supabaseData';
+import { createContext, useCallback, useContext, useEffect, useRef, useState, ReactNode } from 'react';
 import { useRealtimeRefresh } from '../hooks/useRealtimeRefresh';
+import {
+  addRoomToProperty,
+  createPropertyRecord,
+  deletePropertyRecord,
+  deleteRoomFromProperty,
+  getProperties,
+  isDemoModeEnabled,
+  updatePropertyRecord,
+  updateRoomInProperty,
+} from '../services/dataService';
 
 export interface Room {
   id: string;
@@ -41,8 +50,8 @@ interface PropertyContextType {
   properties: Property[];
   selectedProperty: string | 'all';
   setSelectedProperty: (propertyId: string | 'all') => void;
-  addProperty: (property: Omit<Property, 'id' | 'createdAt' | 'rooms'>) => void;
-  updateProperty: (id: string, property: Partial<Property>) => void;
+  addProperty: (property: Omit<Property, 'id' | 'createdAt' | 'rooms'>) => Promise<void>;
+  updateProperty: (id: string, property: Partial<Property>) => Promise<void>;
   deleteProperty: (id: string) => void;
   addRoom: (propertyId: string, room: Omit<Room, 'id'>) => void;
   updateRoom: (propertyId: string, roomId: string, room: Partial<Room>) => void;
@@ -56,74 +65,69 @@ export function PropertyProvider({ children }: { children: ReactNode }) {
   const [properties, setProperties] = useState<Property[]>([]);
   const [selectedProperty, setSelectedProperty] = useState<string | 'all'>('all');
   const [isLoading, setIsLoading] = useState(true);
+  const inFlightRefreshRef = useRef<Promise<void> | null>(null);
+  const isDemoMode = isDemoModeEnabled();
 
-  useEffect(() => {
-    let cancelled = false;
+  const refreshProperties = useCallback(async (showLoader: boolean) => {
+    if (inFlightRefreshRef.current) {
+      await inFlightRefreshRef.current;
+      return;
+    }
 
-    const loadProperties = async () => {
-      setIsLoading(true);
+    const request = (async () => {
+      if (showLoader) {
+        setIsLoading(true);
+      }
+
       try {
-        const list = await supabasePropertyApi.list();
-        if (!cancelled) {
-          setProperties(list);
-        }
+        const list = await getProperties();
+        setProperties(list);
       } catch {
-        if (!cancelled) {
-          setProperties([]);
-        }
+        // Keep last known properties (or cached state) to avoid blank-screen regressions.
       } finally {
-        if (!cancelled) {
+        if (showLoader) {
           setIsLoading(false);
         }
       }
-    };
+    })();
 
-    void loadProperties();
-
-    return () => {
-      cancelled = true;
-    };
+    inFlightRefreshRef.current = request;
+    await request;
+    inFlightRefreshRef.current = null;
   }, []);
+
+  useEffect(() => {
+    void refreshProperties(true);
+  }, [refreshProperties]);
 
   useRealtimeRefresh({
     key: 'property-context',
     tables: ['properties', 'rooms'],
-    onChange: async () => {
-      const list = await supabasePropertyApi.list();
-      setProperties(list);
-    },
+    onChange: () => refreshProperties(false),
+    enabled: !isDemoMode,
   });
 
-  const addProperty = (property: Omit<Property, 'id' | 'createdAt' | 'rooms'>) => {
-    const optimisticProperty: Property = {
-      ...property,
-      id: `tmp-${Date.now()}`,
-      createdAt: new Date().toISOString(),
-      rooms: [],
-    };
-
-    setProperties((prev) => [optimisticProperty, ...prev]);
-
-    void supabasePropertyApi
-      .create(property)
-      .then((created) => {
-        setProperties((prev) => prev.map((entry) => (entry.id === optimisticProperty.id ? created : entry)));
-      })
-      .catch(() => {
-        setProperties((prev) => prev.filter((entry) => entry.id !== optimisticProperty.id));
-      });
+  const addProperty = async (property: Omit<Property, 'id' | 'createdAt' | 'rooms'>): Promise<void> => {
+    try {
+      const created = await createPropertyRecord(property);
+      setProperties((prev) => [created, ...prev]);
+      await refreshProperties(false);
+    } catch (error) {
+      throw error;
+    }
   };
 
-  const updateProperty = (id: string, updatedData: Partial<Property>) => {
-    const previous = properties;
-    setProperties((prev) => prev.map((prop) => (prop.id === id ? { ...prop, ...updatedData } : prop)));
-
+  const updateProperty = async (id: string, updatedData: Partial<Property>): Promise<void> => {
     const payload = { ...updatedData };
     delete (payload as Partial<Property>).rooms;
 
-    void supabasePropertyApi.update(id, payload).catch(() => {
-      setProperties(previous);
-    });
+    try {
+      const updated = await updatePropertyRecord(id, payload);
+      setProperties((prev) => prev.map((prop) => (prop.id === id ? updated : prop)));
+      await refreshProperties(false);
+    } catch (error) {
+      throw error;
+    }
   };
 
   const deleteProperty = (id: string) => {
@@ -133,7 +137,7 @@ export function PropertyProvider({ children }: { children: ReactNode }) {
       setSelectedProperty('all');
     }
 
-    void supabasePropertyApi.remove(id).catch(() => {
+    void deletePropertyRecord(id).catch(() => {
       setProperties(previous);
     });
   };
@@ -158,8 +162,7 @@ export function PropertyProvider({ children }: { children: ReactNode }) {
       }),
     );
 
-    void supabasePropertyApi
-      .addRoom(propertyId, room)
+    void addRoomToProperty(propertyId, room)
       .then((createdRoom) => {
         setProperties((prev) =>
           prev.map((property) => {
@@ -192,7 +195,7 @@ export function PropertyProvider({ children }: { children: ReactNode }) {
       }),
     );
 
-    void supabasePropertyApi.updateRoom(propertyId, roomId, updatedRoom).catch(() => {
+    void updateRoomInProperty(propertyId, roomId, updatedRoom).catch(() => {
       setProperties(previous);
     });
   };
@@ -213,7 +216,7 @@ export function PropertyProvider({ children }: { children: ReactNode }) {
       }),
     );
 
-    void supabasePropertyApi.removeRoom(propertyId, roomId).catch(() => {
+    void deleteRoomFromProperty(propertyId, roomId).catch(() => {
       setProperties(previous);
     });
   };
