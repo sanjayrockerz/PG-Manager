@@ -1,27 +1,32 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, FileText, MessageCircle, Plus, Save, Shield, User, Users, X } from 'lucide-react';
+import { AlertTriangle, FileText, MessageCircle, Plus, Save, Shield, User, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { AppLanguage, useLocalization } from '../contexts/LocalizationContext';
 import { OwnerSettingsRecord, supabaseAuthDataApi, supabaseOwnerDataApi } from '../services/supabaseData';
-import { TeamMembers } from './TeamMembers';
-import { canManageTeam } from '../utils/roles';
+import {
+  DEFAULT_COUNTRY_CODE,
+  SUPPORTED_PHONE_COUNTRIES,
+  formatStoredPhone,
+  getPhoneCountry,
+  getPhoneDropdownLabel,
+  parseStoredPhone,
+  sanitizePhoneLocal,
+  validatePhoneForCountry,
+} from '../utils/phone';
 
 interface ProfileFormState {
   name: string;
   email: string;
-  phone: string;
+  phoneCountryCode: string;
+  phoneLocalNumber: string;
 }
-
-const PHONE_LENGTH = 10;
-
-const toDigits = (value: string): string => value.replace(/\D/g, '').slice(0, PHONE_LENGTH);
 
 export function Settings() {
   const { user, refreshProfile, logout } = useAuth();
   const { setLanguage, t } = useLocalization();
   const [settings, setSettings] = useState<OwnerSettingsRecord | null>(null);
-  const [activeSection, setActiveSection] = useState<'profile' | 'pg-rules' | 'whatsapp' | 'team'>('profile');
+  const [activeSection, setActiveSection] = useState<'profile' | 'pg-rules' | 'whatsapp'>('profile');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState('');
@@ -30,7 +35,8 @@ export function Settings() {
   const [profileForm, setProfileForm] = useState<ProfileFormState>({
     name: '',
     email: '',
-    phone: '',
+    phoneCountryCode: DEFAULT_COUNTRY_CODE,
+    phoneLocalNumber: '',
   });
 
   const [newRule, setNewRule] = useState('');
@@ -71,10 +77,12 @@ export function Settings() {
   }, [settings, setLanguage]);
 
   useEffect(() => {
+    const parsedPhone = parseStoredPhone(user?.phone ?? '');
     setProfileForm({
       name: user?.name ?? '',
       email: user?.email ?? '',
-      phone: toDigits(user?.phone ?? ''),
+      phoneCountryCode: parsedPhone.countryCode,
+      phoneLocalNumber: sanitizePhoneLocal(parsedPhone.localNumber, parsedPhone.countryCode),
     });
   }, [user]);
 
@@ -104,15 +112,16 @@ export function Settings() {
 
   const handleSaveProfile = async () => {
     const cleanedName = profileForm.name.trim();
-    const cleanedPhone = toDigits(profileForm.phone);
+    const cleanedPhone = profileForm.phoneLocalNumber.replace(/\D/g, '');
 
     if (cleanedName.length < 2) {
       setError('Full name must be at least 2 characters.');
       return;
     }
 
-    if (cleanedPhone.length !== PHONE_LENGTH) {
-      setError('Phone number must be exactly 10 digits.');
+    const phoneValidation = validatePhoneForCountry(profileForm.phoneCountryCode, cleanedPhone);
+    if (!phoneValidation.valid) {
+      setError(phoneValidation.error ?? 'Phone number is invalid.');
       return;
     }
 
@@ -122,7 +131,7 @@ export function Settings() {
     try {
       await supabaseAuthDataApi.updateCurrentProfile({
         name: cleanedName,
-        phone: cleanedPhone,
+        phone: formatStoredPhone(profileForm.phoneCountryCode, cleanedPhone),
       });
       await refreshProfile();
       setSuccess('Profile updated successfully.');
@@ -348,42 +357,42 @@ export function Settings() {
   if (isLoading || !settings) {
     return (
       <div className="space-y-6">
-        <div>
-          <h1 className="text-gray-900">Settings</h1>
-          <p className="text-gray-600 mt-1">Loading your settings...</p>
+        <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+          <h1 className="text-2xl font-semibold text-gray-900">Settings</h1>
+          <p className="mt-1 text-sm text-gray-500">Loading your settings...</p>
         </div>
       </div>
     );
   }
 
+  const settingsPhoneCountry = getPhoneCountry(profileForm.phoneCountryCode);
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-gray-900">{t('settings.title', 'Settings')}</h1>
-        <p className="text-gray-600 mt-1">{t('settings.subtitle', 'Manage your account settings')}</p>
+      <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+        <h1 className="text-2xl font-semibold text-gray-900">{t('settings.title', 'Settings')}</h1>
+        <p className="mt-1 text-sm text-gray-500">{t('settings.subtitle', 'Manage your account settings')}</p>
       </div>
 
       {error && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
       {success && <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">{success}</div>}
 
-      <div className="bg-white rounded-xl border border-gray-200 p-2">
+      <div className="rounded-xl border border-gray-200 bg-white p-2 shadow-sm">
         <div className="flex flex-wrap items-center gap-2">
           {[
-            { key: 'profile', label: 'Profile', icon: User },
-            { key: 'pg-rules', label: 'PG Rules', icon: FileText },
-            { key: 'whatsapp', label: 'WhatsApp', icon: MessageCircle },
-            ...(canManageTeam(user?.role) ? [{ key: 'team', label: 'Team', icon: Users }] : []),
+            { key: 'profile', label: 'Profile' },
+            { key: 'pg-rules', label: 'PG Rules' },
+            { key: 'whatsapp', label: 'WhatsApp Integration' },
           ].map((tab) => (
             <button
               key={tab.key}
-              onClick={() => setActiveSection(tab.key as 'profile' | 'pg-rules' | 'whatsapp' | 'team')}
-              className={`px-4 py-2 rounded-lg text-sm transition-colors flex items-center gap-2 ${
+              onClick={() => setActiveSection(tab.key as 'profile' | 'pg-rules' | 'whatsapp')}
+              className={`px-4 py-2 rounded-lg text-sm transition-colors $
                 activeSection === tab.key
-                  ? 'bg-blue-600 text-white'
+                  ? 'bg-indigo-600 text-white'
                   : 'bg-gray-50 text-gray-700 hover:bg-gray-100'
               }`}
             >
-              <tab.icon className="w-3.5 h-3.5" />
               {tab.label}
             </button>
           ))}
@@ -392,40 +401,69 @@ export function Settings() {
 
       {activeSection === 'profile' && (
         <div className="space-y-6">
-          <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
+          <div className="space-y-4 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
             <div className="flex items-center gap-3">
-              <div className="p-3 bg-purple-50 rounded-lg">
-                <User className="w-5 h-5 text-purple-600" />
+              <div className="rounded-lg bg-indigo-50 p-3">
+                <User className="w-5 h-5 text-indigo-600" />
               </div>
               <div>
                 <h2 className="text-gray-900">Profile Settings</h2>
-                <p className="text-sm text-gray-600">Keep your account profile up to date.</p>
+                <p className="text-sm text-gray-500">Keep your account profile up to date.</p>
               </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <label className="text-sm text-gray-600">Full Name</label>
-                <input value={profileForm.name} onChange={(e) => setProfileForm({ ...profileForm, name: e.target.value })} className="w-full px-4 py-2 border border-gray-300 rounded-lg" />
+                <input value={profileForm.name} onChange={(e) => setProfileForm({ ...profileForm, name: e.target.value })} className="w-full rounded-lg border border-gray-300 px-4 py-2" />
               </div>
               <div className="space-y-2">
                 <label className="text-sm text-gray-600">Email</label>
-                <input value={profileForm.email} disabled className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-100 text-gray-500" />
+                <input value={profileForm.email} disabled className="w-full rounded-lg border border-gray-300 bg-gray-100 px-4 py-2 text-gray-500" />
               </div>
               <div className="space-y-2">
                 <label className="text-sm text-gray-600">Phone</label>
-                <input value={profileForm.phone} inputMode="numeric" maxLength={PHONE_LENGTH} onChange={(e) => setProfileForm({ ...profileForm, phone: toDigits(e.target.value) })} className="w-full px-4 py-2 border border-gray-300 rounded-lg" />
+                <div className="group flex items-center rounded-xl border border-gray-300 bg-white transition-shadow focus-within:ring-2 focus-within:ring-indigo-200">
+                  <select
+                    value={profileForm.phoneCountryCode}
+                    onChange={(e) => setProfileForm({
+                      ...profileForm,
+                      phoneCountryCode: e.target.value,
+                      phoneLocalNumber: sanitizePhoneLocal(profileForm.phoneLocalNumber, e.target.value),
+                    })}
+                    className="w-44 rounded-l-xl border-r border-gray-200 bg-gray-50 px-3 py-2.5 text-sm focus:outline-none"
+                  >
+                    {SUPPORTED_PHONE_COUNTRIES.map((entry) => (
+                      <option key={entry.code} value={entry.code}>{getPhoneDropdownLabel(entry)}</option>
+                    ))}
+                  </select>
+                  <span className="border-r border-gray-200 bg-gray-50 px-2 py-2 text-sm font-medium text-gray-700">
+                    {settingsPhoneCountry.flag} {settingsPhoneCountry.code}
+                  </span>
+                  <input
+                    value={profileForm.phoneLocalNumber}
+                    inputMode="numeric"
+                    maxLength={settingsPhoneCountry.localDigits}
+                    onChange={(e) => setProfileForm({
+                      ...profileForm,
+                      phoneLocalNumber: sanitizePhoneLocal(e.target.value, profileForm.phoneCountryCode),
+                    })}
+                    className="w-full rounded-r-xl border-0 px-4 py-2 focus:outline-none"
+                    placeholder={settingsPhoneCountry.placeholder}
+                  />
+                </div>
+                <p className="text-xs text-gray-500">{settingsPhoneCountry.country} numbers require exactly {settingsPhoneCountry.localDigits} digits.</p>
               </div>
             </div>
 
             <div className="flex items-center justify-end">
-              <button onClick={() => void handleSaveProfile()} disabled={isSaving} className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60">
+              <button onClick={() => void handleSaveProfile()} disabled={isSaving} className="rounded-lg bg-indigo-600 px-6 py-2.5 text-white transition-colors hover:bg-indigo-700 disabled:opacity-60">
                 {isSaving ? 'Saving...' : 'Update Profile'}
               </button>
             </div>
           </div>
 
-          <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
+          <div className="space-y-4 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
             <h2 className="text-gray-900">Notifications</h2>
             <div className="space-y-3">
               {[
@@ -434,7 +472,7 @@ export function Settings() {
                 ['tenantUpdates', 'Tenant Updates', 'Check-in and check-out alerts'],
                 ['emailNotifications', 'Email Notifications', 'Receive email updates'],
               ].map(([field, label, note]) => (
-                <label key={field} className="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3">
+                <label key={field} className="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3 shadow-sm">
                   <div>
                     <p className="text-sm text-gray-900">{label}</p>
                     <p className="text-xs text-gray-500 mt-1">{note}</p>
@@ -452,19 +490,19 @@ export function Settings() {
                         },
                       }));
                     }}
-                    className="w-4 h-4"
+                    className="h-4 w-4"
                   />
                 </label>
               ))}
             </div>
             <div className="flex items-center justify-end">
-              <button onClick={() => void persistSettings(settings, 'Notification settings saved successfully.')} disabled={isSaving} className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60">Save Notifications</button>
+              <button onClick={() => void persistSettings(settings, 'Notification settings saved successfully.')} disabled={isSaving} className="rounded-lg bg-indigo-600 px-6 py-2.5 text-white transition-colors hover:bg-indigo-700 disabled:opacity-60">Save Notifications</button>
             </div>
           </div>
 
-          <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
+          <div className="space-y-4 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
             <h2 className="text-gray-900">Security</h2>
-            <div className="rounded-lg border border-gray-200 px-4 py-3 flex items-center justify-between">
+            <div className="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3 shadow-sm">
               <div>
                 <p className="text-sm text-gray-900">Two-Factor Authentication</p>
                 <p className="text-xs text-gray-500 mt-1">Add an extra layer of security</p>
@@ -487,42 +525,42 @@ export function Settings() {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <button onClick={() => void handleSendPasswordReset()} disabled={isSaving} className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">Change Password</button>
-              <button disabled className="px-4 py-2 border border-gray-200 text-gray-400 rounded-lg cursor-not-allowed">Active Sessions: Current Device</button>
+              <button onClick={() => void handleSendPasswordReset()} disabled={isSaving} className="rounded-lg border border-gray-300 bg-white px-4 py-2 transition-colors hover:bg-gray-50">Change Password</button>
+              <button disabled className="cursor-not-allowed rounded-lg border border-gray-200 px-4 py-2 text-gray-400">Active Sessions: Current Device</button>
             </div>
 
             <div className="flex items-center justify-end">
-              <button onClick={() => void persistSettings(settings, 'Security settings saved successfully.')} disabled={isSaving} className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60">Save Security</button>
+              <button onClick={() => void persistSettings(settings, 'Security settings saved successfully.')} disabled={isSaving} className="rounded-lg bg-indigo-600 px-6 py-2.5 text-white transition-colors hover:bg-indigo-700 disabled:opacity-60">Save Security</button>
             </div>
           </div>
 
-          <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
+          <div className="space-y-4 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
             <h2 className="text-gray-900">Payment Settings</h2>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="space-y-2">
                 <label className="text-sm text-gray-600">UPI ID</label>
-                <input value={settings.paymentSettings.upiId} onChange={(e) => updateSettingsDraft((current) => ({ ...current, paymentSettings: { ...current.paymentSettings, upiId: e.target.value } }))} className="w-full px-4 py-2 border border-gray-300 rounded-lg" />
+                <input value={settings.paymentSettings.upiId} onChange={(e) => updateSettingsDraft((current) => ({ ...current, paymentSettings: { ...current.paymentSettings, upiId: e.target.value } }))} className="w-full rounded-lg border border-gray-300 px-4 py-2" />
               </div>
               <div className="space-y-2">
                 <label className="text-sm text-gray-600">Bank Account</label>
-                <input value={settings.paymentSettings.bankAccount} onChange={(e) => updateSettingsDraft((current) => ({ ...current, paymentSettings: { ...current.paymentSettings, bankAccount: e.target.value } }))} className="w-full px-4 py-2 border border-gray-300 rounded-lg" />
+                <input value={settings.paymentSettings.bankAccount} onChange={(e) => updateSettingsDraft((current) => ({ ...current, paymentSettings: { ...current.paymentSettings, bankAccount: e.target.value } }))} className="w-full rounded-lg border border-gray-300 px-4 py-2" />
               </div>
               <div className="space-y-2">
                 <label className="text-sm text-gray-600">Late Payment Fee</label>
-                <input type="number" min={0} value={settings.paymentSettings.latePaymentFee} onChange={(e) => updateSettingsDraft((current) => ({ ...current, paymentSettings: { ...current.paymentSettings, latePaymentFee: Number(e.target.value) || 0 } }))} className="w-full px-4 py-2 border border-gray-300 rounded-lg" />
+                <input type="number" min={0} value={settings.paymentSettings.latePaymentFee} onChange={(e) => updateSettingsDraft((current) => ({ ...current, paymentSettings: { ...current.paymentSettings, latePaymentFee: Number(e.target.value) || 0 } }))} className="w-full rounded-lg border border-gray-300 px-4 py-2" />
               </div>
             </div>
             <div className="flex items-center justify-end">
-              <button onClick={() => void persistSettings(settings, 'Payment settings saved successfully.')} disabled={isSaving} className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60">Save Payment Settings</button>
+              <button onClick={() => void persistSettings(settings, 'Payment settings saved successfully.')} disabled={isSaving} className="rounded-lg bg-indigo-600 px-6 py-2.5 text-white transition-colors hover:bg-indigo-700 disabled:opacity-60">Save Payment Settings</button>
             </div>
           </div>
 
-          <div className="bg-white rounded-xl border border-gray-200 p-6 space-y-4">
+          <div className="space-y-4 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
             <h2 className="text-gray-900">Additional Settings</h2>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="space-y-2">
                 <label className="text-sm text-gray-600">Language</label>
-                <select value={settings.additionalSettings.language} onChange={(e) => updateSettingsDraft((current) => ({ ...current, additionalSettings: { ...current.additionalSettings, language: e.target.value } }))} className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-white">
+                <select value={settings.additionalSettings.language} onChange={(e) => updateSettingsDraft((current) => ({ ...current, additionalSettings: { ...current.additionalSettings, language: e.target.value } }))} className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2">
                   <option value="English">English</option>
                   <option value="Hindi">Hindi</option>
                   <option value="Kannada">Kannada</option>
@@ -530,14 +568,14 @@ export function Settings() {
               </div>
               <div className="space-y-2">
                 <label className="text-sm text-gray-600">Timezone</label>
-                <select value={settings.additionalSettings.timezone} onChange={(e) => updateSettingsDraft((current) => ({ ...current, additionalSettings: { ...current.additionalSettings, timezone: e.target.value } }))} className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-white">
+                <select value={settings.additionalSettings.timezone} onChange={(e) => updateSettingsDraft((current) => ({ ...current, additionalSettings: { ...current.additionalSettings, timezone: e.target.value } }))} className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2">
                   <option value="IST (UTC+5:30)">IST (UTC+5:30)</option>
                   <option value="UTC">UTC</option>
                 </select>
               </div>
               <div className="space-y-2">
                 <label className="text-sm text-gray-600">Currency</label>
-                <select value={settings.additionalSettings.currency} onChange={(e) => updateSettingsDraft((current) => ({ ...current, additionalSettings: { ...current.additionalSettings, currency: e.target.value } }))} className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-white">
+                <select value={settings.additionalSettings.currency} onChange={(e) => updateSettingsDraft((current) => ({ ...current, additionalSettings: { ...current.additionalSettings, currency: e.target.value } }))} className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2">
                   <option value="INR (Rs)">INR (Rs)</option>
                   <option value="USD ($)">USD ($)</option>
                 </select>
@@ -553,14 +591,14 @@ export function Settings() {
                   void persistSettings(settings, 'Additional settings saved successfully.');
                 }}
                 disabled={isSaving}
-                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60"
+                className="rounded-lg bg-indigo-600 px-6 py-2.5 text-white transition-colors hover:bg-indigo-700 disabled:opacity-60"
               >
                 Save Additional Settings
               </button>
             </div>
           </div>
 
-          <div className="bg-white rounded-xl border border-red-200 p-6 space-y-4">
+          <div className="space-y-4 rounded-2xl border border-red-200 bg-white p-6 shadow-sm">
             <div className="flex items-center gap-3">
               <AlertTriangle className="w-5 h-5 text-red-600" />
               <div>
@@ -569,24 +607,24 @@ export function Settings() {
               </div>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <button onClick={() => void handleExportData()} disabled={isSaving} className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">Export All Data</button>
-              <button onClick={() => void handleDeleteAllData()} disabled={isSaving} className="px-4 py-2 border border-red-300 text-red-700 rounded-lg hover:bg-red-50 transition-colors">Delete All Data</button>
-              <button onClick={() => void handleCloseAccount()} disabled={isSaving} className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors">Close Account</button>
+              <button onClick={() => void handleExportData()} disabled={isSaving} className="rounded-lg border border-gray-300 bg-white px-4 py-2 transition-colors hover:bg-gray-50">Export All Data</button>
+              <button onClick={() => void handleDeleteAllData()} disabled={isSaving} className="rounded-lg border border-red-300 px-4 py-2 text-red-700 transition-colors hover:bg-red-50">Delete All Data</button>
+              <button onClick={() => void handleCloseAccount()} disabled={isSaving} className="rounded-lg bg-red-600 px-4 py-2 text-white transition-colors hover:bg-red-700">Close Account</button>
             </div>
           </div>
         </div>
       )}
 
       {activeSection === 'pg-rules' && (
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
+        <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
-              <div className="p-3 bg-blue-50 rounded-lg">
-                <FileText className="w-5 h-5 text-blue-600" />
+              <div className="rounded-lg bg-indigo-50 p-3">
+                <FileText className="w-5 h-5 text-indigo-600" />
               </div>
               <div>
                 <h2 className="text-gray-900">PG Rules</h2>
-                <p className="text-sm text-gray-600">Rules for WhatsApp chatbot auto-replies</p>
+                <p className="text-sm text-gray-500">Rules for WhatsApp chatbot auto-replies</p>
               </div>
             </div>
             <button
@@ -595,7 +633,7 @@ export function Settings() {
                 setNewRule('');
                 setShowAddRuleModal(true);
               }}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-white transition-colors hover:bg-indigo-700"
             >
               <Plus className="w-4 h-4" />
               <span>Add Rule</span>
@@ -607,14 +645,14 @@ export function Settings() {
               <p className="text-sm text-gray-500">No rules added yet.</p>
             ) : (
               settings.pgRules.map((rule, index) => (
-                <div key={`rule-${index}`} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div key={`rule-${index}`} className="flex items-center justify-between rounded-lg bg-gray-50 p-3">
                   <div className="flex items-center gap-3">
                     <span className="text-sm text-gray-500 font-mono">{index + 1}.</span>
                     <p className="text-sm text-gray-900">{rule}</p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <button onClick={() => handleEditRule(index)} className="px-3 py-1 text-sm text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">Edit</button>
-                    <button onClick={() => void handleDeleteRule(index)} className="px-3 py-1 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors">Delete</button>
+                    <button onClick={() => handleEditRule(index)} className="rounded-lg px-3 py-1 text-sm text-indigo-600 transition-colors hover:bg-indigo-50">Edit</button>
+                    <button onClick={() => void handleDeleteRule(index)} className="rounded-lg px-3 py-1 text-sm text-red-600 transition-colors hover:bg-red-50">Delete</button>
                   </div>
                 </div>
               ))
@@ -624,15 +662,15 @@ export function Settings() {
       )}
 
       {activeSection === 'whatsapp' && (
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
+        <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
-              <div className="p-3 bg-green-50 rounded-lg">
+              <div className="rounded-lg bg-green-50 p-3">
                 <MessageCircle className="w-5 h-5 text-green-600" />
               </div>
               <div>
                 <h2 className="text-gray-900">WhatsApp Automation</h2>
-                <p className="text-sm text-gray-600">Configure WhatsApp chatbot templates</p>
+                <p className="text-sm text-gray-500">Configure WhatsApp chatbot templates</p>
               </div>
             </div>
             <div className="text-xs text-gray-500 flex items-center gap-1">
@@ -643,7 +681,7 @@ export function Settings() {
 
           <div className="space-y-3">
             {whatsappTemplateItems.map((item, index) => (
-              <div key={item.key} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+              <div key={item.key} className="flex items-center justify-between rounded-lg bg-gray-50 p-3">
                 <div>
                   <p className="text-sm text-gray-900">{index + 1}. {item.label}</p>
                   <p className="text-xs text-gray-500 mt-1">{item.template}</p>
@@ -671,12 +709,12 @@ export function Settings() {
                     <div className="w-12 h-6 bg-gray-300 rounded-full peer-checked:bg-blue-600 transition-colors cursor-pointer"></div>
                     <div className="absolute left-1 top-1 w-4 h-4 bg-white rounded-full peer-checked:translate-x-6 transition-transform"></div>
                   </label>
-                  <button onClick={() => handleTemplateEdit(item.key)} className="px-3 py-1 text-sm text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">Edit</button>
+                  <button onClick={() => handleTemplateEdit(item.key)} className="rounded-lg px-3 py-1 text-sm text-indigo-600 transition-colors hover:bg-indigo-50">Edit</button>
                 </div>
               </div>
             ))}
 
-            <div className="p-3 bg-gray-50 rounded-lg space-y-2">
+            <div className="space-y-2 rounded-lg bg-gray-50 p-3">
               <div className="flex items-center justify-between">
                 <p className="text-sm text-gray-900">Rent Reminder Timing</p>
                 <input
@@ -697,7 +735,7 @@ export function Settings() {
                       },
                     }));
                   }}
-                  className="w-20 px-2 py-1 border border-gray-300 rounded-md text-sm"
+                  className="w-20 rounded-md border border-gray-300 px-2 py-1 text-sm"
                 />
               </div>
               <p className="text-xs text-gray-500">Automatic reminders are sent this many days before due date.</p>
@@ -727,7 +765,7 @@ export function Settings() {
                         },
                       }));
                     }}
-                    className="w-4 h-4"
+                    className="h-4 w-4"
                   />
                   <span>{label}</span>
                 </label>
@@ -735,22 +773,18 @@ export function Settings() {
             </div>
 
             <div className="flex items-center justify-end">
-              <button onClick={() => void persistSettings(settings, 'WhatsApp automation settings saved successfully.')} disabled={isSaving} className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60">Save WhatsApp Settings</button>
+              <button onClick={() => void persistSettings(settings, 'WhatsApp automation settings saved successfully.')} disabled={isSaving} className="rounded-lg bg-indigo-600 px-6 py-2.5 text-white transition-colors hover:bg-indigo-700 disabled:opacity-60">Save WhatsApp Settings</button>
             </div>
           </div>
         </div>
       )}
 
-      {activeSection === 'team' && canManageTeam(user?.role) && (
-        <TeamMembers />
-      )}
-
       {showAddRuleModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={() => setShowAddRuleModal(false)}>
-          <div className="bg-white rounded-xl max-w-md w-full" onClick={(e) => e.stopPropagation()}>
-            <div className="p-6 border-b border-gray-200 flex items-center justify-between">
-              <h2 className="text-gray-900">{editingRuleIndex !== null ? 'Edit Rule' : 'Add New Rule'}</h2>
-              <button onClick={() => setShowAddRuleModal(false)} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowAddRuleModal(false)}>
+          <div className="w-full max-w-md rounded-xl border border-gray-200 bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-gray-200 p-6">
+              <h2 className="text-lg font-medium text-gray-900">{editingRuleIndex !== null ? 'Edit Rule' : 'Add New Rule'}</h2>
+              <button onClick={() => setShowAddRuleModal(false)} className="rounded-md p-2 transition-colors hover:bg-gray-100">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -758,12 +792,12 @@ export function Settings() {
             <div className="p-6 space-y-4">
               <div className="space-y-2">
                 <label className="text-sm text-gray-700">Rule Text *</label>
-                <textarea value={newRule} onChange={(e) => setNewRule(e.target.value)} className="w-full px-4 py-2 border border-gray-300 rounded-lg" rows={3} placeholder="e.g., Check-in time: After 6:00 PM" />
+                <textarea value={newRule} onChange={(e) => setNewRule(e.target.value)} className="w-full rounded-lg border border-gray-300 px-4 py-2" rows={3} placeholder="e.g., Check-in time: After 6:00 PM" />
               </div>
 
-              <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-200">
-                <button onClick={() => setShowAddRuleModal(false)} className="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">Cancel</button>
-                <button onClick={() => void handleAddRule()} disabled={!newRule.trim() || isSaving} className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50">
+              <div className="flex items-center justify-end gap-3 border-t border-gray-200 pt-4">
+                <button onClick={() => setShowAddRuleModal(false)} className="rounded-lg border border-gray-300 bg-white px-6 py-2.5 transition-colors hover:bg-gray-50">Cancel</button>
+                <button onClick={() => void handleAddRule()} disabled={!newRule.trim() || isSaving} className="rounded-lg bg-indigo-600 px-6 py-2.5 text-white transition-colors hover:bg-indigo-700 disabled:opacity-50">
                   {editingRuleIndex !== null ? 'Update Rule' : 'Add Rule'}
                 </button>
               </div>
@@ -773,11 +807,11 @@ export function Settings() {
       )}
 
       {showTemplateModal && editingTemplate && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={() => setShowTemplateModal(false)}>
-          <div className="bg-white rounded-xl max-w-md w-full" onClick={(e) => e.stopPropagation()}>
-            <div className="p-6 border-b border-gray-200 flex items-center justify-between">
-              <h2 className="text-gray-900">Edit WhatsApp Template</h2>
-              <button onClick={() => setShowTemplateModal(false)} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowTemplateModal(false)}>
+          <div className="w-full max-w-md rounded-xl border border-gray-200 bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-gray-200 p-6">
+              <h2 className="text-lg font-medium text-gray-900">Edit WhatsApp Template</h2>
+              <button onClick={() => setShowTemplateModal(false)} className="rounded-md p-2 transition-colors hover:bg-gray-100">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -785,12 +819,12 @@ export function Settings() {
             <div className="p-6 space-y-4">
               <div className="space-y-2">
                 <label className="text-sm text-gray-700">Template Text *</label>
-                <textarea value={editingTemplate.value} onChange={(e) => setEditingTemplate({ ...editingTemplate, value: e.target.value })} className="w-full px-4 py-2 border border-gray-300 rounded-lg" rows={5} />
+                <textarea value={editingTemplate.value} onChange={(e) => setEditingTemplate({ ...editingTemplate, value: e.target.value })} className="w-full rounded-lg border border-gray-300 px-4 py-2" rows={5} />
               </div>
 
-              <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-200">
-                <button onClick={() => setShowTemplateModal(false)} className="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">Cancel</button>
-                <button onClick={() => void handleTemplateSave()} disabled={!editingTemplate.value.trim() || isSaving} className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50">
+              <div className="flex items-center justify-end gap-3 border-t border-gray-200 pt-4">
+                <button onClick={() => setShowTemplateModal(false)} className="rounded-lg border border-gray-300 bg-white px-6 py-2.5 transition-colors hover:bg-gray-50">Cancel</button>
+                <button onClick={() => void handleTemplateSave()} disabled={!editingTemplate.value.trim() || isSaving} className="rounded-lg bg-indigo-600 px-6 py-2.5 text-white transition-colors hover:bg-indigo-700 disabled:opacity-50">
                   Save Template
                 </button>
               </div>

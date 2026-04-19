@@ -139,7 +139,7 @@ BEGIN
     2,
     4,
     'Demo Owner',
-    '+919876500001',
+    '9876500001',
     'owner.demo@pgmanager.app'
   )
   ON CONFLICT (id)

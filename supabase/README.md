@@ -12,6 +12,7 @@ Run these files in order:
 4. `supabase/seed_demo_owner.sql` (optional bootstrap data)
 5. `supabase/seed_demo_tenant_link.sql` (optional tenant account link)
 6. `supabase/seed_demo_admin_link.sql` (optional admin account link)
+7. `supabase/seed_demo_extra_properties_tenants.sql` (optional extra synthetic properties, rooms, and tenants)
 
 `schema.sql` includes only SQL-editor-safe application database objects:
 - Core app tables

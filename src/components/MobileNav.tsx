@@ -1,4 +1,4 @@
-import { CreditCard, Home, Settings, Shield, UserCircle, Users, LifeBuoy, Package } from 'lucide-react';
+import { CreditCard, Home, Settings, Shield, UserCircle, Users, LifeBuoy } from 'lucide-react';
 import { useLocalization } from '../contexts/LocalizationContext';
 import { isPlatformAdminRole, isScopedOwnerRole } from '../utils/roles';
 
@@ -13,7 +13,6 @@ const ownerNavItems = [
   { id: 'tenants', label: 'Tenants', icon: Users },
   { id: 'payments', label: 'Payments', icon: CreditCard },
   { id: 'support', label: 'Support', icon: LifeBuoy },
-  { id: 'subscriptions', label: 'Plans', icon: Package },
   { id: 'settings', label: 'Settings', icon: Settings },
 ];
 
@@ -72,7 +71,6 @@ export function MobileNav({ activeTab, setActiveTab, userRole = 'owner' }: Mobil
                     : item.id === 'properties' ? t('mobile.properties', item.label)
                       : item.id === 'payments' ? t('mobile.payments', item.label)
                         : item.id === 'support' ? t('mobile.support', item.label)
-                          : item.id === 'subscriptions' ? t('mobile.subscriptions', item.label)
                             : item.id === 'settings' ? t('mobile.settings', item.label)
                               : item.id === 'admin-section' ? t('mobile.admin', item.label)
                                 : item.id === 'tenant-portal' ? t(userRole === 'tenant' ? 'mobile.portal' : 'mobile.tenant', item.label)

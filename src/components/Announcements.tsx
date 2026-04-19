@@ -152,10 +152,10 @@ export function Announcements() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="flex flex-col gap-4 rounded-xl border border-gray-200 bg-white p-6 shadow-sm sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-gray-900">Announcements</h1>
-          <p className="text-gray-600 mt-1">Broadcast and manage tenant announcements</p>
+          <h1 className="text-2xl font-semibold text-gray-900">Announcements</h1>
+          <p className="mt-1 text-sm text-gray-500">Broadcast and manage tenant announcements</p>
           <div className="mt-3">
             <LiveStatusBadge lastUpdatedAt={lastUpdatedAt} isSyncing={isSyncing} label="Announcement stream" />
           </div>
@@ -165,7 +165,7 @@ export function Announcements() {
             resetForm();
             setShowAddModal(true);
           }}
-          className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          className="flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-white transition-colors hover:bg-indigo-700"
         >
           <Plus className="w-5 h-5" />
           <span>New Announcement</span>
@@ -178,13 +178,13 @@ export function Announcements() {
         </div>
       )}
 
-      <div className="bg-white rounded-xl border border-gray-200 p-4">
+      <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
         <div className="flex gap-2 overflow-x-auto">
           {['all', 'maintenance', 'payment', 'rules', 'general'].map((category) => (
             <button
               key={category}
               onClick={() => setFilterCategory(category)}
-              className={`px-4 py-2 rounded-lg text-sm whitespace-nowrap transition-colors ${filterCategory === category ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+              className={`whitespace-nowrap rounded-lg px-4 py-2 text-sm transition-colors ${filterCategory === category ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
             >
               {category.charAt(0).toUpperCase() + category.slice(1)}
             </button>
@@ -193,22 +193,22 @@ export function Announcements() {
       </div>
 
       {isLoading ? (
-        <div className="bg-white rounded-xl border border-gray-200 p-8 text-center text-sm text-gray-500">Loading announcements...</div>
+        <div className="rounded-xl border border-gray-200 bg-white px-4 py-8 text-center text-sm text-gray-500 shadow-sm">Loading announcements...</div>
       ) : (
         <>
           {pinnedAnnouncements.length > 0 && (
             <div className="space-y-4">
               <div className="flex items-center gap-2">
-                <Pin className="w-5 h-5 text-blue-600" />
+                <Pin className="w-5 h-5 text-indigo-600" />
                 <h2 className="text-gray-900">Pinned Announcements</h2>
               </div>
 
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
                 {pinnedAnnouncements.map((announcement) => (
-                  <div key={announcement.id} className="bg-gradient-to-br from-blue-50 to-purple-50 rounded-xl border-2 border-blue-200 p-6">
+                  <div key={announcement.id} className="rounded-xl border border-indigo-200 bg-white p-6 shadow-sm ring-1 ring-indigo-50">
                     <div className="flex items-start justify-between mb-3">
                       <div className="flex items-center gap-2">
-                        <Pin className="w-5 h-5 text-blue-600" />
+                        <Pin className="w-5 h-5 text-indigo-600" />
                         <span className={`px-2 py-1 rounded text-xs ${announcement.category === 'maintenance' ? 'bg-orange-100 text-orange-700' : announcement.category === 'payment' ? 'bg-green-100 text-green-700' : announcement.category === 'rules' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-700'}`}>
                           {announcement.category.charAt(0).toUpperCase() + announcement.category.slice(1)}
                         </span>
@@ -251,11 +251,11 @@ export function Announcements() {
             {pinnedAnnouncements.length > 0 && <h2 className="text-gray-900">All Announcements</h2>}
 
             {regularAnnouncements.length === 0 ? (
-              <div className="bg-white rounded-xl border border-gray-200 p-8 text-center text-sm text-gray-500">No announcements found for this filter.</div>
+              <div className="rounded-xl border border-gray-200 bg-white px-4 py-8 text-center text-sm text-gray-500 shadow-sm">No announcements found for this filter.</div>
             ) : (
               <div className="space-y-4">
                 {regularAnnouncements.map((announcement) => (
-                  <div key={announcement.id} className="bg-white rounded-xl border border-gray-200 p-6 hover:shadow-md transition-shadow">
+                  <div key={announcement.id} className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm transition-shadow hover:shadow-md">
                     <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
                       <div className="flex-1">
                         <div className="flex flex-wrap items-center gap-2 mb-3">
@@ -281,17 +281,17 @@ export function Announcements() {
                       </div>
 
                       <div className="flex md:flex-col gap-2">
-                        <button onClick={() => void handleTogglePin(announcement)} className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm hover:bg-gray-200 transition-colors">
+                        <button onClick={() => void handleTogglePin(announcement)} className="rounded-lg bg-gray-100 px-4 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-200">
                           {announcement.isPinned ? 'Unpin' : 'Pin'}
                         </button>
-                        <button onClick={() => handleEditAnnouncement(announcement)} className="px-4 py-2 bg-blue-50 text-blue-600 rounded-lg text-sm hover:bg-blue-100 transition-colors">
+                        <button onClick={() => handleEditAnnouncement(announcement)} className="rounded-lg bg-indigo-50 px-4 py-2 text-sm text-indigo-600 transition-colors hover:bg-indigo-100">
                           Edit
                         </button>
-                        <button onClick={() => void handleMarkSent(announcement.id)} className="px-4 py-2 bg-green-50 text-green-600 rounded-lg text-sm hover:bg-green-100 transition-colors flex items-center gap-1 justify-center">
+                        <button onClick={() => void handleMarkSent(announcement.id)} className="flex items-center justify-center gap-1 rounded-lg bg-green-50 px-4 py-2 text-sm text-green-600 transition-colors hover:bg-green-100">
                           <Send className="w-3 h-3" />
                           Sent
                         </button>
-                        <button onClick={() => void handleDelete(announcement.id)} className="px-4 py-2 bg-red-50 text-red-600 rounded-lg text-sm hover:bg-red-100 transition-colors flex items-center gap-1 justify-center">
+                        <button onClick={() => void handleDelete(announcement.id)} className="flex items-center justify-center gap-1 rounded-lg bg-red-50 px-4 py-2 text-sm text-red-600 transition-colors hover:bg-red-100">
                           <Trash2 className="w-3 h-3" />
                           Delete
                         </button>
@@ -306,17 +306,17 @@ export function Announcements() {
       )}
 
       {showAddModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={() => {
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => {
           setShowAddModal(false);
           resetForm();
         }}>
-          <div className="bg-white rounded-xl max-w-2xl w-full" onClick={(e) => e.stopPropagation()}>
-            <div className="p-6 border-b border-gray-200 flex items-center justify-between">
-              <h2 className="text-gray-900">{editingAnnouncement ? 'Edit Announcement' : 'New Announcement'}</h2>
+          <div className="w-full max-w-2xl rounded-xl border border-gray-200 bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-gray-200 p-6">
+              <h2 className="text-lg font-medium text-gray-900">{editingAnnouncement ? 'Edit Announcement' : 'New Announcement'}</h2>
               <button onClick={() => {
                 setShowAddModal(false);
                 resetForm();
-              }} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
+              }} className="rounded-md p-2 transition-colors hover:bg-gray-100">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -324,18 +324,18 @@ export function Announcements() {
             <form onSubmit={(e) => void handleCreateOrUpdateAnnouncement(e)} className="p-6 space-y-4">
               <div className="space-y-2">
                 <label className="text-sm text-gray-700">Title *</label>
-                <input required value={formData.title} onChange={(e) => setFormData({ ...formData, title: e.target.value })} className="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="e.g., Rent Due Reminder" />
+                <input required value={formData.title} onChange={(e) => setFormData({ ...formData, title: e.target.value })} className="w-full rounded-lg border border-gray-300 px-4 py-2" placeholder="e.g., Rent Due Reminder" />
               </div>
 
               <div className="space-y-2">
                 <label className="text-sm text-gray-700">Message *</label>
-                <textarea required value={formData.content} onChange={(e) => setFormData({ ...formData, content: e.target.value })} className="w-full px-4 py-2 border border-gray-300 rounded-lg" rows={4} placeholder="Write your announcement message" />
+                <textarea required value={formData.content} onChange={(e) => setFormData({ ...formData, content: e.target.value })} className="w-full rounded-lg border border-gray-300 px-4 py-2" rows={4} placeholder="Write your announcement message" />
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <label className="text-sm text-gray-700">Category *</label>
-                  <select value={formData.category} onChange={(e) => setFormData({ ...formData, category: e.target.value as 'maintenance' | 'payment' | 'rules' | 'general' })} className="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                  <select value={formData.category} onChange={(e) => setFormData({ ...formData, category: e.target.value as 'maintenance' | 'payment' | 'rules' | 'general' })} className="w-full rounded-lg border border-gray-300 px-4 py-2">
                     <option value="general">General</option>
                     <option value="maintenance">Maintenance</option>
                     <option value="payment">Payment</option>
@@ -345,28 +345,28 @@ export function Announcements() {
 
                 <div className="flex items-center gap-4 pt-6">
                   <label className="flex items-center gap-2 cursor-pointer">
-                    <input type="checkbox" checked={formData.isPinned} onChange={(e) => setFormData({ ...formData, isPinned: e.target.checked })} className="w-4 h-4 text-blue-600 rounded" />
+                    <input type="checkbox" checked={formData.isPinned} onChange={(e) => setFormData({ ...formData, isPinned: e.target.checked })} className="h-4 w-4 rounded text-indigo-600" />
                     <span className="text-sm text-gray-700">Pin Announcement</span>
                   </label>
                 </div>
               </div>
 
               {!editingAnnouncement && (
-                <div className="flex items-center gap-2 p-3 bg-green-50 rounded-lg">
-                  <input type="checkbox" checked={formData.sendViaWhatsApp} onChange={(e) => setFormData({ ...formData, sendViaWhatsApp: e.target.checked })} className="w-4 h-4 text-green-600 rounded" />
+                <div className="flex items-center gap-2 rounded-lg bg-green-50 p-3">
+                  <input type="checkbox" checked={formData.sendViaWhatsApp} onChange={(e) => setFormData({ ...formData, sendViaWhatsApp: e.target.checked })} className="h-4 w-4 rounded text-green-600" />
                   <MessageCircle className="w-4 h-4 text-green-600" />
                   <span className="text-sm text-green-700">Mark as sent via WhatsApp</span>
                 </div>
               )}
 
-              <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-200">
+              <div className="flex items-center justify-end gap-3 border-t border-gray-200 pt-4">
                 <button type="button" onClick={() => {
                   setShowAddModal(false);
                   resetForm();
-                }} className="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
+                }} className="rounded-lg border border-gray-300 bg-white px-6 py-2.5 transition-colors hover:bg-gray-50">
                   Cancel
                 </button>
-                <button type="submit" disabled={isSaving} className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60">
+                <button type="submit" disabled={isSaving} className="rounded-lg bg-indigo-600 px-6 py-2.5 text-white transition-colors hover:bg-indigo-700 disabled:opacity-60">
                   {isSaving ? 'Saving...' : editingAnnouncement ? 'Update Announcement' : 'Create Announcement'}
                 </button>
               </div>

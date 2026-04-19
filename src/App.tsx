@@ -10,8 +10,6 @@ import { Announcements } from './components/Announcements';
 import { Settings } from './components/Settings';
 import { Properties } from './components/Properties';
 import { Notifications } from './components/Notifications';
-import { Pricing } from './components/Pricing';
-import { Subscriptions } from './components/Subscriptions';
 import { Support } from './components/Support';
 import { AdminSection } from './components/AdminSection';
 import { TenantPortal } from './components/TenantPortal';
@@ -20,6 +18,7 @@ import { MobileNav } from './components/MobileNav';
 import { Header } from './components/Header';
 import { OTPLogin } from './components/OTPLogin';
 import { OTPSignup } from './components/OTPSignup';
+import { PageFrame } from './components/ui/PageFrame';
 import { LocalizationProvider } from './contexts/LocalizationContext';
 import { isPlatformAdminRole, isScopedOwnerRole } from './utils/roles';
 
@@ -28,6 +27,7 @@ function AppContent() {
   const [showSignUp, setShowSignUp] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -136,22 +136,10 @@ function AppContent() {
         return <Settings />;
       case 'notifications':
         return <Notifications onBack={() => setActiveTab('dashboard')} />;
-      case 'pricing':
-        return <Pricing />;
-      case 'subscriptions':
-        return <Subscriptions />;
       case 'support':
         return <Support />;
-      case 'admin-dashboard':
-        return isPlatformAdminRole(user.role) ? <AdminSection view="dashboard" onNavigate={(v) => setActiveTab(`admin-${v}`)} /> : <Dashboard />;
-      case 'admin-owners':
-        return isPlatformAdminRole(user.role) ? <AdminSection view="owners" onNavigate={(v) => setActiveTab(`admin-${v}`)} /> : <Dashboard />;
-      case 'admin-subscriptions':
-        return isPlatformAdminRole(user.role) ? <AdminSection view="subscriptions" onNavigate={(v) => setActiveTab(`admin-${v}`)} /> : <Dashboard />;
-      case 'admin-support':
-        return isPlatformAdminRole(user.role) ? <AdminSection view="support" onNavigate={(v) => setActiveTab(`admin-${v}`)} /> : <Dashboard />;
-      case 'admin-activity':
-        return isPlatformAdminRole(user.role) ? <AdminSection view="activity" onNavigate={(v) => setActiveTab(`admin-${v}`)} /> : <Dashboard />;
+      case 'admin-section':
+        return isPlatformAdminRole(user.role) ? <AdminSection /> : <Dashboard />;
       case 'tenant-portal':
         return <TenantPortal />;
       default:
@@ -161,13 +149,15 @@ function AppContent() {
 
   return (
     <PropertyProvider>
-      <div className="flex h-screen bg-slate-100 overflow-hidden">
+      <div className="flex h-screen bg-[#F8FAFC] overflow-hidden">
         {/* Sidebar for desktop */}
         <Sidebar 
           activeTab={activeTab} 
           setActiveTab={setActiveTabWithRoleGuard}
           sidebarOpen={sidebarOpen}
           setSidebarOpen={setSidebarOpen}
+          sidebarCollapsed={sidebarCollapsed}
+          setSidebarCollapsed={setSidebarCollapsed}
           userRole={user.role}
         />
 
@@ -180,9 +170,9 @@ function AppContent() {
           />
           
           <main className="flex-1 overflow-y-auto pb-20 md:pb-0">
-            <div className="p-4 md:p-6 lg:p-8">
+            <PageFrame>
               {renderContent()}
-            </div>
+            </PageFrame>
           </main>
 
           {/* Mobile bottom navigation */}

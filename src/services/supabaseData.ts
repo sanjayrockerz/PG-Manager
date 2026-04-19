@@ -1,6 +1,7 @@
 import { supabase } from '../lib/supabase';
 import type { Property, Room } from '../contexts/PropertyContext';
 import { isPlatformAdminRole, isScopedOwnerRole } from '../utils/roles';
+import { isValidStoredPhoneNumber as isValidStoredPhoneFromUtils, parseStoredPhone } from '../utils/phone';
 
 export type UserRole = 'owner' | 'owner_manager' | 'staff' | 'tenant' | 'platform_admin' | 'admin' | 'super_admin';
 export type TenantStatus = 'active' | 'inactive';
@@ -13,6 +14,11 @@ export type SupportTicketPriority = 'low' | 'medium' | 'high' | 'urgent';
 export type SupportTicketCategory = 'billing' | 'technical' | 'operations' | 'tenant' | 'other';
 
 const TENANT_FILES_BUCKET = 'tenant-files';
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const INDIAN_PINCODE_PATTERN = /^\d{6}$/;
+const STARTER_MARKER = '[starter-reference-v2]';
+const STARTER_EMAIL_PREFIX = 'starter.';
+const SYNTHETIC_EMAIL_MARKERS = ['.demo@pgmanager.app', '@demo.app'] as const;
 
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
@@ -492,7 +498,68 @@ function normalizeError(error: unknown): Error {
   if (error instanceof Error) {
     return error;
   }
+  const candidate = error as { message?: string; details?: string; hint?: string; code?: string } | null;
+  const message = String(candidate?.message ?? '').trim();
+  const details = String(candidate?.details ?? '').trim();
+  const hint = String(candidate?.hint ?? '').trim();
+  const code = String(candidate?.code ?? '').trim();
+
+  const combined = [message, details, hint].filter(Boolean).join(' | ');
+  if (combined) {
+    return new Error(code ? `${combined} (code: ${code})` : combined);
+  }
   return new Error('Unknown Supabase error');
+}
+
+function isStarterPropertyRow(row: Pick<PropertyRow, 'landmark'>): boolean {
+  const landmark = String(row.landmark ?? '').toLowerCase();
+  return landmark.includes(STARTER_MARKER.toLowerCase());
+}
+
+function isStarterTenantRow(row: Pick<TenantRow, 'email'>): boolean {
+  const email = String(row.email ?? '').trim().toLowerCase();
+  return email.startsWith(STARTER_EMAIL_PREFIX) || SYNTHETIC_EMAIL_MARKERS.some((marker) => email.includes(marker));
+}
+
+function isSyntheticTenantEmail(emailValue: string): boolean {
+  const email = String(emailValue ?? '').trim().toLowerCase();
+  if (!email) {
+    return false;
+  }
+  return email.startsWith(STARTER_EMAIL_PREFIX) || SYNTHETIC_EMAIL_MARKERS.some((marker) => email.includes(marker));
+}
+
+async function filterSyntheticPayments(rows: PaymentRow[]): Promise<PaymentRow[]> {
+  if (rows.length === 0) {
+    return rows;
+  }
+
+  const tenantIds = Array.from(new Set(rows.map((row) => row.tenant_id).filter(Boolean)));
+  if (tenantIds.length === 0) {
+    return rows;
+  }
+
+  const { data: tenantRows, error } = await supabase
+    .from('tenants')
+    .select('id,email')
+    .in('id', tenantIds)
+    .returns<Array<{ id: string; email: string }>>();
+
+  if (error) {
+    throw error;
+  }
+
+  const syntheticTenantIds = new Set(
+    (tenantRows ?? [])
+      .filter((tenant) => isSyntheticTenantEmail(tenant.email))
+      .map((tenant) => tenant.id),
+  );
+
+  if (syntheticTenantIds.size === 0) {
+    return rows;
+  }
+
+  return rows.filter((row) => !syntheticTenantIds.has(row.tenant_id));
 }
 
 function isMissingColumnError(error: unknown, candidateColumns: string[]): boolean {
@@ -506,6 +573,316 @@ function isMissingColumnError(error: unknown, candidateColumns: string[]): boole
 function isMissingRelationError(error: unknown, relation: string): boolean {
   const message = String((error as { message?: string } | null)?.message ?? '').toLowerCase();
   return message.includes('relation') && message.includes(relation.toLowerCase()) && message.includes('does not exist');
+}
+
+function isValidEmailAddress(value: string): boolean {
+  return EMAIL_PATTERN.test(value.trim());
+}
+
+function isValidStoredPhoneNumber(value: string): boolean {
+  return isValidStoredPhoneFromUtils(value);
+}
+
+function normalizePhoneDigits(value: string): string {
+  return value.replace(/\D/g, '');
+}
+
+function toPropertyContactPhoneForDatabase(value: string): string {
+  const parsed = parseStoredPhone(value);
+  const localDigits = normalizePhoneDigits(parsed.localNumber);
+  if (localDigits.length === 10) {
+    return localDigits;
+  }
+
+  // Fallback for partially normalized historical values.
+  const allDigits = normalizePhoneDigits(value);
+  if (allDigits.length >= 10) {
+    return allDigits.slice(-10);
+  }
+
+  return allDigits;
+}
+
+function toPhoneSearchVariants(value: string): string[] {
+  const trimmed = value.trim();
+  const digits = normalizePhoneDigits(trimmed);
+  const variants = new Set<string>();
+
+  if (trimmed) {
+    variants.add(trimmed);
+  }
+
+  if (digits) {
+    variants.add(digits);
+    if (digits.length > 10) {
+      variants.add(digits.slice(-10));
+    }
+    if (digits.length === 10) {
+      variants.add(`+91 ${digits}`);
+      variants.add(`+91${digits}`);
+    }
+  }
+
+  return Array.from(variants);
+}
+
+function validatePropertyInput(input: Partial<Property>, requireAll: boolean): void {
+  const name = String(input.name ?? '').trim();
+  const address = String(input.address ?? '').trim();
+  const city = String(input.city ?? '').trim();
+  const state = String(input.state ?? '').trim();
+  const pincode = String(input.pincode ?? '').trim();
+  const contactName = String(input.contactName ?? '').trim();
+  const contactPhone = String(input.contactPhone ?? '').trim();
+  const contactPhoneDigits = toPropertyContactPhoneForDatabase(contactPhone);
+  const contactEmail = String(input.contactEmail ?? '').trim();
+
+  if (requireAll || input.name !== undefined) {
+    if (!name || name.length < 2) {
+      throw new Error('Property name must be at least 2 characters.');
+    }
+  }
+
+  if (requireAll || input.address !== undefined) {
+    if (!address || address.length < 5) {
+      throw new Error('Property address must be at least 5 characters.');
+    }
+  }
+
+  if (requireAll || input.city !== undefined) {
+    if (!city || /\d/.test(city)) {
+      throw new Error('City is required and cannot contain digits.');
+    }
+  }
+
+  if (requireAll || input.state !== undefined) {
+    if (!state || /\d/.test(state)) {
+      throw new Error('State is required and cannot contain digits.');
+    }
+  }
+
+  if (requireAll || input.pincode !== undefined) {
+    if (!INDIAN_PINCODE_PATTERN.test(pincode)) {
+      throw new Error('Pincode must be exactly 6 digits.');
+    }
+  }
+
+  if (requireAll || input.floors !== undefined) {
+    const floors = Number(input.floors ?? 0);
+    if (!Number.isFinite(floors) || floors < 1 || floors > 100) {
+      throw new Error('Number of floors must be between 1 and 100.');
+    }
+  }
+
+  if (requireAll || input.contactName !== undefined) {
+    if (!contactName || contactName.length < 2 || /\d/.test(contactName)) {
+      throw new Error('Contact person name is required and cannot contain digits.');
+    }
+  }
+
+  if (requireAll || input.contactPhone !== undefined) {
+    if (!contactPhone) {
+      throw new Error('Contact phone number is required.');
+    }
+
+    if (!isValidStoredPhoneNumber(contactPhone)) {
+      throw new Error('Contact phone number must be a valid mobile value like +919876543210.');
+    }
+
+    if (contactPhoneDigits.length !== 10) {
+      throw new Error('Property contact phone must resolve to exactly 10 digits for current Supabase schema.');
+    }
+  }
+
+  if (requireAll || input.contactEmail !== undefined) {
+    if (contactEmail && !isValidEmailAddress(contactEmail)) {
+      throw new Error('Contact email must be a valid email address.');
+    }
+  }
+}
+
+function validateTenantInput(input: Partial<TenantCreateInput>, requireAll: boolean): void {
+  const name = String(input.name ?? '').trim();
+  const email = String(input.email ?? '').trim().toLowerCase();
+  const phone = String(input.phone ?? '').trim();
+  const parentName = String(input.parentName ?? '').trim();
+  const parentPhone = String(input.parentPhone ?? '').trim();
+  const idType = String(input.idType ?? '').trim();
+  const idNumber = String(input.idNumber ?? '').trim();
+
+  if (requireAll || input.name !== undefined) {
+    if (!name || name.length < 2 || /\d/.test(name)) {
+      throw new Error('Tenant name must be at least 2 characters and cannot contain digits.');
+    }
+  }
+
+  if (requireAll || input.email !== undefined) {
+    if (!email || !isValidEmailAddress(email)) {
+      throw new Error('Tenant email must be a valid email address.');
+    }
+  }
+
+  if (requireAll || input.phone !== undefined) {
+    if (!phone || !isValidStoredPhoneNumber(phone)) {
+      throw new Error('Tenant phone must be a valid value like +919876543210.');
+    }
+  }
+
+  if (requireAll || input.propertyId !== undefined) {
+    if (!String(input.propertyId ?? '').trim()) {
+      throw new Error('Property selection is required.');
+    }
+  }
+
+  if (requireAll || input.floor !== undefined) {
+    const floor = Number(input.floor ?? 0);
+    if (!Number.isFinite(floor) || floor < 1) {
+      throw new Error('Floor must be at least 1.');
+    }
+  }
+
+  if (requireAll || input.room !== undefined) {
+    if (!String(input.room ?? '').trim()) {
+      throw new Error('Room is required.');
+    }
+  }
+
+  if (requireAll || input.bed !== undefined) {
+    if (!String(input.bed ?? '').trim()) {
+      throw new Error('Bed is required.');
+    }
+  }
+
+  if (requireAll || input.monthlyRent !== undefined) {
+    const monthlyRent = Number(input.monthlyRent ?? 0);
+    if (!Number.isFinite(monthlyRent) || monthlyRent <= 0) {
+      throw new Error('Monthly rent must be greater than zero.');
+    }
+  }
+
+  if (requireAll || input.securityDeposit !== undefined) {
+    const securityDeposit = Number(input.securityDeposit ?? 0);
+    if (!Number.isFinite(securityDeposit) || securityDeposit < 0) {
+      throw new Error('Security deposit cannot be negative.');
+    }
+  }
+
+  if (requireAll || input.rentDueDate !== undefined) {
+    const rentDueDate = Number(input.rentDueDate ?? 0);
+    if (!Number.isFinite(rentDueDate) || rentDueDate < 1 || rentDueDate > 31) {
+      throw new Error('Rent due date must be between 1 and 31.');
+    }
+  }
+
+  if (requireAll || input.parentName !== undefined) {
+    if (!parentName || /\d/.test(parentName)) {
+      throw new Error('Parent/guardian name is required and cannot contain digits.');
+    }
+  }
+
+  if (requireAll || input.parentPhone !== undefined) {
+    if (!parentPhone || !isValidStoredPhoneNumber(parentPhone)) {
+      throw new Error('Parent phone must be a valid value like +919876543210.');
+    }
+  }
+
+  if (requireAll || input.idType !== undefined) {
+    if (!idType) {
+      throw new Error('ID type is required.');
+    }
+  }
+
+  if (requireAll || input.idNumber !== undefined) {
+    if (!idNumber || idNumber.length > 64) {
+      throw new Error('ID number is required and cannot exceed 64 characters.');
+    }
+  }
+
+  if (requireAll || input.joinDate !== undefined) {
+    if (!String(input.joinDate ?? '').trim()) {
+      throw new Error('Join date is required.');
+    }
+  }
+}
+
+function mapTenantSaveError(error: unknown): Error {
+  const candidate = error as { message?: string; details?: string; code?: string } | null;
+  const message = String(candidate?.message ?? '').toLowerCase();
+  const details = String(candidate?.details ?? '').toLowerCase();
+  const combined = `${message} ${details}`.trim();
+
+  if (combined.includes('tenants_parent_phone_format') || combined.includes('parent_phone')) {
+    return new Error('Parent phone format is invalid. Please enter digits only (for example +919876543210) without spaces.');
+  }
+
+  if (combined.includes('tenants_phone_format') || (combined.includes('phone') && combined.includes('constraint'))) {
+    return new Error('Tenant phone format is invalid. Please enter digits only (for example +919876543210) without spaces.');
+  }
+
+  if (combined.includes('tenants_email_format')) {
+    return new Error('Tenant email format is invalid. Enter a valid email address.');
+  }
+
+  if (combined.includes('row-level security') || combined.includes('rls')) {
+    return new Error('Tenant save is blocked by Supabase RLS policy. Apply the latest database setup/migrations and verify owner scope policies.');
+  }
+
+  if (combined.includes('foreign key') && combined.includes('property_id')) {
+    return new Error('Selected property is invalid or inaccessible for this account. Refresh properties and try again.');
+  }
+
+  if (combined.includes('duplicate key') && combined.includes('tenant')) {
+    return new Error('A conflicting tenant record already exists. Check room/tenant details and try again.');
+  }
+
+  return normalizeError(error);
+}
+
+function mapPropertySaveError(error: unknown): Error {
+  const candidate = error as { message?: string; details?: string; code?: string } | null;
+  const message = String(candidate?.message ?? '').toLowerCase();
+  const details = String(candidate?.details ?? '').toLowerCase();
+  const combined = `${message} ${details}`.trim();
+
+  if (combined.includes('row-level security') || combined.includes('rls')) {
+    return new Error('Property save is blocked by Supabase RLS policy. Use an owner account for property create/update/delete, or update properties_owner_manage policy for scoped roles. Also confirm latest Supabase migrations are applied.');
+  }
+
+  if (combined.includes('duplicate key') && combined.includes('properties')) {
+    return new Error('A property with similar details already exists. Update the existing property or change the name.');
+  }
+
+  if (combined.includes('properties_contact_email_format') || (combined.includes('contact_email') && combined.includes('constraint'))) {
+    return new Error('Contact email format is invalid. Enter a valid email address or leave it blank.');
+  }
+
+  if (combined.includes('properties_contact_phone_format') || (combined.includes('contact_phone') && combined.includes('constraint'))) {
+    return new Error('Property contact phone must be exactly 10 digits in this Supabase setup.');
+  }
+
+  return normalizeError(error);
+}
+
+async function shouldIncludeStarterRows(context: CurrentUserContext): Promise<boolean> {
+  const profile = await supabaseAuthDataApi.getProfileById(context.userId);
+  if (!profile) {
+    return false;
+  }
+  return shouldBootstrapStarterData(profile.email);
+}
+
+async function assertPropertyDefinitionWriteAccess(): Promise<CurrentUserContext> {
+  const context = await getCurrentUserContext();
+
+  if (context.isPlatformAdmin) {
+    return context;
+  }
+
+  if (context.role !== 'owner') {
+    throw new Error('Property save is blocked by role policy. In current Supabase RLS, only owner accounts can create/update/delete properties. Log in as owner, or update the properties_owner_manage policy for owner_manager/staff roles.');
+  }
+
+  return context;
 }
 
 interface CurrentUserContext {
@@ -722,10 +1099,15 @@ async function resolveTenantContextForCurrentUser(): Promise<{
   };
 
   const fetchTenantByPhone = async (tenantPhone: string): Promise<TenantRow | null> => {
+    const variants = toPhoneSearchVariants(tenantPhone);
+    if (variants.length === 0) {
+      return null;
+    }
+
     const { data, error } = await supabase
       .from('tenants')
       .select('*')
-      .eq('phone', tenantPhone)
+      .in('phone', variants)
       .order('status', { ascending: false })
       .order('created_at', { ascending: false })
       .limit(1)
@@ -735,7 +1117,30 @@ async function resolveTenantContextForCurrentUser(): Promise<{
       throw error;
     }
 
-    return data?.[0] ?? null;
+    if (data?.[0]) {
+      return data[0];
+    }
+
+    const digits = normalizePhoneDigits(tenantPhone);
+    if (!digits) {
+      return null;
+    }
+
+    const suffix = digits.length > 10 ? digits.slice(-10) : digits;
+    const { data: fallbackRows, error: fallbackError } = await supabase
+      .from('tenants')
+      .select('*')
+      .ilike('phone', `%${suffix}`)
+      .order('status', { ascending: false })
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .returns<TenantRow[]>();
+
+    if (fallbackError) {
+      throw fallbackError;
+    }
+
+    return fallbackRows?.[0] ?? null;
   };
 
   let row: TenantRow | null = null;
@@ -1112,7 +1517,548 @@ async function syncPropertyRoomCount(propertyId: string): Promise<void> {
   }
 }
 
-async function uploadTenantFile(ownerId: string, tenantName: string, file: File, kind: 'photo' | 'document'): Promise<string> {
+async function ensureOwnerStarterData(ownerId: string, ownerName: string, ownerEmail: string): Promise<void> {
+  const STARTER_ID_DOC_URL = 'https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf';
+  const STARTER_PHOTO_URL = 'https://placehold.co/512x512/png?text=Tenant+Photo';
+
+  const now = new Date();
+  const ownerSuffix = ownerId.replace(/-/g, '').slice(0, 8);
+  const fallbackOwnerName = ownerName?.trim() || 'Owner';
+  const emailDomain = ownerEmail?.includes('@')
+    ? ownerEmail.split('@')[1].trim().toLowerCase()
+    : 'pgmanager.app';
+
+  const toDateOnlyString = (value: Date): string => value.toISOString().split('T')[0];
+  const shiftDays = (days: number): Date => {
+    const date = new Date(now);
+    date.setDate(date.getDate() + days);
+    return date;
+  };
+  const shiftMonthsWithDay = (monthOffset: number, dayOfMonth: number): Date => {
+    const date = new Date(now.getFullYear(), now.getMonth() + monthOffset, Math.min(Math.max(dayOfMonth, 1), 28));
+    date.setHours(10, 0, 0, 0);
+    return date;
+  };
+
+  const referenceProperties = [
+    {
+      key: 'hsr',
+      name: 'Reference - Sunrise Habitat (HSR)',
+      address: '42, 19th Main Road, Sector 4, HSR Layout',
+      city: 'Bengaluru',
+      state: 'Karnataka',
+      pincode: '560102',
+      floors: 3,
+      contactName: 'Nikhil Reddy',
+      contactPhone: '9845012345',
+      addressLine1: '42, 19th Main Road',
+      locality: 'HSR Layout Sector 4',
+      landmark: 'Near BDA Complex',
+      formattedAddress: '42, 19th Main Road, Sector 4, HSR Layout, Bengaluru, Karnataka 560102',
+      rooms: [
+        { number: '101', floor: 1, type: 'double' as const, beds: 2, rent: 12500 },
+        { number: '102', floor: 1, type: 'double' as const, beds: 2, rent: 11800 },
+        { number: '201', floor: 2, type: 'single' as const, beds: 1, rent: 14500 },
+      ],
+    },
+    {
+      key: 'kor',
+      name: 'Reference - City Nest (Koramangala)',
+      address: '17, 5th Block, Koramangala',
+      city: 'Bengaluru',
+      state: 'Karnataka',
+      pincode: '560095',
+      floors: 2,
+      contactName: 'Ananya Rao',
+      contactPhone: '9900123456',
+      addressLine1: '17, 5th Block',
+      locality: 'Koramangala',
+      landmark: 'Near Jyoti Nivas College',
+      formattedAddress: '17, 5th Block, Koramangala, Bengaluru, Karnataka 560095',
+      rooms: [
+        { number: '001', floor: 0, type: 'single' as const, beds: 1, rent: 13200 },
+        { number: '002', floor: 0, type: 'double' as const, beds: 2, rent: 11200 },
+        { number: '101', floor: 1, type: 'triple' as const, beds: 3, rent: 9800 },
+      ],
+    },
+    {
+      key: 'ind',
+      name: 'Reference - Green View (Indiranagar)',
+      address: '28, 12th Cross, Indiranagar',
+      city: 'Bengaluru',
+      state: 'Karnataka',
+      pincode: '560038',
+      floors: 2,
+      contactName: 'Siddharth Jain',
+      contactPhone: '9876504455',
+      addressLine1: '28, 12th Cross',
+      locality: 'Indiranagar',
+      landmark: '100 Feet Road',
+      formattedAddress: '28, 12th Cross, Indiranagar, Bengaluru, Karnataka 560038',
+      rooms: [
+        { number: 'A1', floor: 1, type: 'single' as const, beds: 1, rent: 15000 },
+        { number: 'A2', floor: 1, type: 'double' as const, beds: 2, rent: 12500 },
+      ],
+    },
+  ] as const;
+
+  const referenceTenants = [
+    {
+      slug: 'meera',
+      propertyKey: 'hsr',
+      name: 'Meera Sharma',
+      phone: '+919988776655',
+      floor: 1,
+      room: '101',
+      bed: '1',
+      monthlyRent: 12500,
+      securityDeposit: 25000,
+      rentDueDate: 5,
+      parentName: 'Sanjay Sharma',
+      parentPhone: '+919988776601',
+      idType: 'Aadhaar',
+      idNumber: '987654321012',
+      joinedDaysAgo: 120,
+      status: 'active' as const,
+    },
+    {
+      slug: 'karan',
+      propertyKey: 'hsr',
+      name: 'Karan Malhotra',
+      phone: '+919876501234',
+      floor: 1,
+      room: '102',
+      bed: '1',
+      monthlyRent: 11800,
+      securityDeposit: 23600,
+      rentDueDate: 7,
+      parentName: 'Rakesh Malhotra',
+      parentPhone: '+919876501200',
+      idType: 'PAN',
+      idNumber: 'ABCDE1234F',
+      joinedDaysAgo: 70,
+      status: 'active' as const,
+    },
+    {
+      slug: 'nisha',
+      propertyKey: 'kor',
+      name: 'Nisha Verma',
+      phone: '+919812304567',
+      floor: 0,
+      room: '001',
+      bed: '1',
+      monthlyRent: 13200,
+      securityDeposit: 26400,
+      rentDueDate: 3,
+      parentName: 'Mahesh Verma',
+      parentPhone: '+919812304500',
+      idType: 'Passport',
+      idNumber: 'Z3456789',
+      joinedDaysAgo: 140,
+      status: 'active' as const,
+    },
+    {
+      slug: 'rohan',
+      propertyKey: 'kor',
+      name: 'Rohan Dsouza',
+      phone: '+919765401234',
+      floor: 0,
+      room: '002',
+      bed: '2',
+      monthlyRent: 11200,
+      securityDeposit: 20000,
+      rentDueDate: 10,
+      parentName: 'Anthony Dsouza',
+      parentPhone: '+919765401200',
+      idType: 'Driving License',
+      idNumber: 'KA0520240011234',
+      joinedDaysAgo: 45,
+      status: 'active' as const,
+    },
+    {
+      slug: 'diya',
+      propertyKey: 'ind',
+      name: 'Diya Menon',
+      phone: '+918971231234',
+      floor: 1,
+      room: 'A1',
+      bed: '1',
+      monthlyRent: 15000,
+      securityDeposit: 30000,
+      rentDueDate: 4,
+      parentName: 'Ritu Menon',
+      parentPhone: '+918971231200',
+      idType: 'Aadhaar',
+      idNumber: '123412341234',
+      joinedDaysAgo: 30,
+      status: 'active' as const,
+    },
+    {
+      slug: 'aditya',
+      propertyKey: 'ind',
+      name: 'Aditya Nair',
+      phone: '+919611123456',
+      floor: 1,
+      room: 'A2',
+      bed: '1',
+      monthlyRent: 12500,
+      securityDeposit: 25000,
+      rentDueDate: 8,
+      parentName: 'Vikram Nair',
+      parentPhone: '+919611123400',
+      idType: 'PAN',
+      idNumber: 'PQRSN4321K',
+      joinedDaysAgo: 18,
+      status: 'inactive' as const,
+    },
+  ] as const;
+
+  const { data: starterPropertyRows, error: starterPropertyError } = await supabase
+    .from('properties')
+    .select('*')
+    .eq('owner_id', ownerId)
+    .ilike('landmark', `%${STARTER_MARKER}%`)
+    .returns<PropertyRow[]>();
+
+  if (starterPropertyError) {
+    throw starterPropertyError;
+  }
+
+  const starterPropertyMap = new Map<string, PropertyRow>();
+  (starterPropertyRows ?? []).forEach((row) => {
+    starterPropertyMap.set(row.name, row);
+  });
+
+  const propertyByKey = new Map<string, PropertyRow>();
+
+  for (const seedProperty of referenceProperties) {
+    let propertyRow = starterPropertyMap.get(seedProperty.name);
+
+    if (!propertyRow) {
+      const { data, error } = await supabase
+        .from('properties')
+        .insert({
+          owner_id: ownerId,
+          name: seedProperty.name,
+          address: seedProperty.address,
+          city: seedProperty.city,
+          state: seedProperty.state,
+          pincode: seedProperty.pincode,
+          floors: seedProperty.floors,
+          total_rooms: seedProperty.rooms.length,
+          contact_name: seedProperty.contactName,
+          contact_phone: seedProperty.contactPhone,
+          contact_email: ownerEmail?.trim().toLowerCase() || `${ownerSuffix}@${emailDomain}`,
+          address_line1: seedProperty.addressLine1,
+          locality: seedProperty.locality,
+          landmark: `${seedProperty.landmark} ${STARTER_MARKER}`,
+          formatted_address: seedProperty.formattedAddress,
+        })
+        .select('*')
+        .single<PropertyRow>();
+
+      if (error) {
+        throw error;
+      }
+
+      propertyRow = data;
+      starterPropertyMap.set(seedProperty.name, propertyRow);
+    }
+
+    propertyByKey.set(seedProperty.key, propertyRow);
+
+    const { data: existingRooms, error: roomFetchError } = await supabase
+      .from('rooms')
+      .select('number,floor')
+      .eq('property_id', propertyRow.id)
+      .returns<Array<{ number: string; floor: number }>>();
+
+    if (roomFetchError) {
+      throw roomFetchError;
+    }
+
+    const roomKeySet = new Set((existingRooms ?? []).map((room) => `${room.floor}::${room.number.toLowerCase()}`));
+    const missingRooms = seedProperty.rooms.filter((room) => !roomKeySet.has(`${room.floor}::${room.number.toLowerCase()}`));
+
+    if (missingRooms.length > 0) {
+      const { error: roomInsertError } = await supabase
+        .from('rooms')
+        .insert(missingRooms.map((room) => ({
+          property_id: propertyRow.id,
+          number: room.number,
+          floor: room.floor,
+          type: room.type,
+          beds: room.beds,
+          rent: room.rent,
+          status: 'vacant',
+          occupied_beds: 0,
+          tenant_id: null,
+        })));
+
+      if (roomInsertError) {
+        throw roomInsertError;
+      }
+    }
+  }
+
+  const seededEmails = referenceTenants.map((tenant) => `starter.${tenant.slug}.${ownerSuffix}@${emailDomain}`);
+
+  const { data: existingSeedTenants, error: existingTenantError } = await supabase
+    .from('tenants')
+    .select('*')
+    .eq('owner_id', ownerId)
+    .in('email', seededEmails)
+    .returns<TenantRow[]>();
+
+  if (existingTenantError) {
+    throw existingTenantError;
+  }
+
+  const tenantByEmail = new Map<string, TenantRow>();
+  (existingSeedTenants ?? []).forEach((tenant) => {
+    tenantByEmail.set(tenant.email.toLowerCase(), tenant);
+  });
+
+  for (const seedTenant of referenceTenants) {
+    const tenantEmail = `starter.${seedTenant.slug}.${ownerSuffix}@${emailDomain}`.toLowerCase();
+    if (tenantByEmail.has(tenantEmail)) {
+      continue;
+    }
+
+    const property = propertyByKey.get(seedTenant.propertyKey);
+    if (!property) {
+      continue;
+    }
+
+    const joinDate = toDateOnlyString(shiftDays(-seedTenant.joinedDaysAgo));
+
+    const { data: createdTenant, error: tenantInsertError } = await supabase
+      .from('tenants')
+      .insert({
+        owner_id: ownerId,
+        property_id: property.id,
+        name: seedTenant.name,
+        phone: seedTenant.phone,
+        email: tenantEmail,
+        photo_url: STARTER_PHOTO_URL,
+        floor: seedTenant.floor,
+        room: seedTenant.room,
+        bed: seedTenant.bed,
+        monthly_rent: seedTenant.monthlyRent,
+        security_deposit: seedTenant.securityDeposit,
+        rent_due_date: seedTenant.rentDueDate,
+        parent_name: seedTenant.parentName,
+        parent_phone: seedTenant.parentPhone,
+        id_type: seedTenant.idType,
+        id_number: seedTenant.idNumber,
+        id_document_url: STARTER_ID_DOC_URL,
+        join_date: joinDate,
+        status: seedTenant.status,
+      })
+      .select('*')
+      .single<TenantRow>();
+
+    if (tenantInsertError) {
+      throw tenantInsertError;
+    }
+
+    tenantByEmail.set(tenantEmail, createdTenant);
+  }
+
+  const seededTenants = referenceTenants
+    .map((seedTenant) => {
+      const tenantEmail = `starter.${seedTenant.slug}.${ownerSuffix}@${emailDomain}`.toLowerCase();
+      const tenant = tenantByEmail.get(tenantEmail);
+      const property = propertyByKey.get(seedTenant.propertyKey);
+      if (!tenant || !property) {
+        return null;
+      }
+      return {
+        seed: seedTenant,
+        tenant,
+        property,
+      };
+    })
+    .filter((entry): entry is { seed: typeof referenceTenants[number]; tenant: TenantRow; property: PropertyRow } => Boolean(entry));
+
+  for (const property of propertyByKey.values()) {
+    await syncRoomOccupancyForProperty(ownerId, property.id);
+    await syncPropertyRoomCount(property.id);
+  }
+
+  const dueOffsets = [-2, -1, 0] as const;
+  const paymentSeeds = seededTenants.flatMap(({ seed, tenant, property }, tenantIndex) => {
+    return dueOffsets.map((offset, indexInOffsets) => {
+      const dueDate = shiftMonthsWithDay(offset, seed.rentDueDate);
+      const dueDateString = toDateOnlyString(dueDate);
+      const isLatestCycle = indexInOffsets === dueOffsets.length - 1;
+      const status: PaymentStatus = isLatestCycle
+        ? (tenantIndex % 2 === 0 ? 'pending' : 'overdue')
+        : 'paid';
+      const extraCharges = isLatestCycle ? (tenantIndex % 3) * 300 : (indexInOffsets === 0 ? 200 : 0);
+      const totalAmount = Number(seed.monthlyRent) + Number(extraCharges);
+      const paidDate = status === 'paid'
+        ? toDateOnlyString(shiftDays(-Math.max(3, 45 + (tenantIndex * 2) + (indexInOffsets * 25))))
+        : null;
+      const createdAt = new Date(dueDate);
+      createdAt.setDate(createdAt.getDate() - 2);
+
+      return {
+        owner_id: ownerId,
+        tenant_id: tenant.id,
+        property_id: property.id,
+        tenant_name: tenant.name,
+        room: tenant.room,
+        monthly_rent: seed.monthlyRent,
+        extra_charges: extraCharges,
+        total_amount: totalAmount,
+        due_date: dueDateString,
+        paid_date: paidDate,
+        status,
+        created_at: createdAt.toISOString(),
+      };
+    });
+  });
+
+  const { data: existingPayments, error: existingPaymentsError } = await supabase
+    .from('payments')
+    .select('tenant_id,due_date')
+    .eq('owner_id', ownerId)
+    .in('tenant_id', seededTenants.map((entry) => entry.tenant.id))
+    .returns<Array<{ tenant_id: string; due_date: string }>>();
+
+  if (existingPaymentsError) {
+    throw existingPaymentsError;
+  }
+
+  const existingPaymentKeys = new Set((existingPayments ?? []).map((payment) => `${payment.tenant_id}::${payment.due_date}`));
+  const paymentsToInsert = paymentSeeds.filter((payment) => !existingPaymentKeys.has(`${payment.tenant_id}::${payment.due_date}`));
+
+  if (paymentsToInsert.length > 0) {
+    const { error: paymentInsertError } = await supabase
+      .from('payments')
+      .insert(paymentsToInsert);
+
+    if (paymentInsertError) {
+      throw paymentInsertError;
+    }
+  }
+
+  const maintenanceSeeds = seededTenants.slice(0, 5).map(({ seed, tenant, property }, index) => {
+    const statuses: MaintenanceStatus[] = ['open', 'in-progress', 'resolved', 'open', 'resolved'];
+    const priorities: MaintenancePriority[] = ['high', 'medium', 'low', 'high', 'medium'];
+    const issues = [
+      'Leaking tap in washroom',
+      'Wi-Fi connectivity issue',
+      'Fan making noise',
+      'Water heater not working',
+      'Room lock replacement',
+    ];
+
+    const date = shiftDays(-(index + 1) * 2);
+    const createdAt = new Date(date);
+    createdAt.setHours(11, 30, 0, 0);
+
+    return {
+      owner_id: ownerId,
+      tenant_id: tenant.id,
+      tenant: tenant.name,
+      property_id: property.id,
+      room: `${seed.room}${seed.bed ? `-${seed.bed}` : ''}`,
+      issue: issues[index] ?? 'General maintenance request',
+      description: 'Reference demo maintenance ticket for dashboard and tenant history preview.',
+      source: index % 2 === 0 ? 'manual' as const : 'whatsapp' as const,
+      status: statuses[index] ?? 'open',
+      priority: priorities[index] ?? 'medium',
+      phone: tenant.phone,
+      date: toDateOnlyString(date),
+      created_at: createdAt.toISOString(),
+    };
+  });
+
+  const { data: existingMaintenance, error: existingMaintenanceError } = await supabase
+    .from('maintenance_tickets')
+    .select('property_id,room,issue,date')
+    .eq('owner_id', ownerId)
+    .in('issue', maintenanceSeeds.map((entry) => entry.issue))
+    .returns<Array<{ property_id: string; room: string; issue: string; date: string }>>();
+
+  if (existingMaintenanceError) {
+    throw existingMaintenanceError;
+  }
+
+  const existingMaintenanceKeys = new Set((existingMaintenance ?? []).map((entry) => `${entry.property_id}::${entry.room}::${entry.issue}::${entry.date}`));
+  const maintenanceToInsert = maintenanceSeeds.filter((entry) => !existingMaintenanceKeys.has(`${entry.property_id}::${entry.room}::${entry.issue}::${entry.date}`));
+
+  if (maintenanceToInsert.length > 0) {
+    const { error: maintenanceInsertError } = await supabase
+      .from('maintenance_tickets')
+      .insert(maintenanceToInsert);
+
+    if (maintenanceInsertError) {
+      throw maintenanceInsertError;
+    }
+  }
+
+  const announcementSeeds = [
+    {
+      title: 'Reference Notice: Monthly Deep Cleaning',
+      content: 'Common areas will be deep-cleaned this Sunday between 10 AM and 1 PM.',
+      category: 'general' as const,
+      is_pinned: true,
+      sent_via_whatsapp: true,
+      date: toDateOnlyString(shiftDays(-1)),
+      created_at: shiftDays(-1).toISOString(),
+    },
+    {
+      title: 'Reference Notice: Rent Reminder Window',
+      content: 'Please clear rent dues by the 7th to avoid late fee auto-application.',
+      category: 'payment' as const,
+      is_pinned: false,
+      sent_via_whatsapp: true,
+      date: toDateOnlyString(shiftDays(-3)),
+      created_at: shiftDays(-3).toISOString(),
+    },
+  ];
+
+  const { data: existingAnnouncements, error: existingAnnouncementsError } = await supabase
+    .from('announcements')
+    .select('title')
+    .eq('owner_id', ownerId)
+    .in('title', announcementSeeds.map((entry) => entry.title))
+    .returns<Array<{ title: string }>>();
+
+  if (existingAnnouncementsError) {
+    throw existingAnnouncementsError;
+  }
+
+  const existingAnnouncementTitles = new Set((existingAnnouncements ?? []).map((entry) => entry.title));
+  const announcementsToInsert = announcementSeeds
+    .filter((entry) => !existingAnnouncementTitles.has(entry.title))
+    .map((entry) => ({
+      owner_id: ownerId,
+      property_id: null,
+      ...entry,
+    }));
+
+  if (announcementsToInsert.length > 0) {
+    const { error: announcementInsertError } = await supabase
+      .from('announcements')
+      .insert(announcementsToInsert);
+
+    if (announcementInsertError) {
+      throw announcementInsertError;
+    }
+  }
+}
+
+function shouldBootstrapStarterData(ownerEmail: string): boolean {
+  const normalized = String(ownerEmail ?? '').trim().toLowerCase();
+  // Restrict starter reference data to explicit demo-style accounts only.
+  return normalized.endsWith('@pgmanager.app') || normalized.includes('.demo@');
+}
+
+async function uploadTenantFile(ownerId: string, tenantName: string, file: File, kind: 'photo' | 'document'): Promise<string | null> {
   const extension = file.name.includes('.') ? file.name.split('.').pop() : 'bin';
   const safeName = tenantName.toLowerCase().replace(/[^a-z0-9]+/g, '-');
   const path = `${ownerId}/${kind}/${Date.now()}-${safeName}.${extension}`;
@@ -1124,7 +2070,8 @@ async function uploadTenantFile(ownerId: string, tenantName: string, file: File,
   if (error) {
     const message = String(error.message ?? '').toLowerCase();
     if (message.includes('bucket') || message.includes('policy') || message.includes('permission') || message.includes('not found')) {
-      throw new Error('File upload failed. Configure Supabase storage bucket tenant-files and storage policies, then try again.');
+      console.warn('Tenant file upload skipped because storage is not configured for tenant-files bucket:', error.message ?? error);
+      return null;
     }
     throw error;
   }
@@ -1134,7 +2081,7 @@ async function uploadTenantFile(ownerId: string, tenantName: string, file: File,
 }
 
 export const supabaseAuthDataApi = {
-  async getProfileById(userId: string): Promise<AppUser | null> {
+  async getProfileById(userId: string, options?: { bootstrapStarterData?: boolean }): Promise<AppUser | null> {
     let { data, error } = await supabase
       .from('profiles')
       .select('id,email,full_name,phone,role,owner_scope_id,pg_name,city')
@@ -1165,7 +2112,7 @@ export const supabaseAuthDataApi = {
       return null;
     }
 
-    return {
+    const mappedUser: AppUser = {
       id: data.id,
       name: data.full_name ?? data.email ?? 'Owner',
       email: data.email ?? '',
@@ -1175,6 +2122,8 @@ export const supabaseAuthDataApi = {
       pgName: data.pg_name ?? '',
       city: data.city ?? '',
     };
+
+    return mappedUser;
   },
 
   async ensureOwnerProfile(payload: {
@@ -1257,6 +2206,7 @@ export const supabaseAuthDataApi = {
     if (subscriptionError && !isMissingRelationError(subscriptionError, 'owner_subscriptions')) {
       throw subscriptionError;
     }
+
   },
 
   async updateCurrentProfile(input: ProfileUpdateInput): Promise<AppUser> {
@@ -1315,7 +2265,7 @@ export const supabasePropertyApi = {
       throw error;
     }
 
-    const properties = propertyRows ?? [];
+    const properties = (propertyRows ?? []).filter((row) => !isStarterPropertyRow(row));
     if (properties.length === 0) {
       return [];
     }
@@ -1345,20 +2295,23 @@ export const supabasePropertyApi = {
   },
 
   async create(input: Omit<Property, 'id' | 'createdAt' | 'rooms'>): Promise<Property> {
-    const ownerId = await getOwnerId();
+    validatePropertyInput(input as Partial<Property>, true);
+
+    const context = await assertPropertyDefinitionWriteAccess();
+    const ownerId = context.ownerId;
 
     const basePayload = {
       owner_id: ownerId,
-      name: input.name,
-      address: input.address,
-      city: input.city,
-      state: input.state,
-      pincode: input.pincode,
-      floors: input.floors,
+      name: input.name.trim(),
+      address: input.address.trim(),
+      city: input.city.trim(),
+      state: input.state.trim(),
+      pincode: input.pincode.trim(),
+      floors: Number(input.floors),
       total_rooms: input.totalRooms,
-      contact_name: input.contactName,
-      contact_phone: input.contactPhone,
-      contact_email: input.contactEmail,
+      contact_name: input.contactName.trim(),
+      contact_phone: toPropertyContactPhoneForDatabase(input.contactPhone),
+      contact_email: input.contactEmail.trim().toLowerCase(),
     };
 
     const extendedPayload = {
@@ -1392,7 +2345,7 @@ export const supabasePropertyApi = {
         .single<PropertyRow>();
 
       if (fallbackError) {
-        throw fallbackError;
+        throw mapPropertySaveError(fallbackError);
       }
 
       createdRow = fallbackData;
@@ -1400,7 +2353,7 @@ export const supabasePropertyApi = {
 
     if (!createdRow) {
       if (error) {
-        throw error;
+        throw mapPropertySaveError(error);
       }
       throw new Error('Property could not be created.');
     }
@@ -1409,18 +2362,22 @@ export const supabasePropertyApi = {
   },
 
   async update(id: string, input: Partial<Property>): Promise<Property> {
+    validatePropertyInput(input, false);
+
+    await assertPropertyDefinitionWriteAccess();
+
     const payload: Record<string, unknown> = {};
 
-    if (input.name !== undefined) payload.name = input.name;
-    if (input.address !== undefined) payload.address = input.address;
-    if (input.city !== undefined) payload.city = input.city;
-    if (input.state !== undefined) payload.state = input.state;
-    if (input.pincode !== undefined) payload.pincode = input.pincode;
-    if (input.floors !== undefined) payload.floors = input.floors;
+    if (input.name !== undefined) payload.name = input.name.trim();
+    if (input.address !== undefined) payload.address = input.address.trim();
+    if (input.city !== undefined) payload.city = input.city.trim();
+    if (input.state !== undefined) payload.state = input.state.trim();
+    if (input.pincode !== undefined) payload.pincode = input.pincode.trim();
+    if (input.floors !== undefined) payload.floors = Number(input.floors);
     if (input.totalRooms !== undefined) payload.total_rooms = input.totalRooms;
-    if (input.contactName !== undefined) payload.contact_name = input.contactName;
-    if (input.contactPhone !== undefined) payload.contact_phone = input.contactPhone;
-    if (input.contactEmail !== undefined) payload.contact_email = input.contactEmail;
+    if (input.contactName !== undefined) payload.contact_name = input.contactName.trim();
+    if (input.contactPhone !== undefined) payload.contact_phone = toPropertyContactPhoneForDatabase(input.contactPhone);
+    if (input.contactEmail !== undefined) payload.contact_email = input.contactEmail.trim().toLowerCase();
 
     const extendedPayload: Record<string, unknown> = { ...payload };
     if (input.addressLine1 !== undefined) extendedPayload.address_line1 = input.addressLine1;
@@ -1453,7 +2410,7 @@ export const supabasePropertyApi = {
         .single<PropertyRow>();
 
       if (fallbackError) {
-        throw fallbackError;
+        throw mapPropertySaveError(fallbackError);
       }
 
       updatedRow = fallbackData;
@@ -1461,7 +2418,7 @@ export const supabasePropertyApi = {
 
     if (!updatedRow) {
       if (error) {
-        throw error;
+        throw mapPropertySaveError(error);
       }
       throw new Error('Property could not be updated.');
     }
@@ -1482,6 +2439,8 @@ export const supabasePropertyApi = {
   },
 
   async remove(id: string): Promise<void> {
+    await assertPropertyDefinitionWriteAccess();
+
     const { error } = await supabase.from('properties').delete().eq('id', id);
     if (error) {
       throw error;
@@ -1584,7 +2543,9 @@ export const supabaseOwnerDataApi = {
       throw error;
     }
 
-    return (data ?? []).map(mapTenant);
+    const rows = (data ?? []).filter((row) => !isStarterTenantRow(row));
+
+    return rows.map(mapTenant);
   },
 
   async getTenantById(tenantId: string): Promise<TenantRecord | null> {
@@ -1618,16 +2579,26 @@ export const supabaseOwnerDataApi = {
   },
 
   async createTenant(input: TenantCreateInput): Promise<TenantRecord> {
+    validateTenantInput(input, true);
+
     const ownerId = await getOwnerId();
 
     let photoUrl: string | null = null;
     let idDocumentUrl: string | null = null;
 
     if (input.photo) {
-      photoUrl = await uploadTenantFile(ownerId, input.name, input.photo, 'photo');
+      try {
+        photoUrl = await uploadTenantFile(ownerId, input.name, input.photo, 'photo');
+      } catch (uploadError) {
+        console.warn('Tenant photo upload failed. Continuing without photo:', uploadError);
+      }
     }
     if (input.idDocument) {
-      idDocumentUrl = await uploadTenantFile(ownerId, input.name, input.idDocument, 'document');
+      try {
+        idDocumentUrl = await uploadTenantFile(ownerId, input.name, input.idDocument, 'document');
+      } catch (uploadError) {
+        console.warn('Tenant ID upload failed. Continuing without ID document:', uploadError);
+      }
     }
 
     const { data, error } = await supabase
@@ -1657,7 +2628,7 @@ export const supabaseOwnerDataApi = {
       .single<TenantRow>();
 
     if (error) {
-      throw error;
+      throw mapTenantSaveError(error);
     }
 
     const created = mapTenant(data);
@@ -1670,13 +2641,20 @@ export const supabaseOwnerDataApi = {
       // Notification should not block tenant creation.
     });
 
-    await syncRoomOccupancyForProperty(ownerId, created.propertyId);
+    try {
+      await syncRoomOccupancyForProperty(ownerId, created.propertyId);
+    } catch (syncError) {
+      // Do not fail tenant creation when post-write occupancy sync has schema/policy issues.
+      console.warn('Room occupancy sync skipped after tenant creation:', syncError);
+    }
     emitOwnerDataUpdated();
 
     return created;
   },
 
   async updateTenant(tenantId: string, input: Partial<TenantCreateInput>): Promise<TenantRecord> {
+    validateTenantInput(input, false);
+
     const ownerId = await getOwnerId();
 
     const { data: existingTenant, error: existingTenantError } = await supabase
@@ -1718,7 +2696,7 @@ export const supabaseOwnerDataApi = {
       .single<TenantRow>();
 
     if (error) {
-      throw error;
+      throw mapTenantSaveError(error);
     }
 
     const filePayload: Record<string, unknown> = {};
@@ -1813,7 +2791,13 @@ export const supabaseOwnerDataApi = {
     }
     propertyIdsToSync.add(updatedTenant.propertyId);
 
-    await Promise.all(Array.from(propertyIdsToSync).map((propertyId) => syncRoomOccupancyForProperty(ownerId, propertyId)));
+    await Promise.all(Array.from(propertyIdsToSync).map(async (propertyId) => {
+      try {
+        await syncRoomOccupancyForProperty(ownerId, propertyId);
+      } catch (syncError) {
+        console.warn('Room occupancy sync skipped after tenant update:', syncError);
+      }
+    }));
     emitOwnerDataUpdated();
 
     return updatedTenant;
@@ -1844,7 +2828,11 @@ export const supabaseOwnerDataApi = {
     }
 
     if (existingTenant?.property_id) {
-      await syncRoomOccupancyForProperty(ownerId, existingTenant.property_id);
+      try {
+        await syncRoomOccupancyForProperty(ownerId, existingTenant.property_id);
+      } catch (syncError) {
+        console.warn('Room occupancy sync skipped after tenant delete:', syncError);
+      }
     }
     emitOwnerDataUpdated();
   },
@@ -1879,7 +2867,9 @@ export const supabaseOwnerDataApi = {
       throw error;
     }
 
-    return (data ?? []).map(mapPayment);
+    const filteredRows = await filterSyntheticPayments(data ?? []);
+
+    return filteredRows.map(mapPayment);
   },
 
   async listPaymentsForTenant(tenantId: string): Promise<PaymentRecord[]> {
@@ -3538,32 +4528,31 @@ export const supabaseAdminDataApi = {
       throw new Error('Platform admin access is required.');
     }
 
-    // Fetch Properties
     const { data: properties, error: propsError } = await supabase
       .from('properties')
       .select('*')
       .eq('owner_id', ownerId)
       .order('created_at', { ascending: false });
 
-    if (propsError) throw propsError;
+    if (propsError) {
+      throw propsError;
+    }
 
-    // Fetch Tenants
     const { data: tenants, error: tenantsError } = await supabase
       .from('tenants')
       .select('*')
       .eq('owner_id', ownerId)
       .order('created_at', { ascending: false });
 
-    if (tenantsError) throw tenantsError;
+    if (tenantsError) {
+      throw tenantsError;
+    }
 
-    // Fetch Subscription State
-    const { data: subscription, error: subError } = await supabase
+    const { data: subscription } = await supabase
       .from('owner_subscriptions')
       .select('*')
       .eq('owner_id', ownerId)
       .maybeSingle();
-
-    // Do not throw on subError because it might legitimately be missing
 
     return {
       properties: properties ?? [],
@@ -3574,14 +4563,17 @@ export const supabaseAdminDataApi = {
 
   async deleteOwnerProfile(ownerId: string): Promise<void> {
     const context = await getCurrentUserContext();
-    if (!context.isPlatformAdmin) throw new Error('Platform admin access is required.');
+    if (!context.isPlatformAdmin) {
+      throw new Error('Platform admin access is required.');
+    }
 
-    // RLS and cascades handles the heavy lifting, deleting the profile natively purges properties/tenants via foreign keys.
     const { error } = await supabase
       .from('profiles')
       .delete()
       .eq('id', ownerId);
 
-    if (error) throw error;
+    if (error) {
+      throw error;
+    }
   },
 };

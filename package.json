@@ -36,12 +36,14 @@
     "cmdk": "^1.1.1",
     "embla-carousel-react": "^8.6.0",
     "input-otp": "^1.4.2",
+    "libphonenumber-js": "^1.12.41",
     "lucide-react": "^0.487.0",
     "next-themes": "^0.4.6",
     "react": "^18.3.1",
     "react-day-picker": "^8.10.1",
     "react-dom": "^18.3.1",
     "react-hook-form": "^7.55.0",
+    "react-international-phone": "^4.8.0",
     "react-resizable-panels": "^2.1.7",
     "recharts": "^2.15.2",
     "sonner": "^2.0.3",
@@ -60,7 +62,7 @@
     "vite": "6.3.5"
   },
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --host 127.0.0.1 --port 4173 --strictPort",
     "build": "vite build",
     "dev:backend": "npm --prefix backend run dev",
     "build:backend": "npm --prefix backend run build"

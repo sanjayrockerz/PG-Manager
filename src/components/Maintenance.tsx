@@ -5,6 +5,15 @@ import { useProperty } from '../contexts/PropertyContext';
 import { MaintenanceTicketRecord, supabaseOwnerDataApi } from '../services/supabaseData';
 import { useRealtimeRefresh } from '../hooks/useRealtimeRefresh';
 import { LiveStatusBadge } from './LiveStatusBadge';
+import {
+  DEFAULT_COUNTRY_CODE,
+  SUPPORTED_PHONE_COUNTRIES,
+  formatStoredPhone,
+  getPhoneCountry,
+  getPhoneDropdownLabel,
+  sanitizePhoneLocal,
+  validatePhoneForCountry,
+} from '../utils/phone';
 
 export function Maintenance() {
   const { selectedProperty, properties } = useProperty();
@@ -25,6 +34,7 @@ export function Maintenance() {
     issue: '',
     description: '',
     priority: 'medium' as 'low' | 'medium' | 'high',
+    phoneCountryCode: DEFAULT_COUNTRY_CODE,
     phone: '',
   });
 
@@ -62,6 +72,8 @@ export function Maintenance() {
     inProgress: tickets.filter((ticket) => ticket.status === 'in-progress').length,
     completed: tickets.filter((ticket) => ticket.status === 'resolved').length,
   }), [tickets]);
+
+  const maintenancePhoneCountry = getPhoneCountry(formData.phoneCountryCode);
 
   const getPropertyName = (propertyId: string) => {
     const property = properties.find((entry) => entry.id === propertyId);
@@ -120,6 +132,16 @@ export function Maintenance() {
     setError('');
 
     try {
+      const cleanedPhone = formData.phone.replace(/\D/g, '');
+      if (cleanedPhone) {
+        const phoneValidation = validatePhoneForCountry(formData.phoneCountryCode, cleanedPhone);
+        if (!phoneValidation.valid) {
+          setError(phoneValidation.error ?? 'Tenant phone number is invalid.');
+          setIsSaving(false);
+          return;
+        }
+      }
+
       await supabaseOwnerDataApi.createMaintenanceTicket({
         tenant: formData.tenant,
         propertyId: formData.propertyId,
@@ -128,7 +150,7 @@ export function Maintenance() {
         description: formData.description,
         priority: formData.priority,
         source: 'manual',
-        phone: formData.phone,
+        phone: cleanedPhone ? formatStoredPhone(formData.phoneCountryCode, cleanedPhone) : '',
       });
 
       setShowAddModal(false);
@@ -139,6 +161,7 @@ export function Maintenance() {
         issue: '',
         description: '',
         priority: 'medium',
+        phoneCountryCode: DEFAULT_COUNTRY_CODE,
         phone: '',
       });
       await loadTickets();
@@ -153,10 +176,10 @@ export function Maintenance() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="flex flex-col gap-4 rounded-xl border border-gray-200 bg-white p-6 shadow-sm sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-gray-900">Maintenance</h1>
-          <p className="text-gray-600 mt-1">Track and manage maintenance requests</p>
+          <h1 className="text-2xl font-semibold text-gray-900">Maintenance</h1>
+          <p className="mt-1 text-sm text-gray-500">Track and manage maintenance requests</p>
           <div className="mt-3">
             <LiveStatusBadge lastUpdatedAt={lastUpdatedAt} isSyncing={isSyncing} label="Maintenance stream" />
           </div>
@@ -166,7 +189,7 @@ export function Maintenance() {
             setFormData((prev) => ({ ...prev, propertyId: selectedProperty === 'all' ? prev.propertyId : selectedProperty }));
             setShowAddModal(true);
           }}
-          className="flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          className="flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-white transition-colors hover:bg-indigo-700"
         >
           <Plus className="w-5 h-5" />
           <span>Manual Ticket</span>
@@ -179,8 +202,8 @@ export function Maintenance() {
         </div>
       )}
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white rounded-xl p-4 lg:p-6 border border-gray-200">
+      <div className="grid grid-cols-2 gap-6 lg:grid-cols-4">
+        <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md">
           <div className="flex items-start justify-between">
             <div>
               <p className="text-gray-600 text-sm">Total Requests</p>
@@ -192,7 +215,7 @@ export function Maintenance() {
           </div>
         </div>
 
-        <div className="bg-white rounded-xl p-4 lg:p-6 border border-gray-200">
+        <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md">
           <div className="flex items-start justify-between">
             <div>
               <p className="text-gray-600 text-sm">Open</p>
@@ -204,7 +227,7 @@ export function Maintenance() {
           </div>
         </div>
 
-        <div className="bg-white rounded-xl p-4 lg:p-6 border border-gray-200">
+        <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md">
           <div className="flex items-start justify-between">
             <div>
               <p className="text-gray-600 text-sm">In Progress</p>
@@ -216,7 +239,7 @@ export function Maintenance() {
           </div>
         </div>
 
-        <div className="bg-white rounded-xl p-4 lg:p-6 border border-gray-200">
+        <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md">
           <div className="flex items-start justify-between">
             <div>
               <p className="text-gray-600 text-sm">Resolved</p>
@@ -229,13 +252,13 @@ export function Maintenance() {
         </div>
       </div>
 
-      <div className="bg-white rounded-xl border border-gray-200 p-4">
+      <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
         <div className="flex gap-2 overflow-x-auto">
           {['all', 'open', 'in-progress', 'resolved'].map((status) => (
             <button
               key={status}
               onClick={() => setFilterStatus(status)}
-              className={`px-4 py-2 rounded-lg text-sm whitespace-nowrap transition-colors ${filterStatus === status ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+              className={`whitespace-nowrap rounded-lg px-4 py-2 text-sm transition-colors ${filterStatus === status ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
             >
               {status === 'all' ? 'All' : status === 'in-progress' ? 'In Progress' : status.charAt(0).toUpperCase() + status.slice(1)}
             </button>
@@ -245,12 +268,12 @@ export function Maintenance() {
 
       <div className="space-y-4">
         {isLoading ? (
-          <div className="bg-white rounded-xl border border-gray-200 p-8 text-center text-sm text-gray-500">Loading tickets...</div>
+          <div className="rounded-xl border border-gray-200 bg-white px-4 py-8 text-center text-sm text-gray-500 shadow-sm">Loading tickets...</div>
         ) : filteredTickets.length === 0 ? (
-          <div className="bg-white rounded-xl border border-gray-200 p-8 text-center text-sm text-gray-500">No maintenance tickets found.</div>
+          <div className="rounded-xl border border-gray-200 bg-white px-4 py-8 text-center text-sm text-gray-500 shadow-sm">No maintenance tickets found.</div>
         ) : (
           filteredTickets.map((ticket) => (
-            <div key={ticket.id} className="bg-white rounded-xl border border-gray-200 p-4 md:p-6">
+            <div key={ticket.id} className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm md:p-6">
               <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
                 <div className="flex-1">
                   <div className="flex items-start gap-3">
@@ -297,7 +320,7 @@ export function Maintenance() {
                   <span className={`px-3 py-1 rounded-lg text-sm text-center whitespace-nowrap ${ticket.status === 'open' ? 'bg-red-100 text-red-700' : ticket.status === 'in-progress' ? 'bg-yellow-100 text-yellow-700' : 'bg-green-100 text-green-700'}`}>
                     {ticket.status === 'in-progress' ? 'In Progress' : ticket.status.charAt(0).toUpperCase() + ticket.status.slice(1)}
                   </span>
-                  <button onClick={() => handleUpdateStatus(ticket)} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition-colors whitespace-nowrap">
+                  <button onClick={() => handleUpdateStatus(ticket)} className="whitespace-nowrap rounded-lg bg-indigo-600 px-4 py-2 text-sm text-white transition-colors hover:bg-indigo-700">
                     Update Status
                   </button>
                 </div>
@@ -308,11 +331,11 @@ export function Maintenance() {
       </div>
 
       {showAddModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={() => setShowAddModal(false)}>
-          <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="p-6 border-b border-gray-200 flex items-center justify-between sticky top-0 bg-white">
-              <h2 className="text-gray-900">Create Manual Ticket</h2>
-              <button onClick={() => setShowAddModal(false)} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowAddModal(false)}>
+          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="sticky top-0 flex items-center justify-between border-b border-gray-200 bg-white p-6">
+              <h2 className="text-lg font-medium text-gray-900">Create Manual Ticket</h2>
+              <button onClick={() => setShowAddModal(false)} className="rounded-md p-2 transition-colors hover:bg-gray-100">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -321,7 +344,7 @@ export function Maintenance() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <label className="text-sm text-gray-700">Property *</label>
-                  <select required value={formData.propertyId} onChange={(e) => setFormData({ ...formData, propertyId: e.target.value })} className="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                  <select required value={formData.propertyId} onChange={(e) => setFormData({ ...formData, propertyId: e.target.value })} className="w-full rounded-lg border border-gray-300 px-4 py-2">
                     <option value="">Select Property</option>
                     {properties.map((property) => (
                       <option key={property.id} value={property.id}>{property.name}</option>
@@ -331,17 +354,17 @@ export function Maintenance() {
 
                 <div className="space-y-2">
                   <label className="text-sm text-gray-700">Tenant Name *</label>
-                  <input required value={formData.tenant} onChange={(e) => setFormData({ ...formData, tenant: e.target.value })} className="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="John Doe" />
+                  <input required value={formData.tenant} onChange={(e) => setFormData({ ...formData, tenant: e.target.value })} className="w-full rounded-lg border border-gray-300 px-4 py-2" placeholder="John Doe" />
                 </div>
 
                 <div className="space-y-2">
                   <label className="text-sm text-gray-700">Room Number *</label>
-                  <input required value={formData.room} onChange={(e) => setFormData({ ...formData, room: e.target.value })} className="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="101" />
+                  <input required value={formData.room} onChange={(e) => setFormData({ ...formData, room: e.target.value })} className="w-full rounded-lg border border-gray-300 px-4 py-2" placeholder="101" />
                 </div>
 
                 <div className="space-y-2">
                   <label className="text-sm text-gray-700">Priority *</label>
-                  <select required value={formData.priority} onChange={(e) => setFormData({ ...formData, priority: e.target.value as 'low' | 'medium' | 'high' })} className="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                  <select required value={formData.priority} onChange={(e) => setFormData({ ...formData, priority: e.target.value as 'low' | 'medium' | 'high' })} className="w-full rounded-lg border border-gray-300 px-4 py-2">
                     <option value="low">Low</option>
                     <option value="medium">Medium</option>
                     <option value="high">High</option>
@@ -350,23 +373,52 @@ export function Maintenance() {
 
                 <div className="space-y-2 md:col-span-2">
                   <label className="text-sm text-gray-700">Tenant Phone</label>
-                  <input value={formData.phone} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} className="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="9876543210" />
+                  <div className="group flex items-center rounded-xl border border-gray-300 bg-white transition-shadow focus-within:ring-2 focus-within:ring-indigo-200">
+                    <select
+                      value={formData.phoneCountryCode}
+                      onChange={(e) => setFormData({
+                        ...formData,
+                        phoneCountryCode: e.target.value,
+                        phone: sanitizePhoneLocal(formData.phone, e.target.value),
+                      })}
+                      className="w-44 rounded-l-xl border-r border-gray-200 bg-gray-50 px-3 py-2.5 text-sm focus:outline-none"
+                    >
+                      {SUPPORTED_PHONE_COUNTRIES.map((entry) => (
+                        <option key={entry.code} value={entry.code}>{getPhoneDropdownLabel(entry)}</option>
+                      ))}
+                    </select>
+                    <span className="border-r border-gray-200 bg-gray-50 px-2 py-2 text-sm font-medium text-gray-700">
+                      {maintenancePhoneCountry.flag} {maintenancePhoneCountry.code}
+                    </span>
+                    <input
+                      value={formData.phone}
+                      inputMode="numeric"
+                      maxLength={maintenancePhoneCountry.localDigits}
+                      onChange={(e) => setFormData({
+                        ...formData,
+                        phone: sanitizePhoneLocal(e.target.value, formData.phoneCountryCode),
+                      })}
+                      className="w-full rounded-r-xl border-0 px-4 py-2 focus:outline-none"
+                      placeholder={maintenancePhoneCountry.placeholder}
+                    />
+                  </div>
+                  <p className="text-xs text-gray-500">Optional. If provided, enter a valid {maintenancePhoneCountry.country} mobile number.</p>
                 </div>
               </div>
 
               <div className="space-y-2">
                 <label className="text-sm text-gray-700">Issue Title *</label>
-                <input required value={formData.issue} onChange={(e) => setFormData({ ...formData, issue: e.target.value })} className="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="e.g., AC not working" />
+                <input required value={formData.issue} onChange={(e) => setFormData({ ...formData, issue: e.target.value })} className="w-full rounded-lg border border-gray-300 px-4 py-2" placeholder="e.g., AC not working" />
               </div>
 
               <div className="space-y-2">
                 <label className="text-sm text-gray-700">Description *</label>
-                <textarea required value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} className="w-full px-4 py-2 border border-gray-300 rounded-lg" rows={4} placeholder="Detailed description of issue" />
+                <textarea required value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} className="w-full rounded-lg border border-gray-300 px-4 py-2" rows={4} placeholder="Detailed description of issue" />
               </div>
 
-              <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-200">
-                <button type="button" onClick={() => setShowAddModal(false)} className="px-6 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">Cancel</button>
-                <button type="submit" disabled={isSaving} className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60">
+              <div className="flex items-center justify-end gap-3 border-t border-gray-200 pt-4">
+                <button type="button" onClick={() => setShowAddModal(false)} className="rounded-lg border border-gray-300 bg-white px-6 py-2.5 transition-colors hover:bg-gray-50">Cancel</button>
+                <button type="submit" disabled={isSaving} className="rounded-lg bg-indigo-600 px-6 py-2.5 text-white transition-colors hover:bg-indigo-700 disabled:opacity-60">
                   {isSaving ? 'Creating...' : 'Create Ticket'}
                 </button>
               </div>
@@ -376,14 +428,14 @@ export function Maintenance() {
       )}
 
       {showUpdateModal && selectedTicket && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={() => setShowUpdateModal(false)}>
-          <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <div className="p-6 border-b border-gray-200 flex items-center justify-between sticky top-0 bg-white">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowUpdateModal(false)}>
+          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="sticky top-0 flex items-center justify-between border-b border-gray-200 bg-white p-6">
               <div>
-                <h2 className="text-gray-900">Update Ticket Status</h2>
-                <p className="text-sm text-gray-600 mt-1">Ticket #{selectedTicket.ticketId} - {selectedTicket.tenant}</p>
+                <h2 className="text-lg font-medium text-gray-900">Update Ticket Status</h2>
+                <p className="mt-1 text-sm text-gray-600">Ticket #{selectedTicket.ticketId} - {selectedTicket.tenant}</p>
               </div>
-              <button onClick={() => setShowUpdateModal(false)} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
+              <button onClick={() => setShowUpdateModal(false)} className="rounded-md p-2 transition-colors hover:bg-gray-100">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -407,7 +459,7 @@ export function Maintenance() {
               <div className="space-y-2">
                 <label className="text-sm text-gray-700">Add Note</label>
                 <textarea value={newNote} onChange={(e) => setNewNote(e.target.value)} className="w-full px-4 py-2 border border-gray-300 rounded-lg" rows={3} placeholder="Add update note..." />
-                <button onClick={() => void handleAddNote()} disabled={!newNote.trim() || isSaving} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60">
+                  <button onClick={() => void handleAddNote()} disabled={!newNote.trim() || isSaving} className="rounded-lg bg-indigo-600 px-4 py-2 text-white transition-colors hover:bg-indigo-700 disabled:opacity-60">
                   {isSaving ? 'Saving...' : 'Add Note'}
                 </button>
               </div>
@@ -415,7 +467,7 @@ export function Maintenance() {
               {selectedTicket.notes.length > 0 && (
                 <div className="space-y-2">
                   <label className="text-sm text-gray-700">Ticket Notes</label>
-                  <div className="max-h-48 overflow-y-auto space-y-2 bg-gray-50 rounded-lg p-3">
+                  <div className="max-h-48 overflow-y-auto space-y-2 rounded-lg bg-gray-50 p-3">
                     {selectedTicket.notes.map((note, index) => (
                       <p key={`${selectedTicket.id}-timeline-${index}`} className="text-sm text-gray-700">{note}</p>
                     ))}
@@ -423,8 +475,8 @@ export function Maintenance() {
                 </div>
               )}
 
-              <div className="flex justify-end pt-4 border-t border-gray-200">
-                <button onClick={() => setShowUpdateModal(false)} className="px-6 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">Close</button>
+              <div className="flex justify-end border-t border-gray-200 pt-4">
+                <button onClick={() => setShowUpdateModal(false)} className="rounded-lg bg-gray-100 px-6 py-2 text-gray-700 transition-colors hover:bg-gray-200">Close</button>
               </div>
             </div>
           </div>

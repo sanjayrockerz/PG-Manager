@@ -63,6 +63,22 @@ alter table public.properties
   add constraint properties_pincode_format
     check (pincode ~ '^\d{6}$');
 
+-- Normalize existing contact_phone values before applying strict format.
+update public.properties
+set contact_phone = regexp_replace(contact_phone, '[^\d]', '', 'g')
+where contact_phone is not null
+  and contact_phone ~ '[^\d]';
+
+update public.properties
+set contact_phone = right(contact_phone, 10)
+where contact_phone is not null
+  and contact_phone ~ '^\d{11,15}$';
+
+update public.properties
+set contact_phone = '0000000000'
+where contact_phone is not null
+  and contact_phone !~ '^\d{10}$';
+
 -- Contact phone: 10 digits (Indian mobile without country code)
 alter table public.properties
   drop constraint if exists properties_contact_phone_format;
@@ -97,8 +113,6 @@ alter table public.properties
   add constraint properties_state_notempty
     check (length(trim(state)) > 0);
 
--- SECTION 4: Tenant validation constraints
--- ============================================================
 alter table public.tenants
   drop constraint if exists tenants_phone_format;
 alter table public.tenants
@@ -115,10 +129,11 @@ alter table public.tenants
   drop constraint if exists tenants_parent_phone_format;
 alter table public.tenants
   add constraint tenants_parent_phone_format
-    check (parent_phone ~ '^\+?\d{10,15}$');
+   check (parent_phone = '' or parent_phone ~ '^\+?\d{10,15}$');
 
 -- SECTION 5: Fix notifications RLS — restrict to owner only
 -- ============================================================
+drop policy if exists notifications_owner_only on public.notifications;
 drop policy if exists notifications_owner_scope_all on public.notifications;
 drop policy if exists notifications_owner_all on public.notifications;
 drop policy if exists notifications_admin_all on public.notifications;

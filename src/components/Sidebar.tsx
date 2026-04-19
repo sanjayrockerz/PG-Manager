@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Home, Users, CreditCard, Wrench, Bell, Settings, X, Building2, DollarSign, Shield, UserCircle, ChevronDown, ChevronRight, LifeBuoy, Package, Activity } from 'lucide-react';
+import { Home, Users, CreditCard, Wrench, Bell, Settings, X, Building2, Shield, UserCircle, ChevronDown, ChevronRight, LifeBuoy, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { useLocalization } from '../contexts/LocalizationContext';
 import { isPlatformAdminRole, isScopedOwnerRole } from '../utils/roles';
 
@@ -8,6 +8,8 @@ interface SidebarProps {
   setActiveTab: (tab: string) => void;
   sidebarOpen: boolean;
   setSidebarOpen: (open: boolean) => void;
+  sidebarCollapsed: boolean;
+  setSidebarCollapsed: (collapsed: boolean) => void;
   userRole?: 'owner' | 'owner_manager' | 'staff' | 'admin' | 'tenant' | 'super_admin' | 'platform_admin';
 }
 
@@ -19,8 +21,6 @@ const ownerMenuItems = [
   { id: 'maintenance', label: 'Maintenance', icon: Wrench },
   { id: 'announcements', label: 'Announcements', icon: Bell },
   { id: 'support', label: 'Support', icon: LifeBuoy },
-  { id: 'subscriptions', label: 'Subscriptions', icon: Package },
-  { id: 'pricing', label: 'Pricing', icon: DollarSign },
 ];
 
 const staffMenuItems = [
@@ -34,29 +34,33 @@ const staffMenuItems = [
 ];
 
 const portalMenuItems = [
+  { id: 'admin-section', label: 'Admin Panel', icon: Shield },
   { id: 'tenant-portal', label: 'Tenant Portal', icon: UserCircle },
 ];
 
-const adminMenuItems = [
-  { id: 'admin-dashboard', label: 'Platform Analytics', icon: Activity },
-  { id: 'admin-owners', label: 'All Owners', icon: Users },
-  { id: 'admin-subscriptions', label: 'Subscriptions', icon: Package },
-  { id: 'admin-support', label: 'Global Support', icon: LifeBuoy },
-];
-
-export function Sidebar({ activeTab, setActiveTab, sidebarOpen, setSidebarOpen, userRole = 'owner' }: SidebarProps) {
-  const [isCollapsed, setIsCollapsed] = useState(false);
+export function Sidebar({
+  activeTab,
+  setActiveTab,
+  sidebarOpen,
+  setSidebarOpen,
+  sidebarCollapsed,
+  setSidebarCollapsed,
+  userRole = 'owner',
+}: SidebarProps) {
   const [portalsExpanded, setPortalsExpanded] = useState(false);
   const { t } = useLocalization();
 
   const isPlatformAdmin = isPlatformAdminRole(userRole);
   const isScopedStaff = isScopedOwnerRole(userRole);
 
-  const visibleMainMenuItems = isPlatformAdmin 
-    ? adminMenuItems 
-    : (userRole === 'owner' ? ownerMenuItems : (isScopedStaff ? staffMenuItems : []));
+  const visibleMainMenuItems = userRole === 'owner'
+    ? ownerMenuItems
+    : (isScopedStaff ? staffMenuItems : []);
 
   const visiblePortalMenuItems = portalMenuItems.filter((item) => {
+    if (item.id === 'admin-section') {
+      return isPlatformAdmin;
+    }
     if (item.id === 'tenant-portal') {
       return userRole === 'owner' || userRole === 'tenant' || isScopedStaff || isPlatformAdmin;
     }
@@ -65,7 +69,55 @@ export function Sidebar({ activeTab, setActiveTab, sidebarOpen, setSidebarOpen, 
 
   const showPortalSection = visiblePortalMenuItems.length > 0;
 
-  const isPortalActive = activeTab === 'tenant-portal';
+  const isPortalActive = activeTab === 'admin-section' || activeTab === 'tenant-portal';
+
+  const groupedSections = [
+    {
+      title: 'Management',
+      ids: ['dashboard', 'properties', 'tenants'],
+    },
+    {
+      title: 'Finance',
+      ids: ['payments'],
+    },
+    {
+      title: 'Operations',
+      ids: ['maintenance', 'announcements', 'support'],
+    },
+  ] as const;
+
+  const getLocalizedLabel = (id: string, label: string): string => {
+    if (id === 'dashboard') return t('nav.dashboard', label);
+    if (id === 'properties') return t('nav.properties', label);
+    if (id === 'tenants') return t('nav.tenants', label);
+    if (id === 'payments') return t('nav.payments', label);
+    if (id === 'maintenance') return t('nav.maintenance', label);
+    if (id === 'announcements') return t('nav.announcements', label);
+    if (id === 'support') return t('nav.support', label);
+    return label;
+  };
+
+  const renderNavItem = (item: (typeof ownerMenuItems)[number], compact = false) => {
+    const Icon = item.icon;
+    const isActive = activeTab === item.id;
+
+    return (
+      <button
+        key={item.id}
+        onClick={() => {
+          setActiveTab(item.id);
+          setSidebarOpen(false);
+        }}
+        title={item.label}
+        className={`w-full flex items-center gap-3 py-2.5 rounded-lg transition-colors ${compact ? 'justify-center px-2' : 'px-3'} ${isActive ? 'bg-gray-100 text-gray-900 font-medium' : 'text-gray-600 hover:bg-gray-50'}`}
+      >
+        <Icon className="w-4 h-4" />
+        {!compact && <span className="text-sm">{getLocalizedLabel(item.id, item.label)}</span>}
+      </button>
+    );
+  };
+
+  const canShowSettings = userRole === 'owner' || isPlatformAdmin || userRole === 'tenant';
 
   return (
     <>
@@ -80,28 +132,26 @@ export function Sidebar({ activeTab, setActiveTab, sidebarOpen, setSidebarOpen, 
       {/* Sidebar */}
       <aside className={`
         fixed lg:static inset-y-0 left-0 z-50
-        bg-white border-r border-gray-200
-        transform transition-all duration-300 ease-in-out
+        w-60 ${sidebarCollapsed ? 'lg:w-16' : 'lg:w-60'} bg-white border-r border-gray-200
+        transform transition-transform duration-300 ease-in-out
+        lg:transition-[width]
         ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
-        ${isCollapsed ? 'w-20' : 'w-64'}
       `}>
         <div className="flex flex-col h-full">
-          {/* Logo & Desktop Toggle */}
-          <div className={`flex items-center justify-between p-6 border-b border-gray-200 ${isCollapsed ? 'px-4' : 'px-6'}`}>
-            <div className="flex items-center gap-2 overflow-hidden">
-              <div className="flex-shrink-0 w-8 h-8 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg"></div>
-              {!isCollapsed && <span className="font-semibold whitespace-nowrap">PG Manager</span>}
+          {/* Logo */}
+          <div className={`flex items-center justify-between border-b border-gray-200 ${sidebarCollapsed ? 'p-3' : 'p-4'}`}>
+            <div className={`flex items-center gap-2 ${sidebarCollapsed ? 'lg:justify-center lg:w-full' : ''}`}>
+              <div className="w-8 h-8 bg-indigo-600 rounded-lg"></div>
+              <span className={`text-sm font-semibold text-gray-900 ${sidebarCollapsed ? 'lg:hidden' : ''}`}>PG Manager</span>
             </div>
-            
-            {/* Desktop Collapse Toggle */}
-            <button 
-              onClick={() => setIsCollapsed(!isCollapsed)}
-              className="hidden lg:flex p-1.5 hover:bg-gray-100 rounded-lg text-gray-400"
+            <button
+              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+              className="hidden lg:inline-flex p-1.5 hover:bg-gray-100 rounded-lg text-gray-500"
+              title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             >
-              {isCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronDown className="w-4 h-4 -rotate-90" />}
+              {sidebarCollapsed ? <PanelLeftOpen className="w-4 h-4" /> : <PanelLeftClose className="w-4 h-4" />}
             </button>
-
-            <button 
+            <button
               onClick={() => setSidebarOpen(false)}
               className="lg:hidden p-2 hover:bg-gray-100 rounded-lg"
             >
@@ -110,81 +160,44 @@ export function Sidebar({ activeTab, setActiveTab, sidebarOpen, setSidebarOpen, 
           </div>
 
           {/* Navigation */}
-          <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
-            {/* Main Menu Items */}
-            {visibleMainMenuItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = activeTab === item.id;
-              
+          <nav className="flex-1 px-3 py-4 space-y-4 overflow-y-auto">
+            {groupedSections.map((section) => {
+              const sectionItems = section.ids
+                .map((id) => visibleMainMenuItems.find((item) => item.id === id))
+                .filter((item): item is (typeof ownerMenuItems)[number] => Boolean(item));
+
+              if (sectionItems.length === 0) {
+                return null;
+              }
+
               return (
-                <button
-                  key={item.id}
-                  onClick={() => {
-                    setActiveTab(item.id);
-                    setSidebarOpen(false);
-                  }}
-                  title={isCollapsed ? item.label : ''}
-                  className={`
-                    w-full flex items-center gap-3 px-4 py-3 rounded-lg
-                    transition-all
-                    ${isCollapsed ? 'justify-center px-0' : 'justify-start px-4'}
-                    ${isActive 
-                      ? 'bg-gray-100 text-gray-900 font-semibold' 
-                      : 'text-gray-600 hover:bg-gray-50'
-                    }
-                  `}
-                >
-                  <Icon className="w-5 h-5 flex-shrink-0" />
-                  {!isCollapsed && (
-                    <span className="whitespace-nowrap overflow-hidden text-ellipsis">
-                      {
-                        item.id === 'dashboard' ? t('nav.dashboard', item.label)
-                          : item.id === 'properties' ? t('nav.properties', item.label)
-                            : item.id === 'tenants' ? t('nav.tenants', item.label)
-                              : item.id === 'payments' ? t('nav.payments', item.label)
-                                : item.id === 'maintenance' ? t('nav.maintenance', item.label)
-                                  : item.id === 'announcements' ? t('nav.announcements', item.label)
-                                    : item.id === 'support' ? t('nav.support', item.label)
-                                      : item.id === 'subscriptions' ? t('nav.subscriptions', item.label)
-                                    : item.id === 'pricing' ? t('nav.pricing', item.label)
-                                      : item.label
-                      }
-                    </span>
+                <div key={section.title}>
+                  {!sidebarCollapsed && (
+                    <p className="px-3 pb-2 text-xs uppercase tracking-wide text-gray-400">{section.title}</p>
                   )}
-                </button>
+                  <div className="space-y-1">
+                    {sectionItems.map((item) => renderNavItem(item, sidebarCollapsed))}
+                  </div>
+                </div>
               );
             })}
 
-            {showPortalSection && (
+            {showPortalSection && !sidebarCollapsed && (
               <>
-                {/* Divider */}
-                <div className="my-2 border-t border-gray-200"></div>
+                <div className="border-t border-gray-200 pt-4">
+                  <p className="px-3 pb-2 text-xs uppercase tracking-wide text-gray-400">Portals</p>
 
-                {/* Portals Section with Submenu */}
-                <div>
                   <button
                     onClick={() => setPortalsExpanded(!portalsExpanded)}
-                    className={`
-                      w-full flex items-center gap-3 px-4 py-3 rounded-lg
-                      transition-colors
-                      ${isPortalActive
-                        ? 'bg-gray-100 text-gray-900 font-semibold' 
-                        : 'text-gray-600 hover:bg-gray-50'
-                      }
-                    `}
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors ${isPortalActive ? 'bg-gray-100 text-gray-900 font-medium' : 'text-gray-600 hover:bg-gray-50'}`}
                   >
-                    <Settings className="w-5 h-5" />
-                    <span className="flex-1 text-left">{t('nav.portalSections', 'Portal Sections')}</span>
-                    {portalsExpanded ? (
-                      <ChevronDown className="w-4 h-4" />
-                    ) : (
-                      <ChevronRight className="w-4 h-4" />
-                    )}
+                    <Settings className="w-4 h-4" />
+                    <span className="flex-1 text-left text-sm">{t('nav.portalSections', 'Portal Sections')}</span>
+                    {portalsExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                   </button>
 
-                  {/* Submenu */}
                   {portalsExpanded && (
-                    <div className="mt-1 ml-4 space-y-1">
+                    <div className="mt-1 ml-3 space-y-1">
                       {visiblePortalMenuItems.map((item) => {
                         const Icon = item.icon;
                         const isActive = activeTab === item.id;
@@ -196,14 +209,7 @@ export function Sidebar({ activeTab, setActiveTab, sidebarOpen, setSidebarOpen, 
                               setActiveTab(item.id);
                               setSidebarOpen(false);
                             }}
-                            className={`
-                              w-full flex items-center gap-3 px-4 py-2.5 rounded-lg
-                              transition-colors text-sm
-                              ${isActive 
-                                ? 'bg-gray-100 text-gray-900 font-semibold' 
-                                : 'text-gray-600 hover:bg-gray-50'
-                              }
-                            `}
+                            className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-sm ${isActive ? 'bg-gray-100 text-gray-900 font-medium' : 'text-gray-600 hover:bg-gray-50'}`}
                           >
                             <Icon className="w-4 h-4" />
                             <span>{item.id === 'admin-section' ? t('nav.adminPanel', item.label) : t('nav.tenantPortal', item.label)}</span>
@@ -216,41 +222,49 @@ export function Sidebar({ activeTab, setActiveTab, sidebarOpen, setSidebarOpen, 
               </>
             )}
 
-            {(userRole === 'owner' || isPlatformAdmin || userRole === 'tenant') && (
-              <button
-                onClick={() => {
-                  setActiveTab('settings');
-                  setSidebarOpen(false);
-                }}
-                title={isCollapsed ? t('nav.settings', 'Settings') : ''}
-                className={`
-                  w-full flex items-center gap-3 px-4 py-3 rounded-lg
-                  transition-all
-                  ${isCollapsed ? 'justify-center px-0' : 'justify-start px-4'}
-                  ${activeTab === 'settings'
-                    ? 'bg-gray-100 text-gray-900 font-semibold' 
-                    : 'text-gray-600 hover:bg-gray-50'
-                  }
-                `}
-              >
-                <Settings className="w-5 h-5 flex-shrink-0" />
-                {!isCollapsed && <span className="whitespace-nowrap overflow-hidden text-ellipsis">{t('nav.settings', 'Settings')}</span>}
-              </button>
+            {showPortalSection && sidebarCollapsed && (
+              <>
+                <div className="my-2 border-t border-gray-200"></div>
+                {visiblePortalMenuItems.map((item) => {
+                  const Icon = item.icon;
+                  const isActive = activeTab === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      onClick={() => {
+                        setActiveTab(item.id);
+                        setSidebarOpen(false);
+                      }}
+                      title={item.label}
+                      className={`w-full flex items-center justify-center px-2 py-2.5 rounded-lg transition-colors ${isActive ? 'bg-gray-100 text-gray-900 font-medium' : 'text-gray-600 hover:bg-gray-50'}`}
+                    >
+                      <Icon className="w-4 h-4" />
+                    </button>
+                  );
+                })}
+              </>
+            )}
+
+            {canShowSettings && (
+              <div className="border-t border-gray-200 pt-4">
+                {!sidebarCollapsed && (
+                  <p className="px-3 pb-2 text-xs uppercase tracking-wide text-gray-400">Settings</p>
+                )}
+                <button
+                  onClick={() => {
+                    setActiveTab('settings');
+                    setSidebarOpen(false);
+                  }}
+                  title="Settings"
+                  className={`w-full flex items-center gap-3 py-2.5 rounded-lg transition-colors ${sidebarCollapsed ? 'justify-center px-2' : 'px-3'} ${activeTab === 'settings' ? 'bg-gray-100 text-gray-900 font-medium' : 'text-gray-600 hover:bg-gray-50'}`}
+                >
+                  <Settings className="w-4 h-4" />
+                  {!sidebarCollapsed && <span className="text-sm">{t('nav.settings', 'Settings')}</span>}
+                </button>
+              </div>
             )}
           </nav>
 
-          {/* Footer */}
-          {(userRole === 'owner' && !isCollapsed) && (
-            <div className="p-4 border-t border-gray-200">
-              <div className="bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg p-4 text-white">
-                <p className="text-sm">Upgrade to Pro</p>
-                <p className="text-xs opacity-90 mt-1">Get unlimited features</p>
-                <button className="mt-3 w-full bg-white text-blue-600 py-2 rounded-lg text-sm hover:bg-gray-100 transition-colors">
-                  Upgrade Now
-                </button>
-              </div>
-            </div>
-          )}
         </div>
       </aside>
     </>

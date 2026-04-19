@@ -1015,10 +1015,80 @@ alter table public.owner_invites               enable row level security;
 -- Drop all old policies before re-creating (clean slate every run)
 -- ================================================================
 
+drop policy if exists profiles_self_insert on public.profiles;
+drop policy if exists profiles_self_select on public.profiles;
+drop policy if exists profiles_self_update on public.profiles;
+
+drop policy if exists owner_settings_owner_all on public.owner_settings;
+drop policy if exists owner_settings_owner_scope_select on public.owner_settings;
+drop policy if exists owner_settings_admin_all on public.owner_settings;
+
+drop policy if exists properties_owner_select on public.properties;
+drop policy if exists properties_owner_manage on public.properties;
+drop policy if exists properties_admin_all on public.properties;
+drop policy if exists properties_tenant_select on public.properties;
+
+drop policy if exists rooms_owner_select on public.rooms;
+drop policy if exists rooms_owner_manage on public.rooms;
+drop policy if exists rooms_admin_all on public.rooms;
+drop policy if exists rooms_tenant_select on public.rooms;
+
+drop policy if exists tenants_owner_select on public.tenants;
+drop policy if exists tenants_owner_manage on public.tenants;
+drop policy if exists tenants_admin_all on public.tenants;
+drop policy if exists tenants_tenant_select on public.tenants;
+
+drop policy if exists payments_owner_select on public.payments;
+drop policy if exists payments_owner_manage on public.payments;
+drop policy if exists payments_admin_all on public.payments;
+drop policy if exists payments_tenant_select on public.payments;
+
+drop policy if exists payment_charges_owner_select on public.payment_charges;
+drop policy if exists payment_charges_owner_manage on public.payment_charges;
+drop policy if exists payment_charges_admin_all on public.payment_charges;
+drop policy if exists payment_charges_tenant_select on public.payment_charges;
+
+drop policy if exists maintenance_owner_select on public.maintenance_tickets;
+drop policy if exists maintenance_owner_manage on public.maintenance_tickets;
+drop policy if exists maintenance_admin_all on public.maintenance_tickets;
+drop policy if exists maintenance_tenant_select on public.maintenance_tickets;
+drop policy if exists maintenance_tenant_insert on public.maintenance_tickets;
+
+drop policy if exists maintenance_notes_owner_select on public.maintenance_notes;
+drop policy if exists maintenance_notes_owner_manage on public.maintenance_notes;
+drop policy if exists maintenance_notes_admin_all on public.maintenance_notes;
+drop policy if exists maintenance_notes_tenant_select on public.maintenance_notes;
+
+drop policy if exists announcements_owner_select on public.announcements;
+drop policy if exists announcements_owner_manage on public.announcements;
+drop policy if exists announcements_admin_all on public.announcements;
+drop policy if exists announcements_tenant_select on public.announcements;
+
+drop policy if exists notifications_owner_only on public.notifications;
+drop policy if exists notifications_admin_all on public.notifications;
+
+drop policy if exists owner_user_property_scopes_owner_all on public.owner_user_property_scopes;
+drop policy if exists owner_user_property_scopes_self_select on public.owner_user_property_scopes;
+drop policy if exists owner_user_property_scopes_admin_all on public.owner_user_property_scopes;
+
+drop policy if exists owner_subscriptions_owner_all on public.owner_subscriptions;
+drop policy if exists owner_subscriptions_owner_scope_select on public.owner_subscriptions;
+drop policy if exists owner_subscriptions_admin_all on public.owner_subscriptions;
+
+drop policy if exists support_tickets_owner_scope_select on public.support_tickets;
+drop policy if exists support_tickets_owner_scope_insert on public.support_tickets;
+drop policy if exists support_tickets_owner_scope_update on public.support_tickets;
+drop policy if exists support_tickets_admin_all on public.support_tickets;
+
+drop policy if exists support_ticket_comments_owner_scope_select on public.support_ticket_comments;
+drop policy if exists support_ticket_comments_owner_scope_insert on public.support_ticket_comments;
+drop policy if exists support_ticket_comments_admin_all on public.support_ticket_comments;
+
+drop policy if exists owner_invites_owner_all on public.owner_invites;
+drop policy if exists owner_invites_self_select on public.owner_invites;
+drop policy if exists owner_invites_admin_all on public.owner_invites;
+
 -- ── profiles ──────────────────────────────────────────────────────
-drop policy if exists profiles_self_insert              on public.profiles;
-drop policy if exists profiles_self_select              on public.profiles;
-drop policy if exists profiles_self_update              on public.profiles;
 drop policy if exists profiles_owner_select             on public.profiles;
 drop policy if exists profiles_owner_update             on public.profiles;
 drop policy if exists profiles_admin_select             on public.profiles;
@@ -1060,9 +1130,6 @@ create policy profiles_self_update on public.profiles
   );
 
 -- ── owner_settings ────────────────────────────────────────────────
-drop policy if exists owner_settings_owner_all        on public.owner_settings;
-drop policy if exists owner_settings_owner_scope_select on public.owner_settings;
-drop policy if exists owner_settings_admin_all        on public.owner_settings;
 drop policy if exists owner_settings_anon_all         on public.owner_settings;
 
 create policy owner_settings_owner_all on public.owner_settings
@@ -1079,11 +1146,6 @@ create policy owner_settings_admin_all on public.owner_settings
   with check (public.current_user_is_admin());
 
 -- ── properties ────────────────────────────────────────────────────
-drop policy if exists properties_owner_all    on public.properties;
-drop policy if exists properties_owner_select on public.properties;
-drop policy if exists properties_owner_manage on public.properties;
-drop policy if exists properties_admin_all    on public.properties;
-drop policy if exists properties_tenant_select on public.properties;
 drop policy if exists properties_anon_all     on public.properties;
 
 create policy properties_owner_select on public.properties
@@ -1121,11 +1183,6 @@ create policy properties_tenant_select on public.properties
   );
 
 -- ── rooms ─────────────────────────────────────────────────────────
-drop policy if exists rooms_owner_all    on public.rooms;
-drop policy if exists rooms_owner_select on public.rooms;
-drop policy if exists rooms_owner_manage on public.rooms;
-drop policy if exists rooms_admin_all    on public.rooms;
-drop policy if exists rooms_tenant_select on public.rooms;
 drop policy if exists rooms_anon_all     on public.rooms;
 
 create policy rooms_owner_select on public.rooms
@@ -1151,11 +1208,6 @@ create policy rooms_tenant_select on public.rooms
   );
 
 -- ── tenants ───────────────────────────────────────────────────────
-drop policy if exists tenants_owner_all    on public.tenants;
-drop policy if exists tenants_owner_select on public.tenants;
-drop policy if exists tenants_owner_manage on public.tenants;
-drop policy if exists tenants_admin_all    on public.tenants;
-drop policy if exists tenants_tenant_select on public.tenants;
 drop policy if exists tenants_anon_all     on public.tenants;
 
 create policy tenants_owner_select on public.tenants
@@ -1187,11 +1239,6 @@ create policy tenants_tenant_select on public.tenants
   for select using (public.current_user_matches_tenant(email, phone));
 
 -- ── payments ──────────────────────────────────────────────────────
-drop policy if exists payments_owner_all    on public.payments;
-drop policy if exists payments_owner_select on public.payments;
-drop policy if exists payments_owner_manage on public.payments;
-drop policy if exists payments_admin_all    on public.payments;
-drop policy if exists payments_tenant_select on public.payments;
 drop policy if exists payments_anon_all     on public.payments;
 
 create policy payments_owner_select on public.payments
@@ -1229,11 +1276,6 @@ create policy payments_tenant_select on public.payments
   );
 
 -- ── payment_charges ───────────────────────────────────────────────
-drop policy if exists payment_charges_owner_all    on public.payment_charges;
-drop policy if exists payment_charges_owner_select on public.payment_charges;
-drop policy if exists payment_charges_owner_manage on public.payment_charges;
-drop policy if exists payment_charges_admin_all    on public.payment_charges;
-drop policy if exists payment_charges_tenant_select on public.payment_charges;
 drop policy if exists payment_charges_anon_all     on public.payment_charges;
 
 create policy payment_charges_owner_select on public.payment_charges
@@ -1284,12 +1326,6 @@ create policy payment_charges_tenant_select on public.payment_charges
   );
 
 -- ── maintenance_tickets ───────────────────────────────────────────
-drop policy if exists maintenance_owner_all    on public.maintenance_tickets;
-drop policy if exists maintenance_owner_select on public.maintenance_tickets;
-drop policy if exists maintenance_owner_manage on public.maintenance_tickets;
-drop policy if exists maintenance_admin_all    on public.maintenance_tickets;
-drop policy if exists maintenance_tenant_select on public.maintenance_tickets;
-drop policy if exists maintenance_tenant_insert on public.maintenance_tickets;
 drop policy if exists maintenance_tickets_anon_all on public.maintenance_tickets;
 
 create policy maintenance_owner_select on public.maintenance_tickets
@@ -1339,11 +1375,6 @@ create policy maintenance_tenant_insert on public.maintenance_tickets
   );
 
 -- ── maintenance_notes ─────────────────────────────────────────────
-drop policy if exists maintenance_notes_owner_all    on public.maintenance_notes;
-drop policy if exists maintenance_notes_owner_select on public.maintenance_notes;
-drop policy if exists maintenance_notes_owner_manage on public.maintenance_notes;
-drop policy if exists maintenance_notes_admin_all    on public.maintenance_notes;
-drop policy if exists maintenance_notes_tenant_select on public.maintenance_notes;
 drop policy if exists maintenance_notes_anon_all     on public.maintenance_notes;
 
 create policy maintenance_notes_owner_select on public.maintenance_notes
@@ -1394,11 +1425,6 @@ create policy maintenance_notes_tenant_select on public.maintenance_notes
   );
 
 -- ── announcements ─────────────────────────────────────────────────
-drop policy if exists announcements_owner_all    on public.announcements;
-drop policy if exists announcements_owner_select on public.announcements;
-drop policy if exists announcements_owner_manage on public.announcements;
-drop policy if exists announcements_admin_all    on public.announcements;
-drop policy if exists announcements_tenant_select on public.announcements;
 drop policy if exists announcements_anon_all     on public.announcements;
 
 create policy announcements_owner_select on public.announcements
@@ -1450,11 +1476,6 @@ create policy announcements_tenant_select on public.announcements
   );
 
 -- ── notifications ─────────────────────────────────────────────────
-drop policy if exists notifications_owner_all        on public.notifications;
-drop policy if exists notifications_owner_scope_all  on public.notifications;
-drop policy if exists notifications_admin_all        on public.notifications;
-drop policy if exists notifications_anon_all         on public.notifications;
-
 -- Owner-only (not scoped to members)
 create policy notifications_owner_only on public.notifications
   for all

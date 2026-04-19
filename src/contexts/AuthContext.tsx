@@ -22,11 +22,9 @@ interface SignupDraft {
 interface AuthContextType {
   user: User | null;
   authError: string;
-  requestLoginOTP: (email: string) => Promise<boolean>;
-  loginWithOTP: (email: string, otp: string) => Promise<boolean>;
+  sendLoginMagicLink: (email: string) => Promise<boolean>;
   signInWithGoogle: () => Promise<boolean>;
-  requestSignupOTP: (draft: SignupDraft) => Promise<boolean>;
-  signupWithOTP: (email: string, otp: string) => Promise<boolean>;
+  sendSignupMagicLink: (draft: SignupDraft) => Promise<boolean>;
   refreshProfile: () => Promise<void>;
   logout: () => Promise<void>;
   isLoading: boolean;
@@ -86,19 +84,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [authError, setAuthError] = useState('');
-  const pendingSignupRef = useRef<SignupDraft | null>(null);
 
   const resolveEmailRedirectTo = (): string | undefined => {
     const configuredSiteUrl = String((import.meta as any).env?.VITE_SITE_URL ?? '').trim();
-    if (configuredSiteUrl) {
-      return configuredSiteUrl;
-    }
-
     if (typeof window !== 'undefined' && window.location?.origin) {
-      return window.location.origin;
+      const { origin, hostname } = window.location;
+      // Always prefer current origin for localhost development callbacks.
+      if (hostname === 'localhost' || hostname === '127.0.0.1') {
+        return origin;
+      }
+
+      if (configuredSiteUrl) {
+        return configuredSiteUrl;
+      }
+
+      return origin;
     }
 
-    return undefined;
+    return configuredSiteUrl || undefined;
   };
 
   const toAuthMessage = (error: unknown, fallback: string): string => {
@@ -107,8 +110,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const message = candidate?.message?.trim();
     const code = candidate?.code?.trim();
 
-    if (code === 'otp_disabled' || message?.toLowerCase().includes('otp')) {
-      return 'Email OTP is disabled in Supabase Auth settings. Enable Email OTP in Authentication -> Sign In / Providers.';
+    if (code === 'otp_disabled' || message?.toLowerCase().includes('otp') || message?.toLowerCase().includes('email provider')) {
+      return 'Email sign-in is disabled in Supabase Auth settings. Enable Email provider for magic links and try again.';
     }
 
     if (message?.toLowerCase().includes('database error finding user')) {
@@ -121,9 +124,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     if (status === 422) {
       if (message?.toLowerCase().includes('user')) {
-        return 'Account not found for this email. Use Create Account first.';
+        return 'Account not found for this email. Use Create Account first, then try sign in again.';
       }
-      return message || 'OTP request could not be processed. Check Auth settings and try again.';
+      return message || 'Email sign-in request could not be processed. Check Auth settings and try again.';
     }
 
     if (message?.toLowerCase().includes('provider') && message?.toLowerCase().includes('google')) {
@@ -147,26 +150,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     city: appUser.city,
   });
 
-  const resolveSessionUser = async (authUserId: string, email?: string | null): Promise<User | null> => {
+  const resolveSessionUser = async (authUserId: string): Promise<User | null> => {
     const profile = await supabaseAuthDataApi.getProfileById(authUserId);
     if (!profile) {
       return null;
     }
-
-    // Auto-elevate creator to platform_admin securely 
-    const cleanEmail = email?.trim().toLowerCase();
-    const admins = ['myteamcreations09@gmail.com', 'motisanjay04@gmail.com'];
-    
-    if (cleanEmail && admins.includes(cleanEmail) && profile.role !== 'platform_admin') {
-      console.log('[Auth] Elevating user to platform_admin:', cleanEmail);
-      const { error } = await supabase.from('profiles').update({ role: 'platform_admin' }).eq('id', authUserId);
-      if (error) {
-         console.error('[Auth] Elevation failed:', error);
-      } else {
-         profile.role = 'platform_admin';
-      }
-    }
-
     return mapUser(profile);
   };
 
@@ -175,7 +163,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     email?: string | null;
     user_metadata?: Record<string, unknown>;
   }): Promise<User | null> => {
-    const existing = await resolveSessionUser(authUser.id, authUser.email);
+    const existing = await resolveSessionUser(authUser.id);
     if (existing) {
       return existing;
     }
@@ -199,7 +187,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       role: metadataRole,
     });
 
-    return resolveSessionUser(authUser.id, email);
+    return resolveSessionUser(authUser.id);
   };
 
   useEffect(() => {
@@ -274,93 +262,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const requestLoginOTP = async (email: string): Promise<boolean> => {
+  const sendLoginMagicLink = async (email: string): Promise<boolean> => {
     setIsLoading(true);
     setAuthError('');
     try {
       const normalizedEmail = normalizeEmail(email);
       const emailRedirectTo = resolveEmailRedirectTo();
 
-      const sendOtp = async (shouldCreateUser: boolean) => {
-        const demoMetadata = DEMO_LOGIN_METADATA[normalizedEmail];
-
-        return supabase.auth.signInWithOtp({
-          email: normalizedEmail,
-          options: {
-            shouldCreateUser,
-            ...(emailRedirectTo ? { emailRedirectTo } : {}),
-            ...(shouldCreateUser && demoMetadata ? { data: demoMetadata } : {}),
-          },
-        });
-      };
-
-      let { error } = await sendOtp(false);
-
-      // Recover first-time accounts when auth.users entry is missing.
-      if (error && isMissingAuthUserError(error)) {
-        ({ error } = await sendOtp(true));
-      }
+      const { error } = await supabase.auth.signInWithOtp({
+        email: normalizedEmail,
+        options: {
+          shouldCreateUser: false,
+          ...(emailRedirectTo ? { emailRedirectTo } : {}),
+        },
+      });
 
       if (error) {
+        if (isMissingAuthUserError(error)) {
+          setAuthError('Account not found for this email. Use Create Account or continue with Google.');
+          return false;
+        }
         throw error;
       }
 
       return true;
     } catch (error) {
-      setAuthError(toAuthMessage(error, 'Unable to send OTP.'));
+      setAuthError(toAuthMessage(error, 'Unable to send sign-in link.'));
       return false;
     } finally {
       setIsLoading(false);
     }
   };
 
-  const loginWithOTP = async (email: string, otp: string): Promise<boolean> => {
-    setIsLoading(true);
-    setAuthError('');
-
-    try {
-      const { data, error } = await supabase.auth.verifyOtp({
-        email,
-        token: otp,
-        type: 'email',
-      });
-
-      if (error) {
-        throw error;
-      }
-
-      const authUserId = data.user?.id;
-      if (!authUserId) {
-        return false;
-      }
-
-      const loggedInUser = await ensureProfileFromAuthUser({
-        id: authUserId,
-        email: data.user?.email,
-        user_metadata: data.user?.user_metadata as Record<string, unknown> | undefined,
-      });
-      if (!loggedInUser) {
-        return false;
-      }
-
-      setUser(loggedInUser);
-      return true;
-    } catch (error) {
-      setAuthError(toAuthMessage(error, 'Invalid OTP. Please try again.'));
-      return false;
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const requestSignupOTP = async (draft: SignupDraft): Promise<boolean> => {
+  const sendSignupMagicLink = async (draft: SignupDraft): Promise<boolean> => {
     setIsLoading(true);
     setAuthError('');
     try {
       const emailRedirectTo = resolveEmailRedirectTo();
-      pendingSignupRef.current = draft;
       const { error } = await supabase.auth.signInWithOtp({
-        email: draft.email,
+        email: normalizeEmail(draft.email),
         options: {
           shouldCreateUser: true,
           ...(emailRedirectTo ? { emailRedirectTo } : {}),
@@ -378,7 +318,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       return true;
     } catch (error) {
-      setAuthError(toAuthMessage(error, 'Unable to send signup OTP.'));
+      setAuthError(toAuthMessage(error, 'Unable to send account activation link.'));
       return false;
     } finally {
       setIsLoading(false);
@@ -423,70 +363,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const signupWithOTP = async (email: string, otp: string): Promise<boolean> => {
-    setIsLoading(true);
-    setAuthError('');
-
-    try {
-      const { data, error } = await supabase.auth.verifyOtp({
-        email,
-        token: otp,
-        type: 'email',
-      });
-
-      if (error) {
-        throw error;
-      }
-
-      const authUserId = data.user?.id;
-      if (!authUserId) {
-        return false;
-      }
-
-      const authUserPayload = {
-        id: authUserId,
-        email: data.user?.email,
-        user_metadata: data.user?.user_metadata as Record<string, unknown> | undefined,
-      };
-
-      const pending = pendingSignupRef.current;
-      if (pending) {
-        await supabaseAuthDataApi.ensureOwnerProfile({
-          userId: authUserId,
-          email: pending.email,
-          name: pending.name,
-          phone: pending.phone,
-          pgName: '',
-          city: '',
-          role: 'owner',
-        });
-      }
-
-      // Refresh/link based OTP verification can lose in-memory draft state.
-      // Always ensure a profile from auth payload so signup completion does not loop.
-      const ensuredUser = await ensureProfileFromAuthUser(authUserPayload);
-      if (ensuredUser) {
-        setUser(ensuredUser);
-        pendingSignupRef.current = null;
-        return true;
-      }
-
-      const newUser = await resolveSessionUser(authUserId);
-      if (!newUser) {
-        return false;
-      }
-
-      setUser(newUser);
-      pendingSignupRef.current = null;
-      return true;
-    } catch (error) {
-      setAuthError(toAuthMessage(error, 'Invalid OTP. Please try again.'));
-      return false;
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   const logout = async () => {
     setIsLoading(true);
     try {
@@ -516,7 +392,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, authError, requestLoginOTP, loginWithOTP, signInWithGoogle, requestSignupOTP, signupWithOTP, refreshProfile, logout, isLoading }}>
+    <AuthContext.Provider value={{ user, authError, sendLoginMagicLink, signInWithGoogle, sendSignupMagicLink, refreshProfile, logout, isLoading }}>
       {children}
     </AuthContext.Provider>
   );

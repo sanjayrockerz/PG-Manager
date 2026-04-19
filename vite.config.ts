@@ -18,6 +18,7 @@ function figmaAssetResolver() {
 
   export default defineConfig({
     plugins: [react(), tailwindcss(), figmaAssetResolver()],
+    envPrefix: ['VITE_', 'NEXT_PUBLIC_'],
     resolve: {
       extensions: ['.js', '.jsx', '.ts', '.tsx', '.json'],
       alias: {

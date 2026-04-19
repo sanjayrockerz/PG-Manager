@@ -115,7 +115,7 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
 
       <div className="bg-white rounded-xl border border-gray-200 p-6">
         <div className="flex flex-col md:flex-row md:items-start gap-6">
-          <div className="w-24 h-24 bg-gradient-to-br from-blue-400 to-purple-500 rounded-full flex items-center justify-center text-white text-3xl flex-shrink-0">
+          <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center text-gray-700 text-3xl flex-shrink-0 border border-gray-200">
             {tenant.name.charAt(0)}
           </div>
 
@@ -199,7 +199,7 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center gap-2 px-6 py-4 border-b-2 transition-colors whitespace-nowrap ${activeTab === tab.id ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-600 hover:text-gray-900'}`}
+                  className={`flex items-center gap-2 px-6 py-4 border-b-2 transition-colors whitespace-nowrap ${activeTab === tab.id ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-600 hover:text-gray-900'}`}
                 >
                   <Icon className="w-4 h-4" />
                   <span className="text-sm">{tab.label}</span>
