@@ -19,40 +19,64 @@ export function ModeToggle({ canToggle }: ModeToggleProps) {
     }
   }, [canToggle, mode]);
 
-  const label = useMemo(() => (mode === 'demo' ? 'Demo Mode ON' : 'Live Mode ON'), [mode]);
+  const isLive = mode === 'live';
+  const label = useMemo(() => (isLive ? 'Live' : 'Demo'), [isLive]);
 
   const handleModeSwitch = (nextMode: AppMode) => {
-    if (!canToggle || nextMode === mode) {
-      return;
-    }
-
+    if (!canToggle || nextMode === mode) return;
     setModeState(nextMode);
     setAppMode(nextMode);
   };
 
   return (
-    <div className="flex items-center gap-2">
-      <div className="inline-flex overflow-hidden rounded-lg border border-gray-300 bg-white text-xs">
+    <div className="flex items-center gap-1.5">
+      {/* Pill toggle */}
+      <div
+        className={`flex items-center gap-0.5 p-0.5 rounded-full border text-xs font-semibold transition-colors ${
+          isLive
+            ? 'bg-emerald-50 border-emerald-200'
+            : 'bg-amber-50 border-amber-200'
+        }`}
+      >
         <button
           type="button"
           onClick={() => handleModeSwitch('demo')}
-          className={`px-3 py-1.5 transition-colors ${mode === 'demo' ? 'bg-amber-50 text-amber-700 font-semibold' : 'text-gray-600 hover:bg-gray-50'}`}
           disabled={!canToggle}
-          aria-pressed={mode === 'demo'}
+          aria-pressed={!isLive}
+          className={`px-3 py-1 rounded-full transition-all duration-200 ${
+            !isLive
+              ? 'bg-amber-500 text-white shadow-sm'
+              : 'text-gray-500 hover:text-gray-700 disabled:opacity-40'
+          }`}
         >
-          Demo Mode
+          Demo
         </button>
         <button
           type="button"
           onClick={() => handleModeSwitch('live')}
-          className={`border-l border-gray-300 px-3 py-1.5 transition-colors ${mode === 'live' ? 'bg-indigo-50 text-indigo-700 font-semibold' : 'text-gray-600 hover:bg-gray-50'}`}
           disabled={!canToggle}
-          aria-pressed={mode === 'live'}
+          aria-pressed={isLive}
+          className={`px-3 py-1 rounded-full transition-all duration-200 ${
+            isLive
+              ? 'bg-emerald-500 text-white shadow-sm'
+              : 'text-gray-500 hover:text-gray-700 disabled:opacity-40'
+          }`}
         >
-          Live Mode
+          Live
         </button>
       </div>
-      <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${mode === 'demo' ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-indigo-50 text-indigo-700 border border-indigo-200'}`}>
+
+      {/* Status dot + label */}
+      <span
+        className={`hidden sm:flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold border ${
+          isLive
+            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+            : 'bg-amber-50 text-amber-700 border-amber-200'
+        }`}
+      >
+        <span
+          className={`w-1.5 h-1.5 rounded-full ${isLive ? 'bg-emerald-500' : 'bg-amber-500'} animate-pulse`}
+        />
         {label}
       </span>
     </div>

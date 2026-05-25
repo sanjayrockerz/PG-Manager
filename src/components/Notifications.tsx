@@ -34,6 +34,8 @@ const notificationTypeClass: Record<NotificationRecord['type'], string> = {
   maintenance: 'bg-orange-500',
   tenant: 'bg-blue-500',
   announcement: 'bg-violet-500',
+  occupancy: 'bg-gray-500',
+  system: 'bg-gray-500',
 };
 
 export function Notifications({ onBack }: NotificationsProps) {

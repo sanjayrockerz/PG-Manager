@@ -7,10 +7,17 @@ interface PageFrameProps {
 
 export function PageFrame({ children, className = '' }: PageFrameProps) {
   return (
-    <div className={`min-h-screen bg-[#F8FAFC] p-6 ${className}`}>
-      <div className="mx-auto max-w-7xl space-y-6">
-        {children}
-      </div>
+    <div
+      className={className}
+      style={{
+        padding: '20px 24px 32px',
+        minHeight: '100%',
+        background: '#F8FAFC',
+        width: '100%',
+        boxSizing: 'border-box',
+      }}
+    >
+      {children}
     </div>
   );
 }

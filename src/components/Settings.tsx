@@ -1,837 +1,873 @@
-import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, FileText, MessageCircle, Plus, Save, Shield, User, X } from 'lucide-react';
-import { supabase } from '../lib/supabase';
-import { useAuth } from '../contexts/AuthContext';
-import { AppLanguage, useLocalization } from '../contexts/LocalizationContext';
-import { OwnerSettingsRecord, supabaseAuthDataApi, supabaseOwnerDataApi } from '../services/supabaseData';
+import { useEffect, useState } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
+import { Button } from './ui/button';
+import { Input } from './ui/input';
+import { Label } from './ui/label';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
 import {
-  DEFAULT_COUNTRY_CODE,
-  SUPPORTED_PHONE_COUNTRIES,
-  formatStoredPhone,
-  getPhoneCountry,
-  getPhoneDropdownLabel,
-  parseStoredPhone,
-  sanitizePhoneLocal,
-  validatePhoneForCountry,
-} from '../utils/phone';
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from './ui/alert-dialog';
+import { InternationalPhoneField } from './ui/InternationalPhoneField';
+import {
+  User, CreditCard, MessageCircle, Users, Crown, FileText,
+  Bell, Shield, Globe, AlertTriangle, Check, Plus, Trash,
+  Loader2, Save, RefreshCw, Mail,
+} from 'lucide-react';
+import { toast } from 'sonner';
+import { useAuth } from '../contexts/AuthContext';
+import { useProperty } from '../contexts/PropertyContext';
+import {
+  supabaseAuthDataApi, supabaseOwnerDataApi, supabaseNotificationApi,
+  type OwnerSettingsRecord, type ProfileUpdateInput, type NotificationRecord,
+  type OwnerSubscriptionRecord,
+} from '../services/supabaseData';
+import { inviteService, teamService, type TeamMemberRecord, type DisplayRole } from '../services/inviteService';
+import type { InviteRecord } from '../services/inviteService';
 
-interface ProfileFormState {
-  name: string;
-  email: string;
-  phoneCountryCode: string;
-  phoneLocalNumber: string;
+// ─── Toggle component ─────────────────────────────────────────────────────────
+function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!checked)}
+      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${checked ? 'bg-[#4F46E5]' : 'bg-gray-200'}`}
+    >
+      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${checked ? 'translate-x-6' : 'translate-x-1'}`} />
+    </button>
+  );
 }
 
+const roleBadge: Record<string, string> = {
+  manager: 'bg-blue-100 text-blue-700',
+  editor: 'bg-green-100 text-green-700',
+  viewer: 'bg-gray-100 text-gray-700',
+  owner: 'bg-purple-100 text-purple-700',
+};
+
+const notifTypeBadge: Record<string, string> = {
+  payment: 'bg-green-100 text-green-700',
+  maintenance: 'bg-amber-100 text-amber-700',
+  tenant: 'bg-blue-100 text-blue-700',
+  announcement: 'bg-purple-100 text-purple-700',
+};
+
 export function Settings() {
-  const { user, refreshProfile, logout } = useAuth();
-  const { setLanguage, t } = useLocalization();
-  const [settings, setSettings] = useState<OwnerSettingsRecord | null>(null);
-  const [activeSection, setActiveSection] = useState<'profile' | 'pg-rules' | 'whatsapp'>('profile');
-  const [isLoading, setIsLoading] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
+  const { user, refreshProfile } = useAuth();
+  const { properties } = useProperty();
+  const [activeTab, setActiveTab] = useState('basic');
 
-  const [profileForm, setProfileForm] = useState<ProfileFormState>({
-    name: '',
-    email: '',
-    phoneCountryCode: DEFAULT_COUNTRY_CODE,
-    phoneLocalNumber: '',
+  // ── Profile ──────────────────────────────────────────────────────────────────
+  const [profileForm, setProfileForm] = useState<ProfileUpdateInput>({
+    name: user?.name ?? '',
+    phone: user?.phone ?? '',
+    pgName: user?.pgName ?? '',
+    city: user?.city ?? '',
   });
-
-  const [newRule, setNewRule] = useState('');
-  const [showAddRuleModal, setShowAddRuleModal] = useState(false);
-  const [editingRuleIndex, setEditingRuleIndex] = useState<number | null>(null);
-  const [showTemplateModal, setShowTemplateModal] = useState(false);
-  const [editingTemplate, setEditingTemplate] = useState<{
-    type: 'welcomeMessage' | 'rentReminder' | 'paymentConfirmation' | 'complaintUpdate';
-    value: string;
-  } | null>(null);
-
-  const loadSettings = async () => {
-    setIsLoading(true);
-    setError('');
-    try {
-      const data = await supabaseOwnerDataApi.getOwnerSettings();
-      setSettings(data);
-    } catch {
-      setError('Unable to load settings from Supabase.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const [profileSaving, setProfileSaving] = useState(false);
 
   useEffect(() => {
-    void loadSettings();
-  }, []);
-
-  useEffect(() => {
-    if (!settings) {
-      return;
-    }
-
-    const selectedLanguage = settings.additionalSettings.language;
-    if (selectedLanguage === 'English' || selectedLanguage === 'Hindi' || selectedLanguage === 'Kannada') {
-      setLanguage(selectedLanguage as AppLanguage);
-    }
-  }, [settings, setLanguage]);
-
-  useEffect(() => {
-    const parsedPhone = parseStoredPhone(user?.phone ?? '');
     setProfileForm({
       name: user?.name ?? '',
-      email: user?.email ?? '',
-      phoneCountryCode: parsedPhone.countryCode,
-      phoneLocalNumber: sanitizePhoneLocal(parsedPhone.localNumber, parsedPhone.countryCode),
+      phone: user?.phone ?? '',
+      pgName: user?.pgName ?? '',
+      city: user?.city ?? '',
     });
   }, [user]);
 
-  const persistSettings = async (nextSettings: OwnerSettingsRecord, successMessage = 'Settings saved successfully.') => {
-    setIsSaving(true);
-    setError('');
-    setSuccess('');
+  const saveProfile = async () => {
+    setProfileSaving(true);
     try {
-      const saved = await supabaseOwnerDataApi.updateOwnerSettings(nextSettings);
-      setSettings(saved);
-      setSuccess(successMessage);
-    } catch {
-      setError('Unable to save settings.');
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const updateSettingsDraft = (updater: (current: OwnerSettingsRecord) => OwnerSettingsRecord) => {
-    setSettings((current) => {
-      if (!current) {
-        return current;
-      }
-      return updater(current);
-    });
-  };
-
-  const handleSaveProfile = async () => {
-    const cleanedName = profileForm.name.trim();
-    const cleanedPhone = profileForm.phoneLocalNumber.replace(/\D/g, '');
-
-    if (cleanedName.length < 2) {
-      setError('Full name must be at least 2 characters.');
-      return;
-    }
-
-    const phoneValidation = validatePhoneForCountry(profileForm.phoneCountryCode, cleanedPhone);
-    if (!phoneValidation.valid) {
-      setError(phoneValidation.error ?? 'Phone number is invalid.');
-      return;
-    }
-
-    setIsSaving(true);
-    setError('');
-    setSuccess('');
-    try {
-      await supabaseAuthDataApi.updateCurrentProfile({
-        name: cleanedName,
-        phone: formatStoredPhone(profileForm.phoneCountryCode, cleanedPhone),
-      });
+      await supabaseAuthDataApi.updateCurrentProfile(profileForm);
       await refreshProfile();
-      setSuccess('Profile updated successfully.');
-    } catch {
-      setError('Unable to update profile.');
+      toast.success('Profile saved');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save profile');
     } finally {
-      setIsSaving(false);
+      setProfileSaving(false);
     }
   };
 
-  const handleSendPasswordReset = async () => {
-    if (!profileForm.email) {
-      setError('No email found for this account.');
+  // ── Owner Settings ────────────────────────────────────────────────────────────
+  const [ownerSettings, setOwnerSettings] = useState<OwnerSettingsRecord | null>(null);
+  const [settingsLoading, setSettingsLoading] = useState(true);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+
+  const loadOwnerSettings = async () => {
+    try {
+      const s = await supabaseOwnerDataApi.getOwnerSettings();
+      setOwnerSettings(s);
+    } catch {
+      // use defaults silently
+    } finally {
+      setSettingsLoading(false);
+    }
+  };
+
+  const saveOwnerSettings = async (updated: OwnerSettingsRecord) => {
+    setSettingsSaving(true);
+    try {
+      const saved = await supabaseOwnerDataApi.updateOwnerSettings(updated);
+      setOwnerSettings(saved);
+      toast.success('Settings saved');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save settings');
+    } finally {
+      setSettingsSaving(false);
+    }
+  };
+
+  const patchSettings = (patch: Partial<OwnerSettingsRecord>) => {
+    if (!ownerSettings) return;
+    const updated = { ...ownerSettings, ...patch };
+    setOwnerSettings(updated);
+    void saveOwnerSettings(updated);
+  };
+
+  // ── Team ──────────────────────────────────────────────────────────────────────
+  const [teamMembers, setTeamMembers] = useState<TeamMemberRecord[]>([]);
+  const [pendingInvites, setPendingInvites] = useState<InviteRecord[]>([]);
+  const [teamLoading, setTeamLoading] = useState(true);
+
+  // Invite modal
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteForm, setInviteForm] = useState({ email: '', role: 'viewer' as DisplayRole, propertyIds: [] as string[] });
+  const [inviteSaving, setInviteSaving] = useState(false);
+
+  // Remove confirm
+  const [removeOpen, setRemoveOpen] = useState(false);
+  const [removingMember, setRemovingMember] = useState<TeamMemberRecord | null>(null);
+
+  const loadTeam = async () => {
+    setTeamLoading(true);
+    try {
+      const [members, invites] = await Promise.all([
+        teamService.listMembers(),
+        inviteService.listInvites(),
+      ]);
+      setTeamMembers(members);
+      setPendingInvites(invites.filter((i) => i.status === 'pending'));
+    } catch {
+      // team management not available (e.g., demo accounts without team setup)
+    } finally {
+      setTeamLoading(false);
+    }
+  };
+
+  const handleInvite = async () => {
+    if (!inviteForm.email) {
+      toast.error('Email is required');
       return;
     }
-
-    setIsSaving(true);
-    setError('');
-    setSuccess('');
+    setInviteSaving(true);
     try {
-      const { error: resetError } = await supabase.auth.resetPasswordForEmail(profileForm.email, {
-        redirectTo: window.location.origin,
+      await inviteService.createInvite({
+        invitedEmail: inviteForm.email,
+        displayRole: inviteForm.role,
+        propertyIds: inviteForm.propertyIds.length > 0 ? inviteForm.propertyIds : properties.map((p) => p.id),
       });
-
-      if (resetError) {
-        throw resetError;
-      }
-
-      setSuccess('Password reset link sent to your email.');
-    } catch {
-      setError('Unable to send password reset email.');
+      toast.success(`Invite sent to ${inviteForm.email}`);
+      setInviteOpen(false);
+      setInviteForm({ email: '', role: 'viewer', propertyIds: [] });
+      void loadTeam();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to send invite');
     } finally {
-      setIsSaving(false);
+      setInviteSaving(false);
     }
   };
 
-  const handleExportData = async () => {
-    setIsSaving(true);
-    setError('');
-    setSuccess('');
+  const handleRemoveMember = async () => {
+    if (!removingMember) return;
     try {
-      const payload = await supabaseOwnerDataApi.exportOwnerData();
-      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
-      const link = document.createElement('a');
-      link.href = URL.createObjectURL(blob);
-      link.download = `pg-manager-export-${new Date().toISOString().split('T')[0]}.json`;
-      link.click();
-      URL.revokeObjectURL(link.href);
-      setSuccess('Data export generated successfully.');
+      await teamService.removeMember(removingMember.id);
+      toast.success(`${removingMember.name} removed from team`);
+      setRemoveOpen(false);
+      setRemovingMember(null);
+      void loadTeam();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to remove member');
+    }
+  };
+
+  const handleRevokeInvite = async (inviteId: string, email: string) => {
+    try {
+      await inviteService.revokeInvite(inviteId);
+      toast.success(`Invite revoked for ${email}`);
+      void loadTeam();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to revoke invite');
+    }
+  };
+
+  // ── Audit Log ─────────────────────────────────────────────────────────────────
+  const [auditLog, setAuditLog] = useState<NotificationRecord[]>([]);
+  const [auditLoading, setAuditLoading] = useState(true);
+  const [auditFilter, setAuditFilter] = useState<'all' | 'payment' | 'maintenance' | 'tenant' | 'announcement'>('all');
+
+  const loadAuditLog = async () => {
+    try {
+      const data = await supabaseNotificationApi.listForCurrentUser();
+      setAuditLog(data);
     } catch {
-      setError('Unable to export data right now.');
+      // silent
     } finally {
-      setIsSaving(false);
+      setAuditLoading(false);
     }
   };
 
-  const handleDeleteAllData = async () => {
-    const typed = window.prompt('Type DELETE to remove all property, tenant, payment and ticket data.');
-    if (typed !== 'DELETE') {
-      return;
-    }
+  // ── Subscription ──────────────────────────────────────────────────────────────
+  const [subscription, setSubscription] = useState<OwnerSubscriptionRecord | null>(null);
 
-    setIsSaving(true);
-    setError('');
-    setSuccess('');
+  const loadSubscription = async () => {
     try {
-      await supabaseOwnerDataApi.clearOwnerData();
-      await loadSettings();
-      setSuccess('All owner data cleared successfully.');
+      const sub = await supabaseOwnerDataApi.getOwnerSubscription();
+      setSubscription(sub);
     } catch {
-      setError('Unable to clear owner data.');
-    } finally {
-      setIsSaving(false);
+      // silent
     }
   };
 
-  const handleCloseAccount = async () => {
-    const typed = window.prompt('Type CLOSE to clear your account data and sign out.');
-    if (typed !== 'CLOSE') {
-      return;
-    }
+  useEffect(() => {
+    void loadOwnerSettings();
+    void loadTeam();
+    void loadAuditLog();
+    void loadSubscription();
+  }, []);
 
-    setIsSaving(true);
-    setError('');
-    setSuccess('');
-    try {
-      await supabaseOwnerDataApi.clearOwnerData();
-      await logout();
-    } catch {
-      setError('Unable to close account right now.');
-      setIsSaving(false);
-    }
-  };
+  const filteredAudit = auditLog.filter(
+    (n) => auditFilter === 'all' || n.type === auditFilter,
+  );
 
-  const handleAddRule = async () => {
-    if (!settings || !newRule.trim()) {
-      return;
-    }
-
-    const nextRules = [...settings.pgRules];
-    if (editingRuleIndex !== null) {
-      nextRules[editingRuleIndex] = newRule.trim();
-    } else {
-      nextRules.push(newRule.trim());
-    }
-
-    await persistSettings({
-      ...settings,
-      pgRules: nextRules,
-    }, 'PG rules saved successfully.');
-
-    setNewRule('');
-    setEditingRuleIndex(null);
-    setShowAddRuleModal(false);
-  };
-
-  const handleEditRule = (index: number) => {
-    if (!settings) {
-      return;
-    }
-    setNewRule(settings.pgRules[index]);
-    setEditingRuleIndex(index);
-    setShowAddRuleModal(true);
-  };
-
-  const handleDeleteRule = async (index: number) => {
-    if (!settings) {
-      return;
-    }
-    if (!confirm('Are you sure you want to delete this rule?')) {
-      return;
-    }
-
-    const nextRules = settings.pgRules.filter((_, itemIndex) => itemIndex !== index);
-    await persistSettings({
-      ...settings,
-      pgRules: nextRules,
-    }, 'PG rule deleted successfully.');
-  };
-
-  const handleTemplateEdit = (type: 'welcomeMessage' | 'rentReminder' | 'paymentConfirmation' | 'complaintUpdate') => {
-    if (!settings) {
-      return;
-    }
-
-    const templateValue = type === 'complaintUpdate'
-      ? settings.whatsappSettings.complaintUpdate.template
-      : settings.whatsappSettings[type].template;
-
-    setEditingTemplate({
-      type,
-      value: templateValue,
-    });
-    setShowTemplateModal(true);
-  };
-
-  const handleTemplateSave = async () => {
-    if (!settings || !editingTemplate || !editingTemplate.value.trim()) {
-      return;
-    }
-
-    if (editingTemplate.type === 'complaintUpdate') {
-      await persistSettings({
-        ...settings,
-        whatsappSettings: {
-          ...settings.whatsappSettings,
-          complaintUpdate: {
-            ...settings.whatsappSettings.complaintUpdate,
-            template: editingTemplate.value.trim(),
-          },
-        },
-      }, 'WhatsApp complaint template updated successfully.');
-    } else {
-      await persistSettings({
-        ...settings,
-        whatsappSettings: {
-          ...settings.whatsappSettings,
-          [editingTemplate.type]: {
-            ...settings.whatsappSettings[editingTemplate.type],
-            template: editingTemplate.value.trim(),
-          },
-        },
-      }, 'WhatsApp template updated successfully.');
-    }
-
-    setEditingTemplate(null);
-    setShowTemplateModal(false);
-  };
-
-  const whatsappTemplateItems = useMemo(() => {
-    if (!settings) {
-      return [];
-    }
-
-    return [
-      {
-        key: 'welcomeMessage' as const,
-        label: 'Welcome Message',
-        enabled: settings.whatsappSettings.welcomeMessage.enabled,
-        template: settings.whatsappSettings.welcomeMessage.template,
-      },
-      {
-        key: 'rentReminder' as const,
-        label: 'Rent Reminder',
-        enabled: settings.whatsappSettings.rentReminder.enabled,
-        template: settings.whatsappSettings.rentReminder.template,
-      },
-      {
-        key: 'paymentConfirmation' as const,
-        label: 'Payment Confirmation',
-        enabled: settings.whatsappSettings.paymentConfirmation.enabled,
-        template: settings.whatsappSettings.paymentConfirmation.template,
-      },
-      {
-        key: 'complaintUpdate' as const,
-        label: 'Complaint Notifications',
-        enabled: settings.whatsappSettings.complaintUpdate.enabled,
-        template: settings.whatsappSettings.complaintUpdate.template,
-      },
-    ];
-  }, [settings]);
-
-  if (isLoading || !settings) {
-    return (
-      <div className="space-y-6">
-        <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-          <h1 className="text-2xl font-semibold text-gray-900">Settings</h1>
-          <p className="mt-1 text-sm text-gray-500">Loading your settings...</p>
-        </div>
-      </div>
-    );
-  }
-
-  const settingsPhoneCountry = getPhoneCountry(profileForm.phoneCountryCode);
+  const planLabel = subscription ? (subscription.planCode === 'starter' ? 'Free' : subscription.planCode.charAt(0).toUpperCase() + subscription.planCode.slice(1)) : 'Free';
+  const planStatusColor: Record<string, string> = { trialing: 'bg-blue-100 text-blue-700', active: 'bg-green-100 text-green-700', past_due: 'bg-red-100 text-red-700', cancelled: 'bg-gray-100 text-gray-700' };
 
   return (
-    <div className="space-y-6">
-      <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-        <h1 className="text-2xl font-semibold text-gray-900">{t('settings.title', 'Settings')}</h1>
-        <p className="mt-1 text-sm text-gray-500">{t('settings.subtitle', 'Manage your account settings')}</p>
+    <div className="p-6 bg-gray-50 min-h-screen pb-20 md:pb-6">
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
+        <p className="text-sm text-gray-500 mt-1">Manage your account, team, and preferences</p>
       </div>
 
-      {error && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
-      {success && <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">{success}</div>}
-
-      <div className="rounded-xl border border-gray-200 bg-white p-2 shadow-sm">
-        <div className="flex flex-wrap items-center gap-2">
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList className="mb-6 bg-white border border-gray-200 flex-wrap h-auto gap-1">
           {[
-            { key: 'profile', label: 'Profile' },
-            { key: 'pg-rules', label: 'PG Rules' },
-            { key: 'whatsapp', label: 'WhatsApp Integration' },
-          ].map((tab) => (
-            <button
-              key={tab.key}
-              onClick={() => setActiveSection(tab.key as 'profile' | 'pg-rules' | 'whatsapp')}
-              className={`px-4 py-2 rounded-lg text-sm transition-colors $
-                activeSection === tab.key
-                  ? 'bg-indigo-600 text-white'
-                  : 'bg-gray-50 text-gray-700 hover:bg-gray-100'
-              }`}
-            >
-              {tab.label}
-            </button>
+            { value: 'basic', icon: User, label: 'Profile' },
+            { value: 'payment', icon: CreditCard, label: 'Payment' },
+            { value: 'whatsapp', icon: MessageCircle, label: 'WhatsApp' },
+            { value: 'team', icon: Users, label: 'Team' },
+            { value: 'subscription', icon: Crown, label: 'Plan' },
+            { value: 'audit', icon: FileText, label: 'Activity' },
+          ].map(({ value, icon: Icon, label }) => (
+            <TabsTrigger key={value} value={value} className="data-[state=active]:bg-[#4F46E5] data-[state=active]:text-white">
+              <Icon className="w-4 h-4 mr-1.5" /> {label}
+            </TabsTrigger>
           ))}
-        </div>
-      </div>
+        </TabsList>
 
-      {activeSection === 'profile' && (
-        <div className="space-y-6">
-          <div className="space-y-4 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-            <div className="flex items-center gap-3">
-              <div className="rounded-lg bg-indigo-50 p-3">
-                <User className="w-5 h-5 text-indigo-600" />
-              </div>
-              <div>
-                <h2 className="text-gray-900">Profile Settings</h2>
-                <p className="text-sm text-gray-500">Keep your account profile up to date.</p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <label className="text-sm text-gray-600">Full Name</label>
-                <input value={profileForm.name} onChange={(e) => setProfileForm({ ...profileForm, name: e.target.value })} className="w-full rounded-lg border border-gray-300 px-4 py-2" />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm text-gray-600">Email</label>
-                <input value={profileForm.email} disabled className="w-full rounded-lg border border-gray-300 bg-gray-100 px-4 py-2 text-gray-500" />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm text-gray-600">Phone</label>
-                <div className="group flex items-center rounded-xl border border-gray-300 bg-white transition-shadow focus-within:ring-2 focus-within:ring-indigo-200">
-                  <select
-                    value={profileForm.phoneCountryCode}
-                    onChange={(e) => setProfileForm({
-                      ...profileForm,
-                      phoneCountryCode: e.target.value,
-                      phoneLocalNumber: sanitizePhoneLocal(profileForm.phoneLocalNumber, e.target.value),
-                    })}
-                    className="w-44 rounded-l-xl border-r border-gray-200 bg-gray-50 px-3 py-2.5 text-sm focus:outline-none"
-                  >
-                    {SUPPORTED_PHONE_COUNTRIES.map((entry) => (
-                      <option key={entry.code} value={entry.code}>{getPhoneDropdownLabel(entry)}</option>
-                    ))}
-                  </select>
-                  <span className="border-r border-gray-200 bg-gray-50 px-2 py-2 text-sm font-medium text-gray-700">
-                    {settingsPhoneCountry.flag} {settingsPhoneCountry.code}
-                  </span>
-                  <input
-                    value={profileForm.phoneLocalNumber}
-                    inputMode="numeric"
-                    maxLength={settingsPhoneCountry.localDigits}
-                    onChange={(e) => setProfileForm({
-                      ...profileForm,
-                      phoneLocalNumber: sanitizePhoneLocal(e.target.value, profileForm.phoneCountryCode),
-                    })}
-                    className="w-full rounded-r-xl border-0 px-4 py-2 focus:outline-none"
-                    placeholder={settingsPhoneCountry.placeholder}
-                  />
-                </div>
-                <p className="text-xs text-gray-500">{settingsPhoneCountry.country} numbers require exactly {settingsPhoneCountry.localDigits} digits.</p>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end">
-              <button onClick={() => void handleSaveProfile()} disabled={isSaving} className="rounded-lg bg-indigo-600 px-6 py-2.5 text-white transition-colors hover:bg-indigo-700 disabled:opacity-60">
-                {isSaving ? 'Saving...' : 'Update Profile'}
-              </button>
-            </div>
-          </div>
-
-          <div className="space-y-4 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-            <h2 className="text-gray-900">Notifications</h2>
-            <div className="space-y-3">
-              {[
-                ['paymentNotifications', 'Payment Notifications', 'Get notified about payments'],
-                ['maintenanceAlerts', 'Maintenance Alerts', 'New maintenance requests'],
-                ['tenantUpdates', 'Tenant Updates', 'Check-in and check-out alerts'],
-                ['emailNotifications', 'Email Notifications', 'Receive email updates'],
-              ].map(([field, label, note]) => (
-                <label key={field} className="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3 shadow-sm">
+        {/* ── PROFILE TAB ──────────────────────────────────────────────────────── */}
+        <TabsContent value="basic">
+          <div className="space-y-6">
+            {/* Profile */}
+            <Card className="border-gray-200">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2"><User className="w-5 h-5" /> Profile</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center gap-4">
+                  <div className="w-16 h-16 bg-gradient-to-br from-purple-500 to-blue-500 rounded-2xl flex items-center justify-center shadow-lg">
+                    <span className="text-white font-bold text-xl">
+                      {(user?.name ?? user?.email ?? 'U').split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)}
+                    </span>
+                  </div>
                   <div>
-                    <p className="text-sm text-gray-900">{label}</p>
-                    <p className="text-xs text-gray-500 mt-1">{note}</p>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={settings.notifications[field as keyof OwnerSettingsRecord['notifications']]}
-                    onChange={(e) => {
-                      const checked = e.target.checked;
-                      updateSettingsDraft((current) => ({
-                        ...current,
-                        notifications: {
-                          ...current.notifications,
-                          [field]: checked,
-                        },
-                      }));
-                    }}
-                    className="h-4 w-4"
-                  />
-                </label>
-              ))}
-            </div>
-            <div className="flex items-center justify-end">
-              <button onClick={() => void persistSettings(settings, 'Notification settings saved successfully.')} disabled={isSaving} className="rounded-lg bg-indigo-600 px-6 py-2.5 text-white transition-colors hover:bg-indigo-700 disabled:opacity-60">Save Notifications</button>
-            </div>
-          </div>
-
-          <div className="space-y-4 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-            <h2 className="text-gray-900">Security</h2>
-            <div className="flex items-center justify-between rounded-lg border border-gray-200 px-4 py-3 shadow-sm">
-              <div>
-                <p className="text-sm text-gray-900">Two-Factor Authentication</p>
-                <p className="text-xs text-gray-500 mt-1">Add an extra layer of security</p>
-              </div>
-              <input
-                type="checkbox"
-                checked={settings.security.twoFactorAuthentication}
-                onChange={(e) => {
-                  const checked = e.target.checked;
-                  updateSettingsDraft((current) => ({
-                    ...current,
-                    security: {
-                      ...current.security,
-                      twoFactorAuthentication: checked,
-                    },
-                  }));
-                }}
-                className="w-4 h-4"
-              />
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <button onClick={() => void handleSendPasswordReset()} disabled={isSaving} className="rounded-lg border border-gray-300 bg-white px-4 py-2 transition-colors hover:bg-gray-50">Change Password</button>
-              <button disabled className="cursor-not-allowed rounded-lg border border-gray-200 px-4 py-2 text-gray-400">Active Sessions: Current Device</button>
-            </div>
-
-            <div className="flex items-center justify-end">
-              <button onClick={() => void persistSettings(settings, 'Security settings saved successfully.')} disabled={isSaving} className="rounded-lg bg-indigo-600 px-6 py-2.5 text-white transition-colors hover:bg-indigo-700 disabled:opacity-60">Save Security</button>
-            </div>
-          </div>
-
-          <div className="space-y-4 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-            <h2 className="text-gray-900">Payment Settings</h2>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="space-y-2">
-                <label className="text-sm text-gray-600">UPI ID</label>
-                <input value={settings.paymentSettings.upiId} onChange={(e) => updateSettingsDraft((current) => ({ ...current, paymentSettings: { ...current.paymentSettings, upiId: e.target.value } }))} className="w-full rounded-lg border border-gray-300 px-4 py-2" />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm text-gray-600">Bank Account</label>
-                <input value={settings.paymentSettings.bankAccount} onChange={(e) => updateSettingsDraft((current) => ({ ...current, paymentSettings: { ...current.paymentSettings, bankAccount: e.target.value } }))} className="w-full rounded-lg border border-gray-300 px-4 py-2" />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm text-gray-600">Late Payment Fee</label>
-                <input type="number" min={0} value={settings.paymentSettings.latePaymentFee} onChange={(e) => updateSettingsDraft((current) => ({ ...current, paymentSettings: { ...current.paymentSettings, latePaymentFee: Number(e.target.value) || 0 } }))} className="w-full rounded-lg border border-gray-300 px-4 py-2" />
-              </div>
-            </div>
-            <div className="flex items-center justify-end">
-              <button onClick={() => void persistSettings(settings, 'Payment settings saved successfully.')} disabled={isSaving} className="rounded-lg bg-indigo-600 px-6 py-2.5 text-white transition-colors hover:bg-indigo-700 disabled:opacity-60">Save Payment Settings</button>
-            </div>
-          </div>
-
-          <div className="space-y-4 rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-            <h2 className="text-gray-900">Additional Settings</h2>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="space-y-2">
-                <label className="text-sm text-gray-600">Language</label>
-                <select value={settings.additionalSettings.language} onChange={(e) => updateSettingsDraft((current) => ({ ...current, additionalSettings: { ...current.additionalSettings, language: e.target.value } }))} className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2">
-                  <option value="English">English</option>
-                  <option value="Hindi">Hindi</option>
-                  <option value="Kannada">Kannada</option>
-                </select>
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm text-gray-600">Timezone</label>
-                <select value={settings.additionalSettings.timezone} onChange={(e) => updateSettingsDraft((current) => ({ ...current, additionalSettings: { ...current.additionalSettings, timezone: e.target.value } }))} className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2">
-                  <option value="IST (UTC+5:30)">IST (UTC+5:30)</option>
-                  <option value="UTC">UTC</option>
-                </select>
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm text-gray-600">Currency</label>
-                <select value={settings.additionalSettings.currency} onChange={(e) => updateSettingsDraft((current) => ({ ...current, additionalSettings: { ...current.additionalSettings, currency: e.target.value } }))} className="w-full rounded-lg border border-gray-300 bg-white px-4 py-2">
-                  <option value="INR (Rs)">INR (Rs)</option>
-                  <option value="USD ($)">USD ($)</option>
-                </select>
-              </div>
-            </div>
-            <div className="flex items-center justify-end">
-              <button
-                onClick={() => {
-                  const selectedLanguage = settings.additionalSettings.language;
-                  if (selectedLanguage === 'English' || selectedLanguage === 'Hindi' || selectedLanguage === 'Kannada') {
-                    setLanguage(selectedLanguage as AppLanguage);
-                  }
-                  void persistSettings(settings, 'Additional settings saved successfully.');
-                }}
-                disabled={isSaving}
-                className="rounded-lg bg-indigo-600 px-6 py-2.5 text-white transition-colors hover:bg-indigo-700 disabled:opacity-60"
-              >
-                Save Additional Settings
-              </button>
-            </div>
-          </div>
-
-          <div className="space-y-4 rounded-2xl border border-red-200 bg-white p-6 shadow-sm">
-            <div className="flex items-center gap-3">
-              <AlertTriangle className="w-5 h-5 text-red-600" />
-              <div>
-                <h2 className="text-gray-900">Danger Zone</h2>
-                <p className="text-xs text-gray-500 mt-1">These actions can clear your account data.</p>
-              </div>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <button onClick={() => void handleExportData()} disabled={isSaving} className="rounded-lg border border-gray-300 bg-white px-4 py-2 transition-colors hover:bg-gray-50">Export All Data</button>
-              <button onClick={() => void handleDeleteAllData()} disabled={isSaving} className="rounded-lg border border-red-300 px-4 py-2 text-red-700 transition-colors hover:bg-red-50">Delete All Data</button>
-              <button onClick={() => void handleCloseAccount()} disabled={isSaving} className="rounded-lg bg-red-600 px-4 py-2 text-white transition-colors hover:bg-red-700">Close Account</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {activeSection === 'pg-rules' && (
-        <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <div className="rounded-lg bg-indigo-50 p-3">
-                <FileText className="w-5 h-5 text-indigo-600" />
-              </div>
-              <div>
-                <h2 className="text-gray-900">PG Rules</h2>
-                <p className="text-sm text-gray-500">Rules for WhatsApp chatbot auto-replies</p>
-              </div>
-            </div>
-            <button
-              onClick={() => {
-                setEditingRuleIndex(null);
-                setNewRule('');
-                setShowAddRuleModal(true);
-              }}
-              className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-white transition-colors hover:bg-indigo-700"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Add Rule</span>
-            </button>
-          </div>
-
-          <div className="space-y-2">
-            {settings.pgRules.length === 0 ? (
-              <p className="text-sm text-gray-500">No rules added yet.</p>
-            ) : (
-              settings.pgRules.map((rule, index) => (
-                <div key={`rule-${index}`} className="flex items-center justify-between rounded-lg bg-gray-50 p-3">
-                  <div className="flex items-center gap-3">
-                    <span className="text-sm text-gray-500 font-mono">{index + 1}.</span>
-                    <p className="text-sm text-gray-900">{rule}</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button onClick={() => handleEditRule(index)} className="rounded-lg px-3 py-1 text-sm text-indigo-600 transition-colors hover:bg-indigo-50">Edit</button>
-                    <button onClick={() => void handleDeleteRule(index)} className="rounded-lg px-3 py-1 text-sm text-red-600 transition-colors hover:bg-red-50">Delete</button>
+                    <p className="font-semibold text-gray-900">{user?.name || user?.email}</p>
+                    <p className="text-sm text-gray-500">{user?.email}</p>
                   </div>
                 </div>
-              ))
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label className="text-sm font-semibold">Full Name</Label>
+                    <Input value={profileForm.name ?? ''} onChange={(e) => setProfileForm({ ...profileForm, name: e.target.value })} className="h-11" placeholder="Your full name" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-sm font-semibold">Email</Label>
+                    <div className="relative">
+                      <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                      <Input value={user?.email ?? ''} disabled className="h-11 pl-9 bg-gray-50 text-gray-500 cursor-not-allowed" />
+                    </div>
+                    <p className="text-xs text-gray-400">Email cannot be changed here</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-sm font-semibold">Phone</Label>
+                    <InternationalPhoneField value={profileForm.phone ?? ''} onChange={(v) => setProfileForm({ ...profileForm, phone: v })} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-sm font-semibold">PG / Business Name</Label>
+                    <Input value={profileForm.pgName ?? ''} onChange={(e) => setProfileForm({ ...profileForm, pgName: e.target.value })} className="h-11" placeholder="e.g., Sunrise PG" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-sm font-semibold">City</Label>
+                    <Input value={profileForm.city ?? ''} onChange={(e) => setProfileForm({ ...profileForm, city: e.target.value })} className="h-11" placeholder="e.g., Bengaluru" />
+                  </div>
+                </div>
+
+                <Button onClick={() => void saveProfile()} disabled={profileSaving} className="bg-[#4F46E5] hover:bg-[#4338CA] text-white">
+                  {profileSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+                  Save Profile
+                </Button>
+              </CardContent>
+            </Card>
+
+            {/* Notifications */}
+            <Card className="border-gray-200">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2"><Bell className="w-5 h-5" /> Notifications</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {settingsLoading ? (
+                  <div className="flex items-center justify-center py-4">
+                    <Loader2 className="w-5 h-5 animate-spin text-gray-400" />
+                  </div>
+                ) : ownerSettings ? (
+                  <>
+                    {[
+                      { key: 'paymentNotifications' as const, label: 'Payment notifications', desc: 'Get notified when rent is paid or overdue' },
+                      { key: 'maintenanceAlerts' as const, label: 'Maintenance alerts', desc: 'Notifications for new and updated tickets' },
+                      { key: 'tenantUpdates' as const, label: 'Tenant updates', desc: 'Activity from tenant onboarding and changes' },
+                      { key: 'emailNotifications' as const, label: 'Email notifications', desc: 'Receive summaries via email' },
+                    ].map(({ key, label, desc }) => (
+                      <div key={key} className="flex items-center justify-between py-2">
+                        <div>
+                          <p className="text-sm font-medium text-gray-900">{label}</p>
+                          <p className="text-xs text-gray-500">{desc}</p>
+                        </div>
+                        <Toggle
+                          checked={ownerSettings.notifications[key]}
+                          onChange={(v) => patchSettings({ notifications: { ...ownerSettings.notifications, [key]: v } })}
+                        />
+                      </div>
+                    ))}
+                    {settingsSaving && <p className="text-xs text-gray-400 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> Saving...</p>}
+                  </>
+                ) : (
+                  <p className="text-sm text-gray-400">Could not load notification settings</p>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Preferences */}
+            {ownerSettings && (
+              <Card className="border-gray-200">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2"><Globe className="w-5 h-5" /> Preferences</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="space-y-2">
+                      <Label className="text-sm font-semibold">Language</Label>
+                      <select
+                        value={ownerSettings.additionalSettings.language}
+                        onChange={(e) => patchSettings({ additionalSettings: { ...ownerSettings.additionalSettings, language: e.target.value } })}
+                        className="w-full h-11 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      >
+                        <option value="en">English</option>
+                        <option value="hi">Hindi</option>
+                        <option value="kn">Kannada</option>
+                        <option value="ta">Tamil</option>
+                        <option value="te">Telugu</option>
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-sm font-semibold">Timezone</Label>
+                      <select
+                        value={ownerSettings.additionalSettings.timezone}
+                        onChange={(e) => patchSettings({ additionalSettings: { ...ownerSettings.additionalSettings, timezone: e.target.value } })}
+                        className="w-full h-11 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      >
+                        <option value="Asia/Kolkata">IST (UTC+5:30)</option>
+                        <option value="America/New_York">EST (UTC-5:00)</option>
+                        <option value="America/Los_Angeles">PST (UTC-8:00)</option>
+                        <option value="Asia/Dubai">GST (UTC+4:00)</option>
+                      </select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-sm font-semibold">Currency</Label>
+                      <select
+                        value={ownerSettings.additionalSettings.currency}
+                        onChange={(e) => patchSettings({ additionalSettings: { ...ownerSettings.additionalSettings, currency: e.target.value } })}
+                        className="w-full h-11 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      >
+                        <option value="INR">INR (₹)</option>
+                        <option value="USD">USD ($)</option>
+                        <option value="AED">AED (د.إ)</option>
+                      </select>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Security */}
+            <Card className="border-gray-200">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2"><Shield className="w-5 h-5" /> Security</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <p className="text-sm text-gray-600">Authentication is handled via magic link and Google OAuth through Supabase. No password to change.</p>
+                <div className="flex items-center justify-between py-2">
+                  <div>
+                    <p className="text-sm font-medium text-gray-900">Two-Factor Authentication</p>
+                    <p className="text-xs text-gray-500">Available as a platform upgrade</p>
+                  </div>
+                  {ownerSettings && (
+                    <Toggle
+                      checked={ownerSettings.security.twoFactorAuthentication}
+                      onChange={(v) => patchSettings({ security: { twoFactorAuthentication: v } })}
+                    />
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Danger zone */}
+            <Card className="border-red-200 bg-red-50">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-red-700"><AlertTriangle className="w-5 h-5" /> Danger Zone</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="font-medium text-red-900">Delete Account</h4>
+                    <p className="text-sm text-red-600">Permanently deletes all your data. Cannot be undone.</p>
+                  </div>
+                  <Button variant="destructive" disabled>Delete Account</Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        {/* ── PAYMENT SETTINGS TAB ─────────────────────────────────────────────── */}
+        <TabsContent value="payment">
+          <div className="space-y-6">
+            {settingsLoading ? (
+              <div className="flex items-center justify-center py-12"><Loader2 className="w-6 h-6 animate-spin text-gray-400" /></div>
+            ) : ownerSettings ? (
+              <>
+                <Card className="border-gray-200">
+                  <CardHeader>
+                    <CardTitle>Payment Details</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="space-y-2">
+                      <Label className="text-sm font-semibold">UPI ID</Label>
+                      <Input
+                        placeholder="yourname@upi"
+                        value={ownerSettings.paymentSettings.upiId}
+                        onChange={(e) => setOwnerSettings({ ...ownerSettings, paymentSettings: { ...ownerSettings.paymentSettings, upiId: e.target.value } })}
+                        className="h-11"
+                      />
+                      <p className="text-xs text-gray-400">Shown to tenants for rent payments</p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-sm font-semibold">Bank Account Number</Label>
+                      <Input
+                        placeholder="XXXX XXXX XXXX 1234"
+                        value={ownerSettings.paymentSettings.bankAccount}
+                        onChange={(e) => setOwnerSettings({ ...ownerSettings, paymentSettings: { ...ownerSettings.paymentSettings, bankAccount: e.target.value } })}
+                        className="h-11"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-sm font-semibold">Late Payment Fee (₹)</Label>
+                      <Input
+                        type="number"
+                        min="0"
+                        placeholder="0"
+                        value={ownerSettings.paymentSettings.latePaymentFee || ''}
+                        onChange={(e) => setOwnerSettings({ ...ownerSettings, paymentSettings: { ...ownerSettings.paymentSettings, latePaymentFee: parseInt(e.target.value) || 0 } })}
+                        className="h-11"
+                      />
+                      <p className="text-xs text-gray-400">Auto-applied when rent becomes overdue</p>
+                    </div>
+                    <Button onClick={() => void saveOwnerSettings(ownerSettings)} disabled={settingsSaving} className="bg-[#4F46E5] hover:bg-[#4338CA] text-white">
+                      {settingsSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+                      Save Payment Settings
+                    </Button>
+                  </CardContent>
+                </Card>
+
+                <Card className="border-blue-200 bg-blue-50">
+                  <CardContent className="p-5">
+                    <div className="flex items-start gap-3">
+                      <div className="p-2 bg-blue-100 rounded-lg flex-shrink-0">
+                        <CreditCard className="w-5 h-5 text-blue-600" />
+                      </div>
+                      <div>
+                        <h4 className="font-semibold text-blue-900 mb-1">Payment Gateway Integration</h4>
+                        <p className="text-sm text-blue-700">Upgrade to Pro to accept payments directly through the platform with automated tracking and receipts.</p>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </>
+            ) : (
+              <p className="text-sm text-gray-400 text-center py-8">Could not load payment settings</p>
             )}
           </div>
-        </div>
-      )}
+        </TabsContent>
 
-      {activeSection === 'whatsapp' && (
-        <div className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <div className="rounded-lg bg-green-50 p-3">
-                <MessageCircle className="w-5 h-5 text-green-600" />
-              </div>
-              <div>
-                <h2 className="text-gray-900">WhatsApp Automation</h2>
-                <p className="text-sm text-gray-500">Configure WhatsApp chatbot templates</p>
-              </div>
-            </div>
-            <div className="text-xs text-gray-500 flex items-center gap-1">
-              <Save className="w-3 h-3" />
-              Live Sync
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            {whatsappTemplateItems.map((item, index) => (
-              <div key={item.key} className="flex items-center justify-between rounded-lg bg-gray-50 p-3">
-                <div>
-                  <p className="text-sm text-gray-900">{index + 1}. {item.label}</p>
-                  <p className="text-xs text-gray-500 mt-1">{item.template}</p>
+        {/* ── WHATSAPP TAB ─────────────────────────────────────────────────────── */}
+        <TabsContent value="whatsapp">
+          <div className="space-y-6">
+            <Card className="border-gray-200">
+              <CardHeader>
+                <CardTitle>WhatsApp Connection</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center gap-3 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                  <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0" />
+                  <div>
+                    <p className="text-sm font-semibold text-amber-900">WhatsApp Business API not connected</p>
+                    <p className="text-xs text-amber-700">Connect your WhatsApp Business account to enable automated messaging</p>
+                  </div>
                 </div>
+              </CardContent>
+            </Card>
+
+            <Card className="border-gray-200">
+              <CardHeader>
+                <CardTitle>Message Templates</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {settingsLoading ? (
+                  <div className="flex items-center justify-center py-4"><Loader2 className="w-5 h-5 animate-spin text-gray-400" /></div>
+                ) : ownerSettings ? (
+                  [
+                    { key: 'welcomeMessage' as const, label: 'Welcome Message', desc: 'Sent when a new tenant is onboarded' },
+                    { key: 'rentReminder' as const, label: 'Rent Reminder', desc: `Sent ${ownerSettings.whatsappSettings.rentReminder.daysBeforeDue} days before due date` },
+                    { key: 'paymentConfirmation' as const, label: 'Payment Confirmation', desc: 'Sent when payment is marked as received' },
+                    { key: 'complaintUpdate' as const, label: 'Maintenance Update', desc: 'Sent when a ticket status changes' },
+                  ].map(({ key, label, desc }) => (
+                    <div key={key} className="flex items-center justify-between p-4 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors">
+                      <div>
+                        <h4 className="font-medium text-gray-900">{label}</h4>
+                        <p className="text-sm text-gray-500">{desc}</p>
+                      </div>
+                      <Toggle
+                        checked={ownerSettings.whatsappSettings[key].enabled}
+                        onChange={(v) => patchSettings({
+                          whatsappSettings: {
+                            ...ownerSettings.whatsappSettings,
+                            [key]: { ...ownerSettings.whatsappSettings[key], enabled: v },
+                          },
+                        })}
+                      />
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm text-gray-400">Could not load template settings</p>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        {/* ── TEAM TAB ─────────────────────────────────────────────────────────── */}
+        <TabsContent value="team">
+          <div className="space-y-6">
+            <Card className="border-gray-200">
+              <CardHeader className="flex flex-row items-center justify-between">
+                <CardTitle>Team Members</CardTitle>
                 <div className="flex items-center gap-2">
-                  <label className="relative inline-block w-12 h-6">
+                  <Button variant="outline" size="sm" onClick={() => void loadTeam()} className="h-8">
+                    <RefreshCw className="w-3.5 h-3.5 mr-1" /> Refresh
+                  </Button>
+                  <Button size="sm" onClick={() => setInviteOpen(true)} className="bg-[#4F46E5] hover:bg-[#4338CA] text-white h-8">
+                    <Plus className="w-3.5 h-3.5 mr-1" /> Invite
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {teamLoading ? (
+                  <div className="flex items-center justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-gray-400" /></div>
+                ) : teamMembers.length === 0 && pendingInvites.length === 0 ? (
+                  <div className="text-center py-10 text-gray-400">
+                    <Users className="w-10 h-10 mx-auto mb-3 opacity-30" />
+                    <p className="text-sm">No team members yet. Invite a manager or staff member.</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b border-gray-200 bg-gray-50">
+                          {['Member', 'Email', 'Role', 'Status', 'Actions'].map((h) => (
+                            <th key={h} className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {teamMembers.map((member) => (
+                          <tr key={member.id} className="border-b border-gray-100 hover:bg-gray-50">
+                            <td className="py-3 px-4">
+                              <div className="flex items-center gap-2">
+                                <div className="w-8 h-8 bg-gradient-to-br from-purple-400 to-blue-400 rounded-full flex items-center justify-center">
+                                  <span className="text-white text-xs font-bold">{(member.name || member.email || 'U').slice(0, 1).toUpperCase()}</span>
+                                </div>
+                                <span className="text-sm font-medium text-gray-900">{member.name || '—'}</span>
+                              </div>
+                            </td>
+                            <td className="py-3 px-4 text-sm text-gray-600">{member.email}</td>
+                            <td className="py-3 px-4">
+                              <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${roleBadge[member.displayRole ?? member.role] ?? 'bg-gray-100 text-gray-700'}`}>
+                                {member.displayRole ?? member.role}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4">
+                              <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-700">Active</span>
+                            </td>
+                            <td className="py-3 px-4">
+                              <Button variant="ghost" size="sm" onClick={() => { setRemovingMember(member); setRemoveOpen(true); }} className="h-8 w-8 p-0 text-red-500 hover:text-red-700 hover:bg-red-50">
+                                <Trash className="w-4 h-4" />
+                              </Button>
+                            </td>
+                          </tr>
+                        ))}
+                        {pendingInvites.map((invite) => (
+                          <tr key={invite.id} className="border-b border-gray-100 hover:bg-gray-50 opacity-75">
+                            <td className="py-3 px-4">
+                              <div className="flex items-center gap-2">
+                                <div className="w-8 h-8 bg-gray-200 rounded-full flex items-center justify-center">
+                                  <Mail className="w-4 h-4 text-gray-400" />
+                                </div>
+                                <span className="text-sm font-medium text-gray-500">Pending invite</span>
+                              </div>
+                            </td>
+                            <td className="py-3 px-4 text-sm text-gray-500">{invite.invitedEmail}</td>
+                            <td className="py-3 px-4">
+                              <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${roleBadge[invite.displayRole] ?? 'bg-gray-100 text-gray-700'}`}>
+                                {invite.displayRole}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4">
+                              <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-700">Pending</span>
+                            </td>
+                            <td className="py-3 px-4">
+                              <Button variant="ghost" size="sm" onClick={() => void handleRevokeInvite(invite.id, invite.invitedEmail)} className="h-8 px-2 text-red-500 hover:text-red-700 hover:bg-red-50 text-xs">
+                                Revoke
+                              </Button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        {/* ── SUBSCRIPTION TAB ──────────────────────────────────────────────────── */}
+        <TabsContent value="subscription">
+          <div className="space-y-6">
+            <Card className="border-gray-200">
+              <CardHeader>
+                <CardTitle>Current Plan</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-start justify-between flex-wrap gap-4">
+                  <div>
+                    <div className="flex items-center gap-3 mb-2">
+                      <h3 className="text-2xl font-bold text-gray-900">{planLabel} Plan</h3>
+                      {subscription && (
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${planStatusColor[subscription.status] ?? 'bg-gray-100 text-gray-700'}`}>
+                          {subscription.status.replace('_', ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
+                        </span>
+                      )}
+                    </div>
+                    <ul className="space-y-2 mt-4">
+                      {['Basic payment tracking', 'Up to 10 tenants', 'Maintenance tickets', 'Announcements'].map((f) => (
+                        <li key={f} className="flex items-center gap-2 text-sm text-gray-600">
+                          <Check className="w-4 h-4 text-green-600" /> {f}
+                        </li>
+                      ))}
+                    </ul>
+                    {subscription?.trialEndsAt && (
+                      <p className="text-sm text-amber-600 mt-3">
+                        Trial ends: {new Date(subscription.trialEndsAt).toLocaleDateString('en-IN')}
+                      </p>
+                    )}
+                    {subscription?.renewsAt && (
+                      <p className="text-sm text-gray-500 mt-2">
+                        Renews: {new Date(subscription.renewsAt).toLocaleDateString('en-IN')}
+                      </p>
+                    )}
+                  </div>
+                  <div className="text-right">
+                    <div className="text-3xl font-bold text-gray-900">
+                      {subscription && subscription.amount > 0 ? `₹${subscription.amount}` : '₹0'}
+                    </div>
+                    <div className="text-sm text-gray-500">/{subscription?.billingCycle ?? 'month'}</div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card className="border-purple-300 bg-gradient-to-br from-purple-50 to-blue-50">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Crown className="w-5 h-5 text-[#4F46E5]" /> Upgrade to Pro
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-start justify-between flex-wrap gap-4 mb-6">
+                  <ul className="space-y-2">
+                    {['Unlimited tenants', 'Payment gateway integration', 'Unlimited WhatsApp messages', 'Team collaboration (5 seats)', 'Advanced analytics & reports'].map((f) => (
+                      <li key={f} className="flex items-center gap-2 text-sm font-medium text-gray-900">
+                        <Check className="w-4 h-4 text-[#4F46E5]" /> {f}
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="text-right">
+                    <div className="text-3xl font-bold text-[#4F46E5]">₹999</div>
+                    <div className="text-sm text-gray-500">/month</div>
+                  </div>
+                </div>
+                <Button className="w-full bg-[#4F46E5] hover:bg-[#4338CA] text-white">Upgrade Now</Button>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        {/* ── AUDIT LOG TAB ────────────────────────────────────────────────────── */}
+        <TabsContent value="audit">
+          <Card className="border-gray-200">
+            <CardHeader>
+              <CardTitle>Activity Log</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
+                {(['all', 'payment', 'maintenance', 'tenant', 'announcement'] as const).map((f) => (
+                  <button
+                    key={f}
+                    onClick={() => setAuditFilter(f)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
+                      auditFilter === f ? 'bg-[#4F46E5] text-white' : 'bg-white border border-gray-200 text-gray-600 hover:border-purple-300'
+                    }`}
+                  >
+                    {f.charAt(0).toUpperCase() + f.slice(1)}
+                  </button>
+                ))}
+              </div>
+
+              {auditLoading ? (
+                <div className="flex items-center justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-gray-400" /></div>
+              ) : filteredAudit.length === 0 ? (
+                <div className="text-center py-10 text-gray-400">
+                  <FileText className="w-10 h-10 mx-auto mb-3 opacity-30" />
+                  <p className="text-sm">No activity recorded yet</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {filteredAudit.map((entry) => (
+                    <div key={entry.id} className="flex items-start gap-3 p-3 rounded-xl hover:bg-gray-50 transition-colors">
+                      <span className={`flex-shrink-0 mt-0.5 px-2 py-0.5 rounded-full text-xs font-semibold ${notifTypeBadge[entry.type] ?? 'bg-gray-100 text-gray-700'}`}>
+                        {entry.type}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-900">{entry.title}</p>
+                        <p className="text-xs text-gray-500 truncate">{entry.message}</p>
+                      </div>
+                      <span className="text-xs text-gray-400 flex-shrink-0">
+                        {new Date(entry.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+
+      {/* ── Invite Member Modal ──────────────────────────────────────────────── */}
+      <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Invite Team Member</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold">Email Address *</Label>
+              <Input type="email" placeholder="colleague@example.com" value={inviteForm.email} onChange={(e) => setInviteForm({ ...inviteForm, email: e.target.value })} className="h-11" />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold">Role</Label>
+              <select value={inviteForm.role} onChange={(e) => setInviteForm({ ...inviteForm, role: e.target.value as DisplayRole })} className="w-full h-11 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500">
+                <option value="viewer">Viewer — read-only access</option>
+                <option value="editor">Editor — manage tenants & maintenance</option>
+                <option value="manager">Manager — full access</option>
+              </select>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold">Property Access</Label>
+              <div className="space-y-2 max-h-36 overflow-y-auto border border-gray-200 rounded-md p-2">
+                {properties.length === 0 ? (
+                  <p className="text-xs text-gray-400 py-2 text-center">No properties yet</p>
+                ) : properties.map((p) => (
+                  <label key={p.id} className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
-                      className="sr-only peer"
-                      checked={item.enabled}
+                      checked={inviteForm.propertyIds.length === 0 || inviteForm.propertyIds.includes(p.id)}
                       onChange={(e) => {
-                        const checked = e.target.checked;
-                        updateSettingsDraft((current) => ({
-                          ...current,
-                          whatsappSettings: {
-                            ...current.whatsappSettings,
-                            [item.key]: {
-                              ...current.whatsappSettings[item.key],
-                              enabled: checked,
-                            },
-                          },
-                        }));
+                        if (e.target.checked) {
+                          setInviteForm({ ...inviteForm, propertyIds: [...inviteForm.propertyIds, p.id] });
+                        } else {
+                          setInviteForm({ ...inviteForm, propertyIds: inviteForm.propertyIds.filter((id) => id !== p.id) });
+                        }
                       }}
+                      className="w-4 h-4 accent-purple-600"
                     />
-                    <div className="w-12 h-6 bg-gray-300 rounded-full peer-checked:bg-blue-600 transition-colors cursor-pointer"></div>
-                    <div className="absolute left-1 top-1 w-4 h-4 bg-white rounded-full peer-checked:translate-x-6 transition-transform"></div>
+                    <span className="text-sm text-gray-700">{p.name}</span>
                   </label>
-                  <button onClick={() => handleTemplateEdit(item.key)} className="rounded-lg px-3 py-1 text-sm text-indigo-600 transition-colors hover:bg-indigo-50">Edit</button>
-                </div>
+                ))}
               </div>
-            ))}
-
-            <div className="space-y-2 rounded-lg bg-gray-50 p-3">
-              <div className="flex items-center justify-between">
-                <p className="text-sm text-gray-900">Rent Reminder Timing</p>
-                <input
-                  type="number"
-                  min={1}
-                  max={15}
-                  value={settings.whatsappSettings.rentReminder.daysBeforeDue}
-                  onChange={(e) => {
-                    const days = Math.min(15, Math.max(1, Number(e.target.value) || 1));
-                    updateSettingsDraft((current) => ({
-                      ...current,
-                      whatsappSettings: {
-                        ...current.whatsappSettings,
-                        rentReminder: {
-                          ...current.whatsappSettings.rentReminder,
-                          daysBeforeDue: days,
-                        },
-                      },
-                    }));
-                  }}
-                  className="w-20 rounded-md border border-gray-300 px-2 py-1 text-sm"
-                />
-              </div>
-              <p className="text-xs text-gray-500">Automatic reminders are sent this many days before due date.</p>
-            </div>
-
-            <div className="p-3 bg-gray-50 rounded-lg space-y-2">
-              <p className="text-sm text-gray-900">Complaint Notification Flags</p>
-              {([
-                ['notifyOnCreate', 'Notify on Ticket Create'],
-                ['notifyOnProgress', 'Notify on In Progress'],
-                ['notifyOnResolve', 'Notify on Resolve'],
-              ] as const).map(([field, label]) => (
-                <label key={field} className="flex items-center gap-2 text-sm text-gray-700">
-                  <input
-                    type="checkbox"
-                    checked={settings.whatsappSettings.complaintUpdate[field]}
-                    onChange={(e) => {
-                      const checked = e.target.checked;
-                      updateSettingsDraft((current) => ({
-                        ...current,
-                        whatsappSettings: {
-                          ...current.whatsappSettings,
-                          complaintUpdate: {
-                            ...current.whatsappSettings.complaintUpdate,
-                            [field]: checked,
-                          },
-                        },
-                      }));
-                    }}
-                    className="h-4 w-4"
-                  />
-                  <span>{label}</span>
-                </label>
-              ))}
-            </div>
-
-            <div className="flex items-center justify-end">
-              <button onClick={() => void persistSettings(settings, 'WhatsApp automation settings saved successfully.')} disabled={isSaving} className="rounded-lg bg-indigo-600 px-6 py-2.5 text-white transition-colors hover:bg-indigo-700 disabled:opacity-60">Save WhatsApp Settings</button>
+              <p className="text-xs text-gray-400">Leave all unchecked to grant access to all properties</p>
             </div>
           </div>
-        </div>
-      )}
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setInviteOpen(false)}>Cancel</Button>
+            <Button onClick={() => void handleInvite()} disabled={inviteSaving} className="bg-[#4F46E5] hover:bg-[#4338CA] text-white">
+              {inviteSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Mail className="w-4 h-4 mr-2" />}
+              Send Invite
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-      {showAddRuleModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowAddRuleModal(false)}>
-          <div className="w-full max-w-md rounded-xl border border-gray-200 bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between border-b border-gray-200 p-6">
-              <h2 className="text-lg font-medium text-gray-900">{editingRuleIndex !== null ? 'Edit Rule' : 'Add New Rule'}</h2>
-              <button onClick={() => setShowAddRuleModal(false)} className="rounded-md p-2 transition-colors hover:bg-gray-100">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="p-6 space-y-4">
-              <div className="space-y-2">
-                <label className="text-sm text-gray-700">Rule Text *</label>
-                <textarea value={newRule} onChange={(e) => setNewRule(e.target.value)} className="w-full rounded-lg border border-gray-300 px-4 py-2" rows={3} placeholder="e.g., Check-in time: After 6:00 PM" />
-              </div>
-
-              <div className="flex items-center justify-end gap-3 border-t border-gray-200 pt-4">
-                <button onClick={() => setShowAddRuleModal(false)} className="rounded-lg border border-gray-300 bg-white px-6 py-2.5 transition-colors hover:bg-gray-50">Cancel</button>
-                <button onClick={() => void handleAddRule()} disabled={!newRule.trim() || isSaving} className="rounded-lg bg-indigo-600 px-6 py-2.5 text-white transition-colors hover:bg-indigo-700 disabled:opacity-50">
-                  {editingRuleIndex !== null ? 'Update Rule' : 'Add Rule'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showTemplateModal && editingTemplate && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setShowTemplateModal(false)}>
-          <div className="w-full max-w-md rounded-xl border border-gray-200 bg-white shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between border-b border-gray-200 p-6">
-              <h2 className="text-lg font-medium text-gray-900">Edit WhatsApp Template</h2>
-              <button onClick={() => setShowTemplateModal(false)} className="rounded-md p-2 transition-colors hover:bg-gray-100">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="p-6 space-y-4">
-              <div className="space-y-2">
-                <label className="text-sm text-gray-700">Template Text *</label>
-                <textarea value={editingTemplate.value} onChange={(e) => setEditingTemplate({ ...editingTemplate, value: e.target.value })} className="w-full rounded-lg border border-gray-300 px-4 py-2" rows={5} />
-              </div>
-
-              <div className="flex items-center justify-end gap-3 border-t border-gray-200 pt-4">
-                <button onClick={() => setShowTemplateModal(false)} className="rounded-lg border border-gray-300 bg-white px-6 py-2.5 transition-colors hover:bg-gray-50">Cancel</button>
-                <button onClick={() => void handleTemplateSave()} disabled={!editingTemplate.value.trim() || isSaving} className="rounded-lg bg-indigo-600 px-6 py-2.5 text-white transition-colors hover:bg-indigo-700 disabled:opacity-50">
-                  Save Template
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* ── Remove Member Confirm ────────────────────────────────────────────── */}
+      <AlertDialog open={removeOpen} onOpenChange={setRemoveOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-red-600">
+              <Trash className="w-5 h-5" /> Remove Team Member?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Remove <strong>{removingMember?.name || removingMember?.email}</strong> from your team? Their access will be revoked immediately.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void handleRemoveMember()} className="bg-red-600 hover:bg-red-700 text-white">
+              Remove Member
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -14,10 +14,6 @@
 create extension if not exists pgcrypto;
 
 -- ================================================================
--- SECTION 1: CORE TABLES (Base Schema)
--- ================================================================
-
--- profiles: one row per auth user
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   email text unique,

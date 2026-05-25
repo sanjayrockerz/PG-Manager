@@ -1,1001 +1,732 @@
 import { useState } from 'react';
-import { useProperty, Property, Room } from '../contexts/PropertyContext';
-import { Building2, Plus, Edit2, Trash2, MapPin, Phone, Mail, Layers, Home, X, Bed, ChevronDown, ChevronUp } from 'lucide-react';
 import {
-  DEFAULT_COUNTRY_CODE,
-  isValidStoredPhoneNumber,
-} from '../utils/phone';
+  Plus, Building2, MapPin, ChevronDown, ChevronRight,
+  Edit, Trash, Bed, Home, Layers, Save, AlertTriangle, Loader2,
+} from 'lucide-react';
+import { Card } from './ui/card';
+import { Button } from './ui/button';
+import { Input } from './ui/input';
+import { Label } from './ui/label';
 import { InternationalPhoneField } from './ui/InternationalPhoneField';
-import { AddressAutocomplete } from './ui/AddressAutocomplete';
-import type { StructuredAddressData } from '../hooks/usePhotonAutocomplete';
+import {
+  Dialog, DialogContent, DialogDescription,
+  DialogFooter, DialogHeader, DialogTitle,
+} from './ui/dialog';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel,
+  AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from './ui/alert-dialog';
+import { toast } from 'sonner';
+import { useProperty } from '../contexts/PropertyContext';
+import type { Property, Room } from '../contexts/PropertyContext';
 
-const EMAIL_MAX_LENGTH = 254;
-const PINCODE_LENGTH = 6;
-const PROPERTY_NAME_MAX_LENGTH = 80;
-const PERSON_NAME_MAX_LENGTH = 80;
-const LOCATION_MAX_LENGTH = 64;
+interface PropertiesV2Props {
+  onNavigate: (screen: string) => void;
+}
 
-
-type PropertyField = 'name' | 'address' | 'city' | 'state' | 'pincode' | 'floors' | 'contactName' | 'contactPhone' | 'contactEmail';
-
-const PROPERTY_FIELDS: PropertyField[] = ['name', 'address', 'city', 'state', 'pincode', 'floors', 'contactName', 'contactPhone', 'contactEmail'];
-
-const emptyPropertyErrors = (): Record<PropertyField, string> => ({
+const emptyPropertyForm = () => ({
   name: '',
   address: '',
   city: '',
   state: '',
   pincode: '',
-  floors: '',
+  floors: 1,
+  totalRooms: 0,
   contactName: '',
   contactPhone: '',
   contactEmail: '',
 });
 
-const emptyPropertyTouched = (): Record<PropertyField, boolean> => ({
-  name: false,
-  address: false,
-  city: false,
-  state: false,
-  pincode: false,
-  floors: false,
-  contactName: false,
-  contactPhone: false,
-  contactEmail: false,
-});
+type RoomType = 'single' | 'double' | 'triple';
+type RoomStatus = 'occupied' | 'vacant' | 'maintenance';
 
-const sanitizeTextWithoutDigits = (value: string): string => value.replace(/\d/g, '');
+const roomTypeBeds: Record<RoomType, number> = { single: 1, double: 2, triple: 3 };
 
-const normalizeStoredPhone = (value: string): string => {
-  const raw = String(value ?? '').trim();
-  if (!raw) {
-    return '';
-  }
-
-  const digits = raw.replace(/\D/g, '');
-  if (!digits) {
-    return '';
-  }
-
-  if (raw.startsWith('+')) {
-    return `+${digits}`;
-  }
-
-  return `${DEFAULT_COUNTRY_CODE}${digits}`;
+const statusLabel: Record<RoomStatus, string> = {
+  occupied: 'Occupied',
+  vacant: 'Vacant',
+  maintenance: 'Maintenance',
 };
 
-export function Properties() {
-  const { properties, addProperty, updateProperty, deleteProperty, addRoom, updateRoom, deleteRoom } = useProperty();
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [editingProperty, setEditingProperty] = useState<Property | null>(null);
+const statusColor: Record<RoomStatus, string> = {
+  occupied: 'bg-green-100 text-green-700',
+  vacant: 'bg-gray-100 text-gray-700',
+  maintenance: 'bg-amber-100 text-amber-700',
+};
+
+export function Properties({ onNavigate: _onNavigate }: PropertiesV2Props) {
+  const {
+    properties, isLoading,
+    addProperty, updateProperty, deleteProperty,
+    addRoom, updateRoom, deleteRoom,
+  } = useProperty();
+
   const [expandedProperty, setExpandedProperty] = useState<string | null>(null);
-  const [showRoomDialog, setShowRoomDialog] = useState(false);
+
+  // Add Property
+  const [addPropertyOpen, setAddPropertyOpen] = useState(false);
+  const [addForm, setAddForm] = useState(emptyPropertyForm());
+  const [addSaving, setAddSaving] = useState(false);
+
+  // Edit Property
+  const [editPropertyOpen, setEditPropertyOpen] = useState(false);
+  const [editingProperty, setEditingProperty] = useState<Property | null>(null);
+  const [editSaving, setEditSaving] = useState(false);
+
+  // Delete Property
+  const [deletePropertyOpen, setDeletePropertyOpen] = useState(false);
+  const [deletingProperty, setDeletingProperty] = useState<Property | null>(null);
+
+  // Add Room
+  const [addRoomOpen, setAddRoomOpen] = useState(false);
+  const [addRoomPropertyId, setAddRoomPropertyId] = useState('');
+  const [newRoom, setNewRoom] = useState({ number: '', floor: 1, type: 'single' as RoomType, rent: 0 });
+
+  // Edit Room
+  const [editRoomOpen, setEditRoomOpen] = useState(false);
   const [editingRoom, setEditingRoom] = useState<Room | null>(null);
-  const [currentPropertyId, setCurrentPropertyId] = useState<string>('');
-  const [formError, setFormError] = useState('');
-  const [fieldErrors, setFieldErrors] = useState<Record<PropertyField, string>>(emptyPropertyErrors());
-  const [touchedFields, setTouchedFields] = useState<Record<PropertyField, boolean>>(emptyPropertyTouched());
-  
-  const [formData, setFormData] = useState({
-    name: '',
-    address: '',
-    addressLine1: '',
-    addressLine2: '',
-    locality: '',
-    landmark: '',
-    latitude: null as number | null,
-    longitude: null as number | null,
-    formattedAddress: '',
-    city: '',
-    state: '',
-    pincode: '',
-    floors: 1,
-    totalRooms: 0,
-    contactName: '',
-    contactPhone: '',
-    contactEmail: '',
-  });
+  const [editRoomPropertyId, setEditRoomPropertyId] = useState('');
 
-  const [roomFormData, setRoomFormData] = useState({
-    number: '',
-    floor: 1,
-    type: 'single' as 'single' | 'double' | 'triple',
-    beds: 1,
-    rent: 0,
-    status: 'vacant' as 'occupied' | 'vacant' | 'maintenance',
-  });
+  // Delete Room
+  const [deleteRoomOpen, setDeleteRoomOpen] = useState(false);
+  const [deletingRoom, setDeletingRoom] = useState<{ room: Room; propertyId: string } | null>(null);
 
-  const handleOpenDialog = (property?: Property) => {
-    setFormError('');
-    setFieldErrors(emptyPropertyErrors());
-    setTouchedFields(emptyPropertyTouched());
-    if (property) {
-      setEditingProperty(property);
-      setFormData({
-        name: property.name,
-        address: property.address,
-        addressLine1: property.addressLine1 ?? property.address,
-        addressLine2: property.addressLine2 ?? '',
-        locality: property.locality ?? property.city,
-        landmark: property.landmark ?? '',
-        latitude: property.latitude ?? null,
-        longitude: property.longitude ?? null,
-        formattedAddress: property.formattedAddress ?? property.address,
-        city: property.city,
-        state: property.state,
-        pincode: property.pincode,
-        floors: property.floors,
-        totalRooms: property.totalRooms,
-        contactName: property.contactName,
-        contactPhone: normalizeStoredPhone(property.contactPhone),
-        contactEmail: property.contactEmail,
-      });
-    } else {
-      setEditingProperty(null);
-      setFormData({
-        name: '',
-        address: '',
-        addressLine1: '',
-        addressLine2: '',
-        locality: '',
-        landmark: '',
-        latitude: null,
-        longitude: null,
-        formattedAddress: '',
-        city: '',
-        state: '',
-        pincode: '',
-        floors: 1,
-        totalRooms: 0,
-        contactName: '',
-        contactPhone: '',
-        contactEmail: '',
-      });
-    }
-    setIsDialogOpen(true);
-  };
+  const totalBeds = properties.reduce((s, p) => s + p.rooms.reduce((rs, r) => rs + r.beds, 0), 0);
+  const totalRooms = properties.reduce((s, p) => s + p.rooms.length, 0);
 
-  const handleCloseDialog = () => {
-    setIsDialogOpen(false);
-    setEditingProperty(null);
-    setFormError('');
-    setFieldErrors(emptyPropertyErrors());
-    setTouchedFields(emptyPropertyTouched());
-  };
-
-  const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
-
-  const validatePropertyField = (field: PropertyField, candidate = formData): string => {
-    const cleanName = candidate.name.trim();
-    const cleanAddress = candidate.address.trim();
-    const cleanCity = candidate.city.trim();
-    const cleanState = candidate.state.trim();
-    const cleanPincode = candidate.pincode.trim();
-    const cleanContactName = candidate.contactName.trim();
-    const cleanContactPhone = normalizeStoredPhone(candidate.contactPhone);
-    const cleanContactEmail = candidate.contactEmail.trim();
-
-    switch (field) {
-      case 'name':
-        if (!cleanName) return 'Property name is required.';
-        if (cleanName.length < 2) return 'Property name must be at least 2 characters.';
-        if (cleanName.length > PROPERTY_NAME_MAX_LENGTH) return 'Property name is too long.';
-        return '';
-      case 'address':
-        if (!cleanAddress) return 'Address is required.';
-        if (cleanAddress.length < 5) return 'Address must be at least 5 characters.';
-        return '';
-      case 'city':
-        if (!cleanCity) return 'City is required.';
-        if (/\d/.test(cleanCity)) return 'City cannot contain digits.';
-        if (cleanCity.length > LOCATION_MAX_LENGTH) return 'City is too long.';
-        return '';
-      case 'state':
-        if (!cleanState) return 'State is required.';
-        if (/\d/.test(cleanState)) return 'State cannot contain digits.';
-        if (cleanState.length > LOCATION_MAX_LENGTH) return 'State is too long.';
-        return '';
-      case 'pincode':
-        if (!cleanPincode) return 'Pincode is required.';
-        if (!/^\d{6}$/.test(cleanPincode)) return 'Pincode must be exactly 6 digits.';
-        return '';
-      case 'floors':
-        if (!Number.isFinite(candidate.floors) || candidate.floors < 1) return 'Number of floors must be at least 1.';
-        if (candidate.floors > 100) return 'Number of floors cannot exceed 100.';
-        return '';
-      case 'contactName':
-        if (!cleanContactName) return 'Contact person name is required.';
-        if (cleanContactName.length < 2) return 'Contact person name must be at least 2 characters.';
-        if (/\d/.test(cleanContactName)) return 'Contact person name cannot contain digits.';
-        if (cleanContactName.length > PERSON_NAME_MAX_LENGTH) return 'Contact person name is too long.';
-        return '';
-      case 'contactPhone':
-        if (!cleanContactPhone) return 'Phone number is required.';
-        if (!isValidStoredPhoneNumber(cleanContactPhone)) return 'Enter a valid mobile phone number.';
-        return '';
-      case 'contactEmail':
-        if (cleanContactEmail.length > EMAIL_MAX_LENGTH) return 'Email address is too long.';
-        if (cleanContactEmail && !isValidEmail(cleanContactEmail)) return 'Enter a valid email address or leave it blank.';
-        return '';
-      default:
-        return '';
-    }
-  };
-
-  const validateAllPropertyFields = (candidate = formData): Record<PropertyField, string> => {
-    const nextErrors = emptyPropertyErrors();
-    PROPERTY_FIELDS.forEach((field) => {
-      nextErrors[field] = validatePropertyField(field, candidate);
-    });
-    return nextErrors;
-  };
-
-  const hasValidationErrors = (errors: Record<PropertyField, string>): boolean => PROPERTY_FIELDS.some((field) => errors[field]);
-
-  const touchField = (field: PropertyField, candidate = formData) => {
-    setTouchedFields((current) => ({
-      ...current,
-      [field]: true,
-    }));
-    setFieldErrors((current) => ({
-      ...current,
-      [field]: validatePropertyField(field, candidate),
-    }));
-  };
-
-  const updateFormData = (next: typeof formData, fieldsToValidate: PropertyField[] = []) => {
-    setFormData(next);
-    if (formError) {
-      setFormError('');
-    }
-
-    if (fieldsToValidate.length === 0) {
-      return;
-    }
-
-    setTouchedFields((current) => {
-      const updated = { ...current };
-      fieldsToValidate.forEach((field) => {
-        updated[field] = true;
-      });
-      return updated;
-    });
-
-    setFieldErrors((current) => {
-      const updated = { ...current };
-      fieldsToValidate.forEach((field) => {
-        updated[field] = validatePropertyField(field, next);
-      });
-      return updated;
-    });
-  };
-
-  const applyAddressSuggestion = (suggestion: StructuredAddressData) => {
-    const next = {
-      ...formData,
-      address: suggestion.formattedAddress || suggestion.addressLine1 || formData.address,
-      addressLine1: suggestion.addressLine1 || suggestion.formattedAddress || formData.addressLine1,
-      addressLine2: formData.addressLine2,
-      locality: suggestion.city || formData.locality,
-      landmark: formData.landmark,
-      city: suggestion.city || formData.city,
-      state: suggestion.state || formData.state,
-      pincode: suggestion.pincode ? suggestion.pincode.replace(/\D/g, '').slice(0, PINCODE_LENGTH) : formData.pincode,
-      latitude: suggestion.latitude,
-      longitude: suggestion.longitude,
-      formattedAddress: suggestion.formattedAddress || formData.formattedAddress,
-    };
-    updateFormData(next, ['address', 'city', 'state', 'pincode']);
-  };
-
-  const validatePropertyForm = (): string => {
-    const nextErrors = validateAllPropertyFields(formData);
-    setFieldErrors(nextErrors);
-    setTouchedFields(PROPERTY_FIELDS.reduce((acc, field) => ({ ...acc, [field]: true }), emptyPropertyTouched()));
-
-    if (!hasValidationErrors(nextErrors)) {
-      return '';
-    }
-
-    const firstError = PROPERTY_FIELDS.map((field) => nextErrors[field]).find((value) => value);
-    return firstError || 'Please review the highlighted fields.';
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    const validationError = validatePropertyForm();
-    if (validationError) {
-      setFormError(validationError);
-      return;
-    }
-
-    const payload = {
-      ...formData,
-      address: formData.address.trim(),
-      addressLine1: formData.addressLine1.trim() || formData.address.trim(),
-      addressLine2: formData.addressLine2.trim(),
-      locality: formData.locality.trim(),
-      landmark: formData.landmark.trim(),
-      formattedAddress: formData.formattedAddress.trim() || formData.address.trim(),
-      city: formData.city.trim(),
-      state: formData.state.trim(),
-      pincode: formData.pincode.trim(),
-      name: formData.name.trim(),
-      contactName: formData.contactName.trim(),
-      contactPhone: normalizeStoredPhone(formData.contactPhone),
-      contactEmail: formData.contactEmail.trim(),
-    };
-
-    try {
-      if (editingProperty) {
-        await updateProperty(editingProperty.id, payload);
-      } else {
-        await addProperty(payload);
-      }
-      handleCloseDialog();
-    } catch (saveError) {
-      const message = saveError instanceof Error
-        ? saveError.message
-        : 'Unable to save property. Please try again.';
-      setFormError(message);
-    }
-  };
-
-  const handleDelete = (id: string) => {
-    if (window.confirm('Are you sure you want to delete this property? All associated rooms will be deleted.')) {
-      deleteProperty(id);
-    }
-  };
-
-  const handleOpenRoomDialog = (propertyId: string, room?: Room) => {
-    setCurrentPropertyId(propertyId);
-    if (room) {
-      setEditingRoom(room);
-      setRoomFormData({
-        number: room.number,
-        floor: room.floor,
-        type: room.type,
-        beds: room.beds,
-        rent: room.rent,
-        status: room.status,
-      });
-    } else {
-      setEditingRoom(null);
-      const property = properties.find(p => p.id === propertyId);
-      setRoomFormData({
-        number: '',
-        floor: property?.floors || 1,
-        type: 'single',
-        beds: 1,
-        rent: 0,
-        status: 'vacant',
-      });
-    }
-    setShowRoomDialog(true);
-  };
-
-  const handleCloseRoomDialog = () => {
-    setShowRoomDialog(false);
-    setEditingRoom(null);
-    setCurrentPropertyId('');
-  };
-
-  const handleRoomSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (editingRoom) {
-      updateRoom(currentPropertyId, editingRoom.id, roomFormData);
-    } else {
-      addRoom(currentPropertyId, { ...roomFormData, occupiedBeds: 0 });
-    }
-    handleCloseRoomDialog();
-  };
-
-  const handleDeleteRoom = (propertyId: string, roomId: string) => {
-    if (window.confirm('Are you sure you want to delete this room?')) {
-      deleteRoom(propertyId, roomId);
-    }
-  };
-
-  const togglePropertyExpansion = (propertyId: string) => {
-    setExpandedProperty(expandedProperty === propertyId ? null : propertyId);
-  };
-
-  const getInputClass = (field: PropertyField): string => {
-    if (fieldErrors[field]) {
-      return 'w-full px-4 py-2 border border-red-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-200';
-    }
-    return 'w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500';
-  };
-
-  const summaryCards: Array<{
-    title: string;
-    value: number;
-    icon: typeof Building2;
-    iconClassName: string;
-    iconWrapClassName: string;
-  }> = [
-    {
-      title: 'Total Properties',
-      value: properties.length,
-      icon: Building2,
-      iconClassName: 'text-blue-600',
-      iconWrapClassName: 'bg-blue-100',
-    },
-    {
-      title: 'Total Floors',
-      value: properties.reduce((sum, property) => sum + property.floors, 0),
-      icon: Layers,
-      iconClassName: 'text-emerald-600',
-      iconWrapClassName: 'bg-emerald-100',
-    },
-    {
-      title: 'Total Rooms',
-      value: properties.reduce((sum, property) => sum + property.rooms.length, 0),
-      icon: Home,
-      iconClassName: 'text-violet-600',
-      iconWrapClassName: 'bg-violet-100',
-    },
-    {
-      title: 'Total Beds',
-      value: properties.reduce((sum, property) => sum + property.rooms.reduce((roomTotal, room) => roomTotal + room.beds, 0), 0),
-      icon: Bed,
-      iconClassName: 'text-orange-600',
-      iconWrapClassName: 'bg-orange-100',
-    },
+  const stats = [
+    { label: 'Total Properties', value: properties.length, icon: Building2, color: 'from-purple-500 to-pink-500' },
+    { label: 'Total Floors', value: properties.reduce((s, p) => s + p.floors, 0), icon: Layers, color: 'from-blue-500 to-cyan-500' },
+    { label: 'Total Rooms', value: totalRooms, icon: Home, color: 'from-green-500 to-emerald-500' },
+    { label: 'Total Beds', value: totalBeds, icon: Bed, color: 'from-orange-500 to-amber-500' },
   ];
 
+  const handleAddProperty = async () => {
+    if (!addForm.name || !addForm.address || !addForm.city) {
+      toast.error('Name, address and city are required');
+      return;
+    }
+    setAddSaving(true);
+    try {
+      await addProperty(addForm);
+      setAddPropertyOpen(false);
+      setAddForm(emptyPropertyForm());
+      toast.success('Property added successfully!');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to add property');
+    } finally {
+      setAddSaving(false);
+    }
+  };
+
+  const handleEditProperty = async () => {
+    if (!editingProperty) return;
+    setEditSaving(true);
+    try {
+      await updateProperty(editingProperty.id, {
+        name: editingProperty.name,
+        address: editingProperty.address,
+        city: editingProperty.city,
+        state: editingProperty.state,
+        pincode: editingProperty.pincode,
+        floors: editingProperty.floors,
+        contactName: editingProperty.contactName,
+        contactPhone: editingProperty.contactPhone,
+        contactEmail: editingProperty.contactEmail,
+      });
+      setEditPropertyOpen(false);
+      setEditingProperty(null);
+      toast.success('Property updated successfully!');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update property');
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  const handleDeleteProperty = () => {
+    if (!deletingProperty) return;
+    deleteProperty(deletingProperty.id);
+    setDeletePropertyOpen(false);
+    setDeletingProperty(null);
+    toast.success('Property deleted');
+  };
+
+  const handleAddRoom = () => {
+    if (!newRoom.number || !newRoom.rent) {
+      toast.error('Room number and rent are required');
+      return;
+    }
+    addRoom(addRoomPropertyId, {
+      number: newRoom.number,
+      floor: newRoom.floor,
+      type: newRoom.type,
+      beds: roomTypeBeds[newRoom.type],
+      rent: newRoom.rent,
+      status: 'vacant',
+      occupiedBeds: 0,
+    });
+    setAddRoomOpen(false);
+    setNewRoom({ number: '', floor: 1, type: 'single', rent: 0 });
+    toast.success('Room added');
+  };
+
+  const handleEditRoom = () => {
+    if (!editingRoom || !editRoomPropertyId) return;
+    updateRoom(editRoomPropertyId, editingRoom.id, {
+      number: editingRoom.number,
+      floor: editingRoom.floor,
+      type: editingRoom.type,
+      beds: editingRoom.beds,
+      rent: editingRoom.rent,
+      status: editingRoom.status,
+    });
+    setEditRoomOpen(false);
+    setEditingRoom(null);
+    toast.success('Room updated');
+  };
+
+  const handleDeleteRoom = () => {
+    if (!deletingRoom) return;
+    deleteRoom(deletingRoom.propertyId, deletingRoom.room.id);
+    setDeleteRoomOpen(false);
+    setDeletingRoom(null);
+    toast.success('Room deleted');
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-24">
+        <Loader2 className="w-8 h-8 text-purple-500 animate-spin" />
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-20 md:pb-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold text-gray-900">Properties & Rooms</h1>
-          <p className="text-sm text-gray-500 mt-1">Manage all your PG properties and room configurations</p>
+      <div className="sticky top-0 z-20 -mx-6 px-6 py-4 bg-gradient-to-r from-purple-50 via-white to-blue-50 backdrop-blur-sm border-b border-gray-200 shadow-sm">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div>
+            <h1 className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">
+              Properties & Rooms
+            </h1>
+            <p className="text-sm text-gray-600 mt-1">Manage all your PG properties and room configurations</p>
+          </div>
+          <Button
+            onClick={() => { setAddForm(emptyPropertyForm()); setAddPropertyOpen(true); }}
+            className="bg-gradient-to-r from-[#4F46E5] to-[#7C3AED] hover:from-[#4338CA] hover:to-[#6D28D9] w-full md:w-auto shadow-lg shadow-purple-500/30 transition-all duration-300 hover:shadow-xl hover:scale-105 h-12 md:h-10"
+          >
+            <Plus className="w-5 h-5 mr-2" />
+            <span className="font-semibold">Add Property</span>
+          </Button>
         </div>
-        <button
-          onClick={() => handleOpenDialog()}
-          className="flex items-center gap-2 px-4 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          Add Property
-        </button>
       </div>
 
-      {/* Stats Overview */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        {summaryCards.map((card) => {
-          const Icon = card.icon;
+      {/* Stats */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+        {stats.map((stat) => {
+          const Icon = stat.icon;
           return (
-            <div
-              key={card.title}
-              className="bg-white px-6 py-5 rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow"
-            >
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <p className="text-xs uppercase tracking-wide text-gray-500">{card.title}</p>
-                  <p className="mt-2 text-2xl font-semibold text-gray-900 leading-none">{card.value}</p>
+            <Card key={stat.label} className="relative overflow-hidden border-0 shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105 cursor-pointer">
+              <div className={`absolute inset-0 bg-gradient-to-br ${stat.color} opacity-10`} />
+              <div className="relative p-4 md:p-6">
+                <div className="flex items-start justify-between mb-2">
+                  <div className={`p-2 md:p-3 rounded-xl bg-gradient-to-br ${stat.color} shadow-lg`}>
+                    <Icon className="w-4 h-4 md:w-6 md:h-6 text-white" />
+                  </div>
                 </div>
-                <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${card.iconWrapClassName}`}>
-                  <Icon className={`w-5 h-5 ${card.iconClassName}`} />
-                </div>
+                <p className="text-xs md:text-sm text-gray-600 mb-1 font-medium">{stat.label}</p>
+                <p className="text-2xl md:text-3xl font-bold bg-gradient-to-br from-gray-900 to-gray-700 bg-clip-text text-transparent">
+                  {stat.value}
+                </p>
               </div>
-            </div>
+            </Card>
           );
         })}
       </div>
 
-      {/* Properties List with Expandable Room Management */}
-      <div className="space-y-4">
-        {properties.map((property) => (
-          <div
-            key={property.id}
-            className="bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-md transition-all overflow-hidden"
-          >
-            <div className="p-5 md:p-6">
-              <div className="flex items-start justify-between gap-4 mb-4">
-                <div className="flex items-start gap-3 min-w-0">
-                  <div className="w-10 h-10 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center flex-shrink-0">
-                    <Building2 className="w-5 h-5" />
-                  </div>
-                  <div className="min-w-0">
-                    <h3 className="text-lg font-semibold text-gray-900 truncate">{property.name}</h3>
-                    <p className="text-xs text-gray-500 mt-1">Added on {new Date(property.createdAt).toLocaleDateString()}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => togglePropertyExpansion(property.id)}
-                    className="p-2 rounded-md hover:bg-gray-100 transition-colors"
-                    title="Manage Rooms"
-                  >
-                    {expandedProperty === property.id ? (
-                      <ChevronUp className="w-4 h-4 text-gray-500" />
-                    ) : (
-                      <ChevronDown className="w-4 h-4 text-gray-500" />
-                    )}
-                  </button>
-                  <button
-                    onClick={() => handleOpenDialog(property)}
-                    className="p-2 rounded-md hover:bg-gray-100 transition-colors"
-                    title="Edit property"
-                  >
-                    <Edit2 className="w-4 h-4 text-gray-500" />
-                  </button>
-                  <button
-                    onClick={() => handleDelete(property.id)}
-                    className="p-2 rounded-md hover:bg-gray-100 transition-colors"
-                    title="Delete property"
-                  >
-                    <Trash2 className="w-4 h-4 text-red-600" />
-                  </button>
-                </div>
-              </div>
+      {/* Properties list */}
+      {properties.length === 0 ? (
+        <div className="text-center py-16 text-gray-400">
+          <Building2 className="w-12 h-12 mx-auto mb-3 opacity-30" />
+          <p className="text-sm">No properties yet. Add your first property.</p>
+        </div>
+      ) : (
+        <div className="space-y-4 md:space-y-6">
+          {properties.map((property) => {
+            const isExpanded = expandedProperty === property.id;
+            const floors = Array.from(new Set(property.rooms.map((r) => r.floor))).sort((a, b) => b - a);
 
-              <div className="space-y-4">
-                <div className="flex items-start gap-2">
-                  <MapPin className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" />
-                  <p className="text-sm text-gray-500 leading-6">{property.address}</p>
-                </div>
-
-                <div className="border-t border-gray-200 pt-4 grid grid-cols-3 gap-4">
-                  <div>
-                    <p className="text-xs uppercase tracking-wide text-gray-500">Floors</p>
-                    <p className="mt-1 text-sm font-medium text-gray-900">{property.floors}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs uppercase tracking-wide text-gray-500">Rooms</p>
-                    <p className="mt-1 text-sm font-medium text-gray-900">{property.rooms.length}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs uppercase tracking-wide text-gray-500">Beds</p>
-                    <p className="mt-1 text-sm font-medium text-gray-900">{property.rooms.reduce((sum, r) => sum + r.beds, 0)}</p>
-                  </div>
-                </div>
-
-                <div className="border-t border-gray-200 pt-4 space-y-2">
-                  <p className="text-xs uppercase tracking-wide text-gray-500">Contact</p>
-                  <p className="text-sm font-semibold text-gray-900">{property.contactName}</p>
-                  <div className="flex items-center gap-2 text-sm text-gray-500">
-                    <Phone className="w-3.5 h-3.5 text-gray-400" />
-                    <span>{property.contactPhone}</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-sm text-gray-500">
-                    <Mail className="w-3.5 h-3.5 text-gray-400" />
-                    <span>{property.contactEmail}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Expandable Room Management Section */}
-              {expandedProperty === property.id && (
-                <div className="mt-6 pt-6 border-t border-gray-200">
-                  <div className="flex items-center justify-between mb-4">
-                    <h4 className="text-lg font-medium text-gray-800">Room Management</h4>
-                    <button
-                      onClick={() => handleOpenRoomDialog(property.id)}
-                      className="flex items-center gap-2 px-3 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition-colors"
-                    >
-                      <Plus className="w-3 h-3" />
-                      Add Room
-                    </button>
-                  </div>
-
-                  {/* Rooms by Floor */}
-                  <div className="space-y-4">
-                    {Array.from({ length: property.floors }, (_, i) => i + 1).map((floor) => {
-                      const floorRooms = property.rooms.filter(r => r.floor === floor);
-                      return (
-                        <div key={floor} className="bg-gray-50 rounded-xl p-4">
-                          <h5 className="text-sm font-medium text-gray-800 mb-3">
-                            Floor {floor} - {floorRooms.length} room{floorRooms.length !== 1 ? 's' : ''}
-                          </h5>
-                          {floorRooms.length > 0 ? (
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                              {floorRooms.map((room) => (
-                                <div key={room.id} className="bg-white rounded-xl p-4 border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
-                                  <div className="flex items-start justify-between mb-2 gap-2">
-                                    <div>
-                                      <p className="text-sm font-semibold text-gray-900">Room {room.number}</p>
-                                      <p className="text-xs text-gray-500 capitalize">{room.type} - {room.beds} bed{room.beds > 1 ? 's' : ''}</p>
-                                    </div>
-                                    <span className={`
-                                      px-2 py-0.5 rounded text-xs
-                                      ${room.status === 'occupied' ? 'bg-green-100 text-green-700' : 
-                                        room.status === 'vacant' ? 'bg-gray-100 text-gray-700' : 
-                                        'bg-orange-100 text-orange-700'}
-                                    `}>
-                                      {room.status}
-                                    </span>
-                                  </div>
-                                  <p className="text-xs text-gray-500 mb-2">Rent: ₹{room.rent.toLocaleString()}</p>
-                                  {room.occupiedBeds !== undefined && room.occupiedBeds > 0 && (
-                                    <p className="text-xs text-gray-500 mb-2">
-                                      Occupied: {room.occupiedBeds}/{room.beds} beds
-                                    </p>
-                                  )}
-                                  <div className="flex items-center gap-2 pt-3 border-t border-gray-200">
-                                    <button
-                                      onClick={() => handleOpenRoomDialog(property.id, room)}
-                                      className="flex-1 px-2 py-1.5 text-xs bg-white border border-gray-300 hover:bg-gray-50 rounded-md transition-colors"
-                                    >
-                                      Edit
-                                    </button>
-                                    <button
-                                      onClick={() => handleDeleteRoom(property.id, room.id)}
-                                      className="flex-1 px-2 py-1.5 text-xs bg-white border border-red-200 text-red-600 hover:bg-red-50 rounded-md transition-colors"
-                                    >
-                                      Delete
-                                    </button>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <p className="text-sm text-gray-500 text-center py-4">
-                              No rooms on this floor yet. Click "Add Room" to create one.
-                            </p>
-                          )}
+            return (
+              <Card key={property.id} className="overflow-hidden border-0 shadow-xl hover:shadow-2xl transition-all duration-300">
+                {/* Property header */}
+                <div className="bg-gradient-to-r from-purple-100 via-blue-50 to-purple-50 p-4 md:p-6 border-b border-purple-200">
+                  <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
+                    <div className="flex items-start gap-3 md:gap-4 flex-1">
+                      <div className="w-14 h-14 md:w-16 md:h-16 bg-gradient-to-br from-[#4F46E5] via-[#7C3AED] to-[#9333EA] rounded-2xl flex items-center justify-center flex-shrink-0 shadow-lg shadow-purple-500/50">
+                        <Building2 className="w-7 h-7 md:w-8 md:h-8 text-white" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <h3 className="text-lg md:text-xl font-bold bg-gradient-to-r from-purple-700 to-blue-700 bg-clip-text text-transparent">
+                          {property.name}
+                        </h3>
+                        <p className="text-sm md:text-base text-gray-700 flex items-center gap-1.5 mt-2">
+                          <MapPin className="w-4 h-4 flex-shrink-0 text-purple-600" />
+                          <span className="truncate font-medium">{property.address}{property.city ? `, ${property.city}` : ''}</span>
+                        </p>
+                        <div className="flex flex-wrap gap-3 md:gap-4 mt-3">
+                          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-white rounded-full shadow-sm">
+                            <Layers className="w-3.5 h-3.5 text-blue-600" />
+                            <span className="text-xs md:text-sm font-bold text-gray-900">{property.floors}</span>
+                            <span className="text-xs text-gray-600">Floors</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-white rounded-full shadow-sm">
+                            <Home className="w-3.5 h-3.5 text-green-600" />
+                            <span className="text-xs md:text-sm font-bold text-gray-900">{property.rooms.length}</span>
+                            <span className="text-xs text-gray-600">Rooms</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-white rounded-full shadow-sm">
+                            <Bed className="w-3.5 h-3.5 text-orange-600" />
+                            <span className="text-xs md:text-sm font-bold text-gray-900">{property.rooms.reduce((s, r) => s + r.beds, 0)}</span>
+                            <span className="text-xs text-gray-600">Beds</span>
+                          </div>
                         </div>
-                      );
-                    })}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 justify-end md:justify-start flex-shrink-0">
+                      <Button
+                        variant="ghost" size="sm"
+                        onClick={() => setExpandedProperty(isExpanded ? null : property.id)}
+                        className="h-10 w-10 md:h-9 md:w-9 p-0 rounded-full hover:bg-white hover:shadow-md transition-all"
+                      >
+                        {isExpanded
+                          ? <ChevronDown className="w-5 h-5 text-purple-600" />
+                          : <ChevronRight className="w-5 h-5 text-purple-600" />}
+                      </Button>
+                      <Button
+                        variant="ghost" size="sm"
+                        onClick={() => { setEditingProperty(property); setEditPropertyOpen(true); }}
+                        className="h-10 w-10 md:h-9 md:w-9 p-0 rounded-full hover:bg-blue-100 hover:shadow-md transition-all"
+                      >
+                        <Edit className="w-4 h-4 text-blue-600" />
+                      </Button>
+                      <Button
+                        variant="ghost" size="sm"
+                        onClick={() => { setDeletingProperty(property); setDeletePropertyOpen(true); }}
+                        className="h-10 w-10 md:h-9 md:w-9 p-0 rounded-full hover:bg-red-100 hover:shadow-md transition-all"
+                      >
+                        <Trash className="w-4 h-4 text-red-600" />
+                      </Button>
+                    </div>
                   </div>
+
+                  {/* Contact person */}
+                  {(property.contactName || property.contactPhone || property.contactEmail) && (
+                    <div className="mt-4 pt-4 border-t border-purple-200">
+                      <p className="text-xs font-semibold text-purple-700 mb-2 uppercase tracking-wide">Contact Person</p>
+                      <div className="flex flex-wrap gap-3 md:gap-6 text-sm">
+                        {property.contactName && (
+                          <div className="flex items-center gap-2">
+                            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center shadow-md">
+                              <span className="text-white text-xs font-bold">
+                                {property.contactName.split(' ').map((n) => n[0]).join('').slice(0, 2)}
+                              </span>
+                            </div>
+                            <span className="text-gray-900 font-semibold">{property.contactName}</span>
+                          </div>
+                        )}
+                        {property.contactPhone && <span className="text-gray-700 font-medium">{property.contactPhone}</span>}
+                        {property.contactEmail && <span className="text-gray-700">{property.contactEmail}</span>}
+                      </div>
+                    </div>
+                  )}
                 </div>
-              )}
+
+                {/* Expanded room management (building view) */}
+                {isExpanded && (
+                  <div className="p-4 md:p-6 bg-gradient-to-br from-gray-50 to-blue-50/30">
+                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-6">
+                      <h4 className="text-lg font-bold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">
+                        Room Management
+                      </h4>
+                      <Button
+                        size="sm"
+                        onClick={() => { setAddRoomPropertyId(property.id); setNewRoom({ number: '', floor: 1, type: 'single', rent: 0 }); setAddRoomOpen(true); }}
+                        className="bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 w-full md:w-auto shadow-lg shadow-green-500/30 h-11 md:h-9"
+                      >
+                        <Plus className="w-4 h-4 mr-2" />
+                        <span className="font-semibold">Add Room</span>
+                      </Button>
+                    </div>
+
+                    {property.rooms.length === 0 ? (
+                      <p className="text-sm text-gray-400 text-center py-8">No rooms yet. Add the first room.</p>
+                    ) : (
+                      <div className="space-y-6">
+                        {floors.map((floor) => {
+                          const floorRooms = property.rooms.filter((r) => r.floor === floor);
+                          return (
+                            <div key={floor} className="space-y-3">
+                              <div className="bg-gradient-to-r from-purple-500 to-blue-500 px-4 py-3 rounded-xl shadow-md">
+                                <h5 className="font-bold text-white text-base md:text-lg flex items-center gap-2">
+                                  <Layers className="w-5 h-5" />
+                                  Floor {floor}
+                                  <span className="ml-auto text-sm bg-white/20 px-3 py-1 rounded-full">
+                                    {floorRooms.length} room{floorRooms.length !== 1 ? 's' : ''}
+                                  </span>
+                                </h5>
+                              </div>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
+                                {floorRooms.map((room) => (
+                                  <Card key={room.id} className="p-4 border-0 shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105 bg-white">
+                                    <div className="flex items-start justify-between mb-3">
+                                      <div className="flex items-center gap-2">
+                                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center shadow-md">
+                                          <span className="text-white font-bold text-sm">{room.number}</span>
+                                        </div>
+                                        <div>
+                                          <h6 className="font-bold text-gray-900 text-base">{room.number}</h6>
+                                          <p className="text-xs text-gray-600 font-medium capitalize">{room.type}</p>
+                                        </div>
+                                      </div>
+                                      <div className="flex gap-1 flex-shrink-0">
+                                        <button
+                                          className="p-2 hover:bg-blue-100 rounded-lg transition-all"
+                                          onClick={() => { setEditingRoom(room); setEditRoomPropertyId(property.id); setEditRoomOpen(true); }}
+                                        >
+                                          <Edit className="w-4 h-4 text-blue-600" />
+                                        </button>
+                                        <button
+                                          className="p-2 hover:bg-red-100 rounded-lg transition-all"
+                                          onClick={() => { setDeletingRoom({ room, propertyId: property.id }); setDeleteRoomOpen(true); }}
+                                        >
+                                          <Trash className="w-4 h-4 text-red-600" />
+                                        </button>
+                                      </div>
+                                    </div>
+
+                                    <div className="space-y-3">
+                                      <div className="flex items-center gap-2 p-2 bg-gradient-to-r from-orange-50 to-amber-50 rounded-lg">
+                                        <Bed className="w-5 h-5 text-orange-600 flex-shrink-0" />
+                                        <span className="text-sm font-bold text-gray-900">
+                                          {room.beds} bed{room.beds > 1 ? 's' : ''}
+                                        </span>
+                                      </div>
+                                      <div className="flex items-center justify-between p-2 bg-gradient-to-r from-green-50 to-emerald-50 rounded-lg">
+                                        <span className="text-xs font-medium text-gray-600">Monthly Rent</span>
+                                        <span className="text-base font-bold text-green-700">₹{room.rent.toLocaleString()}</span>
+                                      </div>
+                                      <div className="flex items-center justify-between flex-wrap gap-2">
+                                        <span className={`px-3 py-1.5 rounded-full text-xs font-bold shadow-sm ${statusColor[room.status as RoomStatus] ?? 'bg-gray-100 text-gray-700'}`}>
+                                          {statusLabel[room.status as RoomStatus] ?? room.status}
+                                        </span>
+                                        <span className="text-xs font-semibold text-gray-700 bg-gray-100 px-3 py-1.5 rounded-full">
+                                          {room.occupiedBeds ?? 0}/{room.beds} occupied
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </Card>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </Card>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Add Property Modal */}
+      <Dialog open={addPropertyOpen} onOpenChange={setAddPropertyOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">
+              Add New Property
+            </DialogTitle>
+            <DialogDescription>Enter the details of your new property</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold">Property Name *</Label>
+              <Input placeholder="e.g., Sunshine Residency" value={addForm.name} onChange={(e) => setAddForm({ ...addForm, name: e.target.value })} className="h-11" />
             </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Add/Edit Property Dialog */}
-      {isDialogOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl border border-gray-200 shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-              <h2 className="text-lg font-medium text-gray-800">
-                {editingProperty ? 'Edit Property' : 'Add New Property'}
-              </h2>
-              <button
-                onClick={handleCloseDialog}
-                className="p-2 rounded-md hover:bg-gray-100 transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold">Address *</Label>
+              <Input placeholder="e.g., 123 MG Road, Indiranagar" value={addForm.address} onChange={(e) => setAddForm({ ...addForm, address: e.target.value })} className="h-11" />
             </div>
-
-            <form onSubmit={handleSubmit} className="p-6 space-y-6">
-              {formError && (
-                <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                  {formError}
-                </div>
-              )}
-
-              {/* Property Details */}
-              <div className="space-y-4">
-                <h3 className="text-xs uppercase tracking-wide text-gray-500">
-                  Property Details
-                </h3>
-                
-                <div>
-                  <label className="block text-sm mb-2">Property Name *</label>
-                  <input
-                    type="text"
-                    required
-                    value={formData.name}
-                    onChange={(e) => updateFormData({ ...formData, name: e.target.value }, ['name'])}
-                    onBlur={() => touchField('name')}
-                    maxLength={PROPERTY_NAME_MAX_LENGTH}
-                    className={getInputClass('name')}
-                    placeholder="e.g. Green Valley PG"
-                  />
-                  {touchedFields.name && fieldErrors.name && (
-                    <p className="mt-1 text-xs text-red-600">{fieldErrors.name}</p>
-                  )}
-                </div>
-
-                <div>
-                  <label className="block text-sm mb-2">Address *</label>
-                  <AddressAutocomplete
-                    required
-                    value={formData.address}
-                    onChange={(value) => updateFormData({
-                      ...formData,
-                      address: value,
-                      addressLine1: value,
-                      formattedAddress: '',
-                      latitude: null,
-                      longitude: null,
-                    }, ['address'])}
-                    onBlur={() => touchField('address')}
-                    onSelect={applyAddressSuggestion}
-                    inputClassName={getInputClass('address')}
-                    placeholder="Street address"
-                  />
-
-                  {formData.formattedAddress && (
-                    <p className="mt-2 text-xs text-gray-500">Selected: {formData.formattedAddress}</p>
-                  )}
-
-                  {touchedFields.address && fieldErrors.address && (
-                    <p className="mt-1 text-xs text-red-600">{fieldErrors.address}</p>
-                  )}
-
-                  {formData.latitude !== null && formData.longitude !== null && (
-                    <p className="mt-1 text-xs text-gray-500">
-                      Coordinates: {formData.latitude.toFixed(6)}, {formData.longitude.toFixed(6)}
-                    </p>
-                  )}
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-sm mb-2">City *</label>
-                    <input
-                      type="text"
-                      required
-                      value={formData.city}
-                      onChange={(e) => updateFormData({ ...formData, city: sanitizeTextWithoutDigits(e.target.value) }, ['city'])}
-                      onBlur={() => touchField('city')}
-                      className={getInputClass('city')}
-                      placeholder="e.g. Bengaluru"
-                    />
-                    {touchedFields.city && fieldErrors.city && (
-                      <p className="mt-1 text-xs text-red-600">{fieldErrors.city}</p>
-                    )}
-                  </div>
-                  <div>
-                    <label className="block text-sm mb-2">State *</label>
-                    <input
-                      type="text"
-                      required
-                      value={formData.state}
-                      onChange={(e) => updateFormData({ ...formData, state: sanitizeTextWithoutDigits(e.target.value) }, ['state'])}
-                      onBlur={() => touchField('state')}
-                      className={getInputClass('state')}
-                      placeholder="e.g. Karnataka"
-                    />
-                    {touchedFields.state && fieldErrors.state && (
-                      <p className="mt-1 text-xs text-red-600">{fieldErrors.state}</p>
-                    )}
-                  </div>
-                  <div>
-                    <label className="block text-sm mb-2">Pincode *</label>
-                    <input
-                      type="text"
-                      required
-                      value={formData.pincode}
-                      onChange={(e) => updateFormData({ ...formData, pincode: e.target.value.replace(/\D/g, '').slice(0, PINCODE_LENGTH) }, ['pincode'])}
-                      onBlur={() => touchField('pincode')}
-                      className={getInputClass('pincode')}
-                      placeholder="e.g. 560001"
-                    />
-                    {touchedFields.pincode && fieldErrors.pincode && (
-                      <p className="mt-1 text-xs text-red-600">{fieldErrors.pincode}</p>
-                    )}
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm mb-2">Number of Floors *</label>
-                  <input
-                    type="number"
-                    required
-                    min="1"
-                    value={formData.floors}
-                    onChange={(e) => updateFormData({ ...formData, floors: Math.min(100, parseInt(e.target.value, 10) || 1) }, ['floors'])}
-                    onBlur={() => touchField('floors')}
-                    className={getInputClass('floors')}
-                    placeholder="e.g. 1"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">You can add rooms to each floor after creating the property</p>
-                  {touchedFields.floors && fieldErrors.floors && (
-                    <p className="mt-1 text-xs text-red-600">{fieldErrors.floors}</p>
-                  )}
-                </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold">City *</Label>
+                <Input placeholder="Bangalore" value={addForm.city} onChange={(e) => setAddForm({ ...addForm, city: e.target.value })} className="h-11" />
               </div>
-
-              {/* Contact Details */}
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold">State</Label>
+                <Input placeholder="Karnataka" value={addForm.state} onChange={(e) => setAddForm({ ...addForm, state: e.target.value })} className="h-11" />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold">Pincode</Label>
+                <Input placeholder="560001" value={addForm.pincode} onChange={(e) => setAddForm({ ...addForm, pincode: e.target.value })} className="h-11" />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold">Number of Floors</Label>
+              <Input type="number" min="1" value={addForm.floors} onChange={(e) => setAddForm({ ...addForm, floors: parseInt(e.target.value) || 1 })} className="h-11" />
+            </div>
+            <div className="pt-4 border-t">
+              <h4 className="font-semibold text-gray-900 mb-4">Contact Person</h4>
               <div className="space-y-4">
-                <h3 className="text-xs uppercase tracking-wide text-gray-500">
-                  Contact Details
-                </h3>
-
-                <div>
-                  <label className="block text-sm mb-2">Contact Person Name *</label>
-                  <input
-                    type="text"
-                    required
-                    value={formData.contactName}
-                    onChange={(e) => updateFormData({ ...formData, contactName: sanitizeTextWithoutDigits(e.target.value) }, ['contactName'])}
-                    onBlur={() => touchField('contactName')}
-                    maxLength={PERSON_NAME_MAX_LENGTH}
-                    className={getInputClass('contactName')}
-                    placeholder="e.g. Rahul Verma"
-                  />
-                  {touchedFields.contactName && fieldErrors.contactName && (
-                    <p className="mt-1 text-xs text-red-600">{fieldErrors.contactName}</p>
-                  )}
+                <div className="space-y-2">
+                  <Label className="text-sm font-semibold">Name</Label>
+                  <Input placeholder="e.g., Ramesh Kumar" value={addForm.contactName} onChange={(e) => setAddForm({ ...addForm, contactName: e.target.value })} className="h-11" />
                 </div>
-
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm mb-2">Phone Number *</label>
-                    <InternationalPhoneField
-                      required
-                      value={formData.contactPhone}
-                      onChange={(value) => updateFormData({ ...formData, contactPhone: value }, ['contactPhone'])}
-                      onBlur={() => touchField('contactPhone')}
-                      placeholder="Enter mobile number"
-                      invalid={Boolean(touchedFields.contactPhone && fieldErrors.contactPhone)}
-                    />
-                    <p className="mt-1 text-xs text-gray-500">Select country and enter a valid mobile number.</p>
-                    {touchedFields.contactPhone && fieldErrors.contactPhone && (
-                      <p className="mt-1 text-xs text-red-600">{fieldErrors.contactPhone}</p>
-                    )}
+                  <div className="space-y-2">
+                    <Label className="text-sm font-semibold">Phone</Label>
+                    <InternationalPhoneField value={addForm.contactPhone} onChange={(v) => setAddForm({ ...addForm, contactPhone: v })} placeholder="9876543210" />
                   </div>
-                  <div>
-                    <label className="block text-sm mb-2">Email Address (optional)</label>
-                    <input
-                      type="text"
-                      inputMode="email"
-                      autoComplete="off"
-                      value={formData.contactEmail}
-                      onChange={(e) => updateFormData({ ...formData, contactEmail: e.target.value }, ['contactEmail'])}
-                      onBlur={() => touchField('contactEmail')}
-                      maxLength={EMAIL_MAX_LENGTH}
-                      className={getInputClass('contactEmail')}
-                      placeholder="e.g. contact@property.com"
-                    />
-                    {touchedFields.contactEmail && fieldErrors.contactEmail && (
-                      <p className="mt-1 text-xs text-red-600">{fieldErrors.contactEmail}</p>
-                    )}
+                  <div className="space-y-2">
+                    <Label className="text-sm font-semibold">Email</Label>
+                    <Input type="email" placeholder="ramesh@example.com" value={addForm.contactEmail} onChange={(e) => setAddForm({ ...addForm, contactEmail: e.target.value })} className="h-11" />
                   </div>
                 </div>
               </div>
-
-              {/* Form Actions */}
-              <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-200">
-                <button
-                  type="button"
-                  onClick={handleCloseDialog}
-                  className="px-6 py-2.5 border border-gray-300 bg-white rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-6 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
-                >
-                  {editingProperty ? 'Update Property' : 'Add Property'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Add/Edit Room Dialog */}
-      {showRoomDialog && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl border border-gray-200 shadow-xl max-w-lg w-full">
-            <div className="border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-              <h2 className="text-lg font-medium text-gray-800">
-                {editingRoom ? 'Edit Room' : 'Add New Room'}
-              </h2>
-              <button
-                onClick={handleCloseRoomDialog}
-                className="p-2 rounded-md hover:bg-gray-100 transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
             </div>
-
-            <form onSubmit={handleRoomSubmit} className="p-6 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm mb-2">Room Number *</label>
-                  <input
-                    type="text"
-                    required
-                    value={roomFormData.number}
-                    onChange={(e) => setRoomFormData({ ...roomFormData, number: e.target.value })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="e.g., 101"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm mb-2">Floor *</label>
-                  <select
-                    required
-                    value={roomFormData.floor}
-                    onChange={(e) => setRoomFormData({ ...roomFormData, floor: parseInt(e.target.value) })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    {Array.from({ length: properties.find(p => p.id === currentPropertyId)?.floors || 1 }, (_, i) => i + 1).map((floor) => (
-                      <option key={floor} value={floor}>Floor {floor}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm mb-2">Room Type *</label>
-                  <select
-                    required
-                    value={roomFormData.type}
-                    onChange={(e) => {
-                      const type = e.target.value as 'single' | 'double' | 'triple';
-                      const beds = type === 'single' ? 1 : type === 'double' ? 2 : 3;
-                      setRoomFormData({ ...roomFormData, type, beds });
-                    }}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="single">Single</option>
-                    <option value="double">Double</option>
-                    <option value="triple">Triple</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm mb-2">Number of Beds *</label>
-                  <input
-                    type="number"
-                    required
-                    min="1"
-                    value={roomFormData.beds}
-                    onChange={(e) => setRoomFormData({ ...roomFormData, beds: parseInt(e.target.value) || 1 })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm mb-2">Rent (₹) *</label>
-                  <input
-                    type="number"
-                    required
-                    min="0"
-                    value={roomFormData.rent}
-                    onChange={(e) => setRoomFormData({ ...roomFormData, rent: parseInt(e.target.value) || 0 })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="5000"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm mb-2">Status *</label>
-                  <select
-                    required
-                    value={roomFormData.status}
-                    onChange={(e) => setRoomFormData({ ...roomFormData, status: e.target.value as 'occupied' | 'vacant' | 'maintenance' })}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="vacant">Vacant</option>
-                    <option value="occupied">Occupied</option>
-                    <option value="maintenance">Maintenance</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end gap-3 pt-4 border-t border-gray-200">
-                <button
-                  type="button"
-                  onClick={handleCloseRoomDialog}
-                  className="px-5 py-2.5 border border-gray-300 bg-white rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
-                >
-                  {editingRoom ? 'Update Room' : 'Add Room'}
-                </button>
-              </div>
-            </form>
           </div>
-        </div>
-      )}
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setAddPropertyOpen(false)}>Cancel</Button>
+            <Button onClick={() => void handleAddProperty()} disabled={addSaving} className="bg-gradient-to-r from-[#4F46E5] to-[#7C3AED] hover:from-[#4338CA] hover:to-[#6D28D9]">
+              {addSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+              Add Property
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Property Modal */}
+      <Dialog open={editPropertyOpen} onOpenChange={setEditPropertyOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+              Edit Property
+            </DialogTitle>
+            <DialogDescription>Update the property details</DialogDescription>
+          </DialogHeader>
+          {editingProperty && (
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold">Property Name *</Label>
+                <Input value={editingProperty.name} onChange={(e) => setEditingProperty({ ...editingProperty, name: e.target.value })} className="h-11" />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold">Address</Label>
+                <Input value={editingProperty.address} onChange={(e) => setEditingProperty({ ...editingProperty, address: e.target.value })} className="h-11" />
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label className="text-sm font-semibold">City</Label>
+                  <Input value={editingProperty.city} onChange={(e) => setEditingProperty({ ...editingProperty, city: e.target.value })} className="h-11" />
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-sm font-semibold">State</Label>
+                  <Input value={editingProperty.state ?? ''} onChange={(e) => setEditingProperty({ ...editingProperty, state: e.target.value })} className="h-11" />
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-sm font-semibold">Pincode</Label>
+                  <Input value={editingProperty.pincode ?? ''} onChange={(e) => setEditingProperty({ ...editingProperty, pincode: e.target.value })} className="h-11" />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold">Number of Floors</Label>
+                <Input type="number" min="1" value={editingProperty.floors} onChange={(e) => setEditingProperty({ ...editingProperty, floors: parseInt(e.target.value) || 1 })} className="h-11" />
+              </div>
+              <div className="pt-4 border-t">
+                <h4 className="font-semibold text-gray-900 mb-4">Contact Person</h4>
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label className="text-sm font-semibold">Name</Label>
+                    <Input value={editingProperty.contactName} onChange={(e) => setEditingProperty({ ...editingProperty, contactName: e.target.value })} className="h-11" />
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label className="text-sm font-semibold">Phone</Label>
+                      <InternationalPhoneField value={editingProperty.contactPhone} onChange={(v) => setEditingProperty({ ...editingProperty, contactPhone: v })} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-sm font-semibold">Email</Label>
+                      <Input type="email" value={editingProperty.contactEmail} onChange={(e) => setEditingProperty({ ...editingProperty, contactEmail: e.target.value })} className="h-11" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setEditPropertyOpen(false)}>Cancel</Button>
+            <Button onClick={() => void handleEditProperty()} disabled={editSaving} className="bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600">
+              {editSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+              Update Property
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Property Modal */}
+      <AlertDialog open={deletePropertyOpen} onOpenChange={setDeletePropertyOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-red-600">
+              <AlertTriangle className="w-5 h-5" /> Delete Property?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Delete <strong>{deletingProperty?.name}</strong>? All rooms in this property will also be removed. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteProperty} className="bg-red-600 hover:bg-red-700 text-white">
+              Delete Property
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Add Room Modal */}
+      <Dialog open={addRoomOpen} onOpenChange={setAddRoomOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold bg-gradient-to-r from-green-600 to-emerald-600 bg-clip-text text-transparent">
+              Add New Room
+            </DialogTitle>
+            <DialogDescription>Enter room details</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold">Room Number *</Label>
+                <Input placeholder="e.g., 301" value={newRoom.number} onChange={(e) => setNewRoom({ ...newRoom, number: e.target.value })} className="h-11" />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold">Floor *</Label>
+                <Input type="number" min="0" value={newRoom.floor} onChange={(e) => setNewRoom({ ...newRoom, floor: parseInt(e.target.value) || 1 })} className="h-11" />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold">Room Type *</Label>
+              <select
+                value={newRoom.type}
+                onChange={(e) => setNewRoom({ ...newRoom, type: e.target.value as RoomType })}
+                className="w-full h-11 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
+              >
+                <option value="single">Single (1 bed)</option>
+                <option value="double">Double (2 beds)</option>
+                <option value="triple">Triple (3 beds)</option>
+              </select>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-sm font-semibold">Monthly Rent (₹) *</Label>
+              <Input type="number" min="0" placeholder="8000" value={newRoom.rent || ''} onChange={(e) => setNewRoom({ ...newRoom, rent: parseInt(e.target.value) || 0 })} className="h-11" />
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setAddRoomOpen(false)}>Cancel</Button>
+            <Button onClick={handleAddRoom} className="bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600">
+              <Save className="w-4 h-4 mr-2" /> Add Room
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Room Modal */}
+      <Dialog open={editRoomOpen} onOpenChange={setEditRoomOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+              Edit Room
+            </DialogTitle>
+            <DialogDescription>Update room details</DialogDescription>
+          </DialogHeader>
+          {editingRoom && (
+            <div className="space-y-4 py-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label className="text-sm font-semibold">Room Number *</Label>
+                  <Input value={editingRoom.number} onChange={(e) => setEditingRoom({ ...editingRoom, number: e.target.value })} className="h-11" />
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-sm font-semibold">Floor *</Label>
+                  <Input type="number" min="0" value={editingRoom.floor} onChange={(e) => setEditingRoom({ ...editingRoom, floor: parseInt(e.target.value) || 1 })} className="h-11" />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold">Room Type *</Label>
+                <select
+                  value={editingRoom.type}
+                  onChange={(e) => {
+                    const t = e.target.value as RoomType;
+                    setEditingRoom({ ...editingRoom, type: t, beds: roomTypeBeds[t] });
+                  }}
+                  className="w-full h-11 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
+                >
+                  <option value="single">Single (1 bed)</option>
+                  <option value="double">Double (2 beds)</option>
+                  <option value="triple">Triple (3 beds)</option>
+                </select>
+              </div>
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold">Monthly Rent (₹) *</Label>
+                <Input type="number" min="0" value={editingRoom.rent} onChange={(e) => setEditingRoom({ ...editingRoom, rent: parseInt(e.target.value) || 0 })} className="h-11" />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold">Status</Label>
+                <select
+                  value={editingRoom.status}
+                  onChange={(e) => setEditingRoom({ ...editingRoom, status: e.target.value as RoomStatus })}
+                  className="w-full h-11 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500"
+                >
+                  <option value="vacant">Vacant</option>
+                  <option value="occupied">Occupied</option>
+                  <option value="maintenance">Maintenance</option>
+                </select>
+              </div>
+            </div>
+          )}
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setEditRoomOpen(false)}>Cancel</Button>
+            <Button onClick={handleEditRoom} className="bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600">
+              <Save className="w-4 h-4 mr-2" /> Update Room
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Room Modal */}
+      <AlertDialog open={deleteRoomOpen} onOpenChange={setDeleteRoomOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-red-600">
+              <AlertTriangle className="w-5 h-5" /> Delete Room?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Delete room <strong>{deletingRoom?.room.number}</strong>? This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteRoom} className="bg-red-600 hover:bg-red-700 text-white">
+              Delete Room
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

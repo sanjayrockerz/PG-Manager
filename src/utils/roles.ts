@@ -24,47 +24,6 @@ export function isScopedOwnerRole(role: string | null | undefined): role is 'own
   return role === 'owner_manager' || role === 'staff';
 }
 
-/** Returns true for the main owner (not scoped members) */
-export function isOwnerRole(role: string | null | undefined): role is 'owner' {
-  return role === 'owner';
-}
-
-/** Returns true for any user who operates within an owner scope */
-export function isOwnerOrScoped(role: string | null | undefined): boolean {
-  return role === 'owner' || isScopedOwnerRole(role);
-}
-
-/** Returns true if the user can manage team members (owner only) */
-export function canManageTeam(role: string | null | undefined): boolean {
-  return role === 'owner';
-}
-
-/** Returns true if the user can create/edit properties (owner only) */
-export function canManageProperties(role: string | null | undefined): boolean {
-  return role === 'owner';
-}
-
-/**
- * Map a display role label to the internal profile role.
- * Viewer → staff (read-only RLS)
- * Editor/Manager → owner_manager (write RLS based on capabilities)
- */
 export function displayRoleToProfileRole(displayRole: 'viewer' | 'editor' | 'manager'): 'owner_manager' | 'staff' {
-  return displayRole === 'viewer' ? 'staff' : 'owner_manager';
-}
-
-/**
- * Friendly label for a UserRole.
- */
-export function roleLabel(role: UserRole | string | null | undefined): string {
-  switch (role) {
-    case 'owner': return 'Owner';
-    case 'owner_manager': return 'Manager';
-    case 'staff': return 'Viewer';
-    case 'tenant': return 'Tenant';
-    case 'platform_admin': return 'Platform Admin';
-    case 'admin': return 'Admin';
-    case 'super_admin': return 'Super Admin';
-    default: return 'Unknown';
-  }
+  return displayRole === 'manager' ? 'owner_manager' : 'staff';
 }

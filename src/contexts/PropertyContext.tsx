@@ -42,6 +42,7 @@ export interface Property {
   contactName: string;
   contactPhone: string;
   contactEmail: string;
+  occupancyMode?: 'BED_BASED' | 'ROOM_BASED';
   createdAt: string;
   rooms: Room[];
 }

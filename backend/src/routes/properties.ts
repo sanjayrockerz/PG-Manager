@@ -5,9 +5,11 @@ import { db } from "../store/data.js";
 import { Room } from "../types/entities.js";
 import { getTodayIsoDate } from "../utils/date.js";
 import { validateBody } from "../utils/validation.js";
+import { requireAuth } from "../middleware/auth.js";
+import { requireOwnerOrAdmin } from "../middleware/rbac.js";
+import { validatePropertyOwnership } from "../middleware/ownership.js";
 
 const propertyCreateSchema = z.object({
-  ownerId: z.string().optional().default("owner-1"),
   name: z.string().min(2),
   address: z.string().min(5),
   city: z.string().min(2),
@@ -34,8 +36,11 @@ const roomSchema = z.object({
 
 const roomUpdateSchema = roomSchema.partial();
 
-function hydrateProperties() {
-  return db.properties.map((property) => ({
+function hydrateOwnedProperties(ownerId: string, isAdmin: boolean) {
+  const owned = isAdmin
+    ? db.properties
+    : db.properties.filter((p) => p.ownerId === ownerId);
+  return owned.map((property) => ({
     ...property,
     rooms: db.rooms.filter((room) => room.propertyId === property.id),
   }));
@@ -43,77 +48,103 @@ function hydrateProperties() {
 
 export const propertiesRouter = Router();
 
-propertiesRouter.get("/", (_req, res) => {
-  res.json({ properties: hydrateProperties() });
+// All property routes require authentication
+propertiesRouter.use(requireAuth);
+
+propertiesRouter.get("/", (req, res) => {
+  const authUser = req.authUser!;
+  const isAdminRole = authUser.role === "admin" || authUser.role === "super_admin";
+  res.json({ properties: hydrateOwnedProperties(authUser.id, isAdminRole) });
 });
 
-propertiesRouter.post("/", validateBody(propertyCreateSchema), (req, res) => {
-  const payload = req.body;
+propertiesRouter.post("/", requireOwnerOrAdmin, validateBody(propertyCreateSchema), (req, res) => {
+  const authUser = req.authUser!;
   const property = {
     id: `prop-${Date.now()}`,
+    ownerId: authUser.id,
     createdAt: getTodayIsoDate(),
-    ...payload,
+    ...req.body,
   };
 
   db.properties.push(property);
   res.status(201).json({ property: { ...property, rooms: [] } });
 });
 
-propertiesRouter.put("/:propertyId", validateBody(propertyUpdateSchema), (req, res) => {
-  const { propertyId } = req.params;
-  const index = db.properties.findIndex((entry) => entry.id === propertyId);
+propertiesRouter.put(
+  "/:propertyId",
+  requireOwnerOrAdmin,
+  validatePropertyOwnership,
+  validateBody(propertyUpdateSchema),
+  (req, res) => {
+    const { propertyId } = req.params;
+    const index = db.properties.findIndex((entry) => entry.id === propertyId);
 
-  if (index < 0) {
-    return res.status(404).json({ message: "Property not found" });
-  }
+    if (index < 0) {
+      return res.status(404).json({ message: "Property not found" });
+    }
 
-  db.properties[index] = {
-    ...db.properties[index],
-    ...req.body,
-  };
+    db.properties[index] = {
+      ...db.properties[index],
+      ...req.body,
+    };
 
-  const property = db.properties[index];
-  return res.json({ property: { ...property, rooms: db.rooms.filter((room) => room.propertyId === property.id) } });
-});
+    const property = db.properties[index];
+    return res.json({
+      property: { ...property, rooms: db.rooms.filter((room) => room.propertyId === property.id) },
+    });
+  },
+);
 
-propertiesRouter.delete("/:propertyId", (req, res) => {
-  const { propertyId } = req.params;
-  const exists = db.properties.some((entry) => entry.id === propertyId);
-  if (!exists) {
-    return res.status(404).json({ message: "Property not found" });
-  }
+propertiesRouter.delete(
+  "/:propertyId",
+  requireOwnerOrAdmin,
+  validatePropertyOwnership,
+  (req, res) => {
+    const { propertyId } = req.params;
+    const exists = db.properties.some((entry) => entry.id === propertyId);
+    if (!exists) {
+      return res.status(404).json({ message: "Property not found" });
+    }
 
-  db.properties = db.properties.filter((entry) => entry.id !== propertyId);
-  db.rooms = db.rooms.filter((room) => room.propertyId !== propertyId);
-  db.tenants = db.tenants.filter((tenant) => tenant.propertyId !== propertyId);
-  db.payments = db.payments.filter((payment) => payment.propertyId !== propertyId);
-  db.maintenanceTickets = db.maintenanceTickets.filter((ticket) => ticket.propertyId !== propertyId);
+    db.properties = db.properties.filter((entry) => entry.id !== propertyId);
+    db.rooms = db.rooms.filter((room) => room.propertyId !== propertyId);
+    db.tenants = db.tenants.filter((tenant) => tenant.propertyId !== propertyId);
+    db.payments = db.payments.filter((payment) => payment.propertyId !== propertyId);
+    db.maintenanceTickets = db.maintenanceTickets.filter((ticket) => ticket.propertyId !== propertyId);
 
-  return res.status(204).send();
-});
+    return res.status(204).send();
+  },
+);
 
-propertiesRouter.post("/:propertyId/rooms", validateBody(roomSchema), (req, res) => {
-  const { propertyId } = req.params;
-  const property = db.properties.find((entry) => entry.id === propertyId);
-  if (!property) {
-    return res.status(404).json({ message: "Property not found" });
-  }
+propertiesRouter.post(
+  "/:propertyId/rooms",
+  requireOwnerOrAdmin,
+  validatePropertyOwnership,
+  validateBody(roomSchema),
+  (req, res) => {
+    const { propertyId } = req.params;
+    const property = db.properties.find((entry) => entry.id === propertyId);
+    if (!property) {
+      return res.status(404).json({ message: "Property not found" });
+    }
 
-  const payload = req.body;
-  const room: Room = {
-    id: uuidv4(),
-    propertyId,
-    ...payload,
-  };
+    const room: Room = {
+      id: uuidv4(),
+      propertyId,
+      ...req.body,
+    };
 
-  db.rooms.push(room);
-  property.totalRooms = db.rooms.filter((entry) => entry.propertyId === propertyId).length;
+    db.rooms.push(room);
+    property.totalRooms = db.rooms.filter((entry) => entry.propertyId === propertyId).length;
 
-  return res.status(201).json({ room });
-});
+    return res.status(201).json({ room });
+  },
+);
 
 propertiesRouter.put(
   "/:propertyId/rooms/:roomId",
+  requireOwnerOrAdmin,
+  validatePropertyOwnership,
   validateBody(roomUpdateSchema),
   (req, res) => {
     const { propertyId, roomId } = req.params;
@@ -132,18 +163,23 @@ propertiesRouter.put(
   },
 );
 
-propertiesRouter.delete("/:propertyId/rooms/:roomId", (req, res) => {
-  const { propertyId, roomId } = req.params;
-  const roomExists = db.rooms.some((entry) => entry.id === roomId && entry.propertyId === propertyId);
-  if (!roomExists) {
-    return res.status(404).json({ message: "Room not found" });
-  }
+propertiesRouter.delete(
+  "/:propertyId/rooms/:roomId",
+  requireOwnerOrAdmin,
+  validatePropertyOwnership,
+  (req, res) => {
+    const { propertyId, roomId } = req.params;
+    const roomExists = db.rooms.some((entry) => entry.id === roomId && entry.propertyId === propertyId);
+    if (!roomExists) {
+      return res.status(404).json({ message: "Room not found" });
+    }
 
-  db.rooms = db.rooms.filter((entry) => !(entry.id === roomId && entry.propertyId === propertyId));
-  const property = db.properties.find((entry) => entry.id === propertyId);
-  if (property) {
-    property.totalRooms = db.rooms.filter((entry) => entry.propertyId === propertyId).length;
-  }
+    db.rooms = db.rooms.filter((entry) => !(entry.id === roomId && entry.propertyId === propertyId));
+    const property = db.properties.find((entry) => entry.id === propertyId);
+    if (property) {
+      property.totalRooms = db.rooms.filter((entry) => entry.propertyId === propertyId).length;
+    }
 
-  return res.status(204).send();
-});
+    return res.status(204).send();
+  },
+);

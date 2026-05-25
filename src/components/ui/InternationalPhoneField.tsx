@@ -29,14 +29,16 @@ export function InternationalPhoneField({
       value={value}
       onChange={(phone) => onChange(normalizeInternationalPhone(phone))}
       onBlur={onBlur}
-      className={`w-full rounded-2xl border transition-shadow ${invalid ? 'border-red-300 focus-within:ring-2 focus-within:ring-red-200' : 'border-gray-300 focus-within:ring-2 focus-within:ring-blue-200'}`}
-      inputClassName="!w-full !h-14 !border-0 !rounded-r-2xl !bg-white !px-3 !text-sm focus:!outline-none"
+      className={`h-11 flex rounded-md border overflow-hidden transition-all
+        focus-within:ring-[3px] focus-within:ring-purple-500/20 focus-within:border-purple-500
+        ${invalid ? 'border-red-400 focus-within:ring-red-200 focus-within:border-red-400' : 'border-gray-300'}`}
+      inputClassName="!flex-1 !h-full !border-0 !bg-transparent !px-3 !py-1 !text-sm !text-gray-900 focus:!outline-none placeholder:!text-gray-400"
       countrySelectorStyleProps={{
-        buttonClassName: `!h-14 !px-3 !rounded-l-2xl !border-0 !bg-gray-50 ${invalid ? '!bg-red-50' : ''}`,
-        buttonContentWrapperClassName: '!gap-2',
-        flagClassName: '!w-5 !h-5 !rounded-full',
+        buttonClassName: `!h-full !px-2.5 !border-0 !border-r !border-gray-200 !bg-gray-50 !rounded-none ${invalid ? '!bg-red-50' : ''}`,
+        buttonContentWrapperClassName: '!gap-1.5',
+        flagClassName: '!w-4 !h-4',
         dropdownStyleProps: {
-          className: '!z-[80] !mt-2 !rounded-2xl !border !border-gray-200 !shadow-xl',
+          className: '!z-[80] !mt-1 !rounded-xl !border !border-gray-200 !shadow-xl',
           listItemClassName: '!py-2',
           listItemDialCodeClassName: '!font-semibold !text-gray-700',
         },

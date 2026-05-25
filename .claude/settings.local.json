@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Bash(dir \"C:\\\\Users\\\\motis\\\\Downloads\\\\*.css\")",
+      "Bash(dir \"C:\\\\Users\\\\motis\\\\Downloads\\\\colors_and_type.css\")",
+      "Bash(dir \"C:\\\\Users\\\\motis\\\\Downloads\\\\components.css\")",
+      "Bash(Get-ChildItem -Recurse -Path src)",
+      "Bash(Select-Object -ExpandProperty FullName)"
+    ]
+  }
+}

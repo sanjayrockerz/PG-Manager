@@ -1,0 +1,134 @@
+{
+  "timestamp": "2026-05-25T14:53:51.317Z",
+  "summary": {
+    "total": 24,
+    "pass": 5,
+    "fail": 0,
+    "warn": 19
+  },
+  "results": [
+    {
+      "status": "PASS",
+      "test": "App loads in demo mode",
+      "detail": ""
+    },
+    {
+      "status": "WARN",
+      "test": "Sidebar/nav visible",
+      "detail": "Not found — may be collapsed"
+    },
+    {
+      "status": "WARN",
+      "test": "Dashboard metrics",
+      "detail": "No metric labels found"
+    },
+    {
+      "status": "WARN",
+      "test": "Activity feed",
+      "detail": "No activity section found"
+    },
+    {
+      "status": "WARN",
+      "test": "Payment list",
+      "detail": "No payment rows/cards found — checking content"
+    },
+    {
+      "status": "PASS",
+      "test": "Payment page has content",
+      "detail": "Found payment-related text"
+    },
+    {
+      "status": "WARN",
+      "test": "Mark as Paid button",
+      "detail": "Not found — may require specific filter state"
+    },
+    {
+      "status": "WARN",
+      "test": "Payment export",
+      "detail": "Export/CSV button not found"
+    },
+    {
+      "status": "WARN",
+      "test": "Tenant list",
+      "detail": "No tenant content detected"
+    },
+    {
+      "status": "WARN",
+      "test": "Tenant rows",
+      "detail": "No rows found — checking for card layout"
+    },
+    {
+      "status": "WARN",
+      "test": "Add Tenant button",
+      "detail": "Not found"
+    },
+    {
+      "status": "WARN",
+      "test": "CSV Import button",
+      "detail": "Not found in tenant view"
+    },
+    {
+      "status": "WARN",
+      "test": "Maintenance page",
+      "detail": "No ticket content detected"
+    },
+    {
+      "status": "WARN",
+      "test": "Maintenance tickets",
+      "detail": "No ticket items found"
+    },
+    {
+      "status": "WARN",
+      "test": "Create Ticket button",
+      "detail": "Not found"
+    },
+    {
+      "status": "WARN",
+      "test": "Announcements page",
+      "detail": "No announcement content detected"
+    },
+    {
+      "status": "WARN",
+      "test": "Pinned announcements",
+      "detail": "Pin indicator not visible"
+    },
+    {
+      "status": "PASS",
+      "test": "Create Announcement button visible",
+      "detail": ""
+    },
+    {
+      "status": "WARN",
+      "test": "Create Announcement dialog",
+      "detail": "Did not open"
+    },
+    {
+      "status": "WARN",
+      "test": "Notification bell",
+      "detail": "Bell not in header, notifications page also unclear"
+    },
+    {
+      "status": "WARN",
+      "test": "Mode toggle",
+      "detail": "Not visible in current view"
+    },
+    {
+      "status": "PASS",
+      "test": "Dashboard shows numeric data (counts/metrics populated)",
+      "detail": ""
+    },
+    {
+      "status": "PASS",
+      "test": "Properties page loaded",
+      "detail": ""
+    },
+    {
+      "status": "WARN",
+      "test": "Property cards",
+      "detail": "No cards found"
+    }
+  ],
+  "consoleErrors": [
+    "Failed to load resource: the server responded with a status of 404 (Not Found)"
+  ]
+}

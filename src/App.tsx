@@ -18,34 +18,84 @@ import { MobileNav } from './components/MobileNav';
 import { Header } from './components/Header';
 import { OTPLogin } from './components/OTPLogin';
 import { OTPSignup } from './components/OTPSignup';
+import { PortalSelector, type PortalType } from './components/PortalSelector';
+import { Pricing } from './components/Pricing';
 import { PageFrame } from './components/ui/PageFrame';
 import { LocalizationProvider } from './contexts/LocalizationContext';
-import { isPlatformAdminRole, isScopedOwnerRole } from './utils/roles';
+import { isPlatformAdminRole } from './utils/roles';
+import { hasPermission, TAB_PERMISSION_MAP, getDefaultTab } from './utils/permissions';
+import { PageGuard } from './guards/PageGuard';
+
+const PORTAL_STORAGE_KEY = 'rentcare:selected-portal';
+
+const readStoredPortal = (): PortalType | null => {
+  try {
+    const v = localStorage.getItem(PORTAL_STORAGE_KEY);
+    if (v === 'owner' || v === 'admin' || v === 'tenant') {
+      return v;
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+};
+
+const writeStoredPortal = (portal: PortalType | null): void => {
+  try {
+    if (portal) {
+      localStorage.setItem(PORTAL_STORAGE_KEY, portal);
+    } else {
+      localStorage.removeItem(PORTAL_STORAGE_KEY);
+    }
+  } catch {
+    // ignore
+  }
+};
 
 function AppContent() {
   const { user, isLoading } = useAuth();
   const [showSignUp, setShowSignUp] = useState(false);
+  const [selectedPortal, setSelectedPortal] = useState<PortalType | null>(readStoredPortal);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(
+    () => localStorage.getItem('sidebar_collapsed') === 'true'
+  );
   const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
+
+  const handlePortalSelect = (portal: PortalType) => {
+    setSelectedPortal(portal);
+    writeStoredPortal(portal);
+  };
 
   useEffect(() => {
     if (!user) {
       return;
     }
 
+    // Clear stored portal after the user is loaded — routing is now determined by role.
+    writeStoredPortal(null);
+
     if (user.role === 'tenant' && activeTab !== 'tenant-portal') {
       setActiveTab('tenant-portal');
       setSelectedTenantId(null);
+      return;
     }
 
     if (isPlatformAdminRole(user.role) && activeTab !== 'admin-section' && activeTab !== 'tenant-portal') {
       setActiveTab('admin-section');
       setSelectedTenantId(null);
+      return;
     }
 
-  }, [user, activeTab]);
+    // If user selected a portal but logged in with a mismatched role, silently correct it.
+    if (selectedPortal === 'admin' && !isPlatformAdminRole(user.role) && user.role !== 'tenant') {
+      setActiveTab('dashboard');
+      setSelectedTenantId(null);
+    }
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
 
   const setActiveTabWithRoleGuard = (tab: string) => {
     if (!user) {
@@ -53,36 +103,22 @@ function AppContent() {
       return;
     }
 
-    if (tab === 'admin-section' && !isPlatformAdminRole(user.role)) {
-      setActiveTab('dashboard');
+    // Tabs not in the permission map (notifications, pricing) are always accessible
+    const requiredAction = TAB_PERMISSION_MAP[tab];
+    if (!requiredAction) {
+      setActiveTab(tab);
       setSelectedTenantId(null);
       return;
     }
 
-    if (user.role === 'tenant') {
-      setActiveTab('tenant-portal');
+    if (hasPermission(user.role, requiredAction)) {
+      setActiveTab(tab);
       setSelectedTenantId(null);
       return;
     }
 
-    if (isPlatformAdminRole(user.role)) {
-      if (tab === 'admin-section' || tab === 'tenant-portal' || tab === 'settings') {
-        setActiveTab(tab);
-      } else {
-        setActiveTab('admin-section');
-      }
-      setSelectedTenantId(null);
-      return;
-    }
-
-    if (isScopedOwnerRole(user.role)) {
-      const allowedTabs = new Set(['dashboard', 'properties', 'tenants', 'payments', 'maintenance', 'announcements', 'support', 'tenant-portal', 'notifications']);
-      setActiveTab(allowedTabs.has(tab) ? tab : 'dashboard');
-      setSelectedTenantId(null);
-      return;
-    }
-
-    setActiveTab(tab);
+    // Denied: redirect to the role's natural landing page
+    setActiveTab(getDefaultTab(user.role));
     setSelectedTenantId(null);
   };
 
@@ -107,41 +143,106 @@ function AppContent() {
 
   // Show auth pages if not logged in
   if (!user) {
-    if (showSignUp) {
-      return <OTPSignup onSwitchToLogin={() => setShowSignUp(false)} />;
+    // Step 1: no portal selected — show the portal selector
+    if (!selectedPortal) {
+      return <PortalSelector onSelect={handlePortalSelect} />;
     }
-    return <OTPLogin onSwitchToSignup={() => setShowSignUp(true)} />;
+
+    // Step 2: portal selected — show login with portal context
+    if (showSignUp) {
+      return (
+        <OTPSignup
+          onSwitchToLogin={() => setShowSignUp(false)}
+        />
+      );
+    }
+    return (
+      <OTPLogin
+        onSwitchToSignup={() => setShowSignUp(true)}
+        portalType={selectedPortal}
+        onBack={() => {
+          setSelectedPortal(null);
+          writeStoredPortal(null);
+          setShowSignUp(false);
+        }}
+      />
+    );
   }
 
   const renderContent = () => {
-    // If viewing tenant detail, show that
     if (activeTab === 'tenants' && selectedTenantId) {
-      return <TenantDetail tenantId={selectedTenantId} onBack={handleBackToTenants} />;
+      return (
+        <PageGuard action="page:tenants">
+          <TenantDetail tenantId={selectedTenantId} onBack={handleBackToTenants} />
+        </PageGuard>
+      );
     }
 
     switch (activeTab) {
       case 'dashboard':
-        return <Dashboard />;
+        return (
+          <PageGuard action="page:dashboard">
+            <Dashboard onNavigate={setActiveTab} />
+          </PageGuard>
+        );
       case 'properties':
-        return <Properties />;
+        return (
+          <PageGuard action="page:properties">
+            <Properties onNavigate={setActiveTab} />
+          </PageGuard>
+        );
       case 'tenants':
-        return <Tenants onViewTenant={handleViewTenant} />;
+        return (
+          <PageGuard action="page:tenants">
+            <Tenants onViewTenant={handleViewTenant} />
+          </PageGuard>
+        );
       case 'payments':
-        return <Payments />;
+        return (
+          <PageGuard action="page:payments">
+            <Payments />
+          </PageGuard>
+        );
       case 'maintenance':
-        return <Maintenance />;
+        return (
+          <PageGuard action="page:maintenance">
+            <Maintenance />
+          </PageGuard>
+        );
       case 'announcements':
-        return <Announcements />;
+        return (
+          <PageGuard action="page:announcements">
+            <Announcements />
+          </PageGuard>
+        );
       case 'settings':
-        return <Settings />;
+        return (
+          <PageGuard action="page:settings">
+            <Settings />
+          </PageGuard>
+        );
       case 'notifications':
         return <Notifications onBack={() => setActiveTab('dashboard')} />;
       case 'support':
-        return <Support />;
+        return (
+          <PageGuard action="page:support">
+            <Support />
+          </PageGuard>
+        );
+      case 'pricing':
+        return <Pricing />;
       case 'admin-section':
-        return isPlatformAdminRole(user.role) ? <AdminSection /> : <Dashboard />;
+        return (
+          <PageGuard action="page:admin-section">
+            <AdminSection />
+          </PageGuard>
+        );
       case 'tenant-portal':
-        return <TenantPortal />;
+        return (
+          <PageGuard action="page:tenant-portal">
+            <TenantPortal />
+          </PageGuard>
+        );
       default:
         return <Dashboard />;
     }

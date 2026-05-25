@@ -1,14 +1,38 @@
 import { useEffect, useState } from 'react';
-import { ArrowRight, Building2, Check, Mail, Shield } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, Home, LayoutGrid, Mail, Shield } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import type { PortalType } from './PortalSelector';
 
 interface OTPLoginProps {
   onSwitchToSignup: () => void;
+  portalType?: PortalType;
+  onBack?: () => void;
 }
 
 const EMAIL_MAX_LENGTH = 254;
 
-export function OTPLogin({ onSwitchToSignup }: OTPLoginProps) {
+const portalMeta: Record<PortalType, { label: string; desc: string; icon: typeof LayoutGrid; gradient: string }> = {
+  owner: {
+    label: 'Main Portal',
+    desc: 'Owner & Manager Dashboard',
+    icon: LayoutGrid,
+    gradient: 'from-[#7C3AED] via-[#4F46E5] to-[#312E81]',
+  },
+  admin: {
+    label: 'Admin Portal',
+    desc: 'Super Admin Dashboard',
+    icon: Shield,
+    gradient: 'from-[#EC4899] via-[#BE185D] to-[#831843]',
+  },
+  tenant: {
+    label: 'Tenant Portal',
+    desc: 'For Residents',
+    icon: Home,
+    gradient: 'from-[#0EA5E9] via-[#0284C7] to-[#0D9488]',
+  },
+};
+
+export function OTPLogin({ onSwitchToSignup, portalType, onBack }: OTPLoginProps) {
   const { sendLoginMagicLink, signInWithGoogle, authError, isLoading } = useAuth();
   const [email, setEmail] = useState('');
   const [error, setError] = useState('');
@@ -76,17 +100,31 @@ export function OTPLogin({ onSwitchToSignup }: OTPLoginProps) {
     }
   };
 
+  const meta = portalType ? portalMeta[portalType] : null;
+  const PortalIcon = meta?.icon;
+
   return (
-    <div className="min-h-screen bg-[#F8FAFC] p-4 md:p-8 flex items-center justify-center">
+    <div className="min-h-screen bg-[#F0EFFF] p-4 md:p-8 flex items-center justify-center">
       <div className="w-full max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 rounded-3xl overflow-hidden border border-[#E5E7EB] bg-white shadow-sm">
         <div className="p-6 sm:p-8 md:p-10 bg-white">
+          {/* Back button */}
+          {onBack && (
+            <button
+              onClick={onBack}
+              className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-[#7C3AED] mb-6 transition-colors"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              Back to portal selector
+            </button>
+          )}
+
           <div className="flex items-center gap-3 mb-8">
-            <div className="w-10 h-10 rounded-xl bg-[#EEF2FF] text-[#6366F1] flex items-center justify-center">
-              <Building2 className="w-5 h-5" />
+            <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${meta ? `bg-gradient-to-br ${meta.gradient}` : 'bg-[#EEF2FF]'}`}>
+              {PortalIcon ? <PortalIcon className="w-5 h-5 text-white" /> : <LayoutGrid className="w-5 h-5 text-[#6366F1]" />}
             </div>
             <div>
-              <p className="text-sm font-semibold text-slate-900">PG Manager</p>
-              <p className="text-xs text-slate-500">Property Operations Cloud</p>
+              <p className="text-sm font-semibold text-slate-900">{meta ? meta.label : 'RentCare'}</p>
+              <p className="text-xs text-slate-500">{meta ? meta.desc : 'Property Operations Cloud'}</p>
             </div>
           </div>
 
@@ -168,11 +206,13 @@ export function OTPLogin({ onSwitchToSignup }: OTPLoginProps) {
           </div>
         </div>
 
-        <div className="hidden md:flex flex-col justify-between bg-gradient-to-br from-[#6366F1] via-[#4F46E5] to-[#312E81] p-10 text-white">
+        <div className={`hidden md:flex flex-col justify-between bg-gradient-to-br ${meta?.gradient ?? 'from-[#7C3AED] via-[#4F46E5] to-[#312E81]'} p-10 text-white`}>
           <div>
-            <p className="text-xs uppercase tracking-[0.2em] text-indigo-200 mb-4">PG Manager Platform</p>
-            <h2 className="text-3xl font-semibold leading-tight mb-4">Secure access for owners and teams.</h2>
-            <p className="text-indigo-100 text-sm leading-relaxed mb-7">
+            <p className="text-xs uppercase tracking-[0.2em] text-white/60 mb-4">RentCare Platform</p>
+            <h2 className="text-3xl font-semibold leading-tight mb-4">
+              {meta ? `Sign in to ${meta.label}.` : 'Secure access for owners and teams.'}
+            </h2>
+            <p className="text-white/80 text-sm leading-relaxed mb-7">
               Magic-link authentication keeps sign-in simple while preserving role-based workspace routing.
             </p>
 
@@ -182,15 +222,15 @@ export function OTPLogin({ onSwitchToSignup }: OTPLoginProps) {
                 'No password reset friction',
                 'Works across local and production redirects',
               ].map((benefit) => (
-                <div key={benefit} className="flex items-start gap-2 text-sm text-indigo-50">
-                  <Check className="w-4 h-4 mt-0.5 text-indigo-200" />
+                <div key={benefit} className="flex items-start gap-2 text-sm text-white/80">
+                  <Check className="w-4 h-4 mt-0.5 text-white/60" />
                   <span>{benefit}</span>
                 </div>
               ))}
             </div>
           </div>
 
-          <div className="mt-8 rounded-xl border border-indigo-300/40 bg-indigo-400/20 px-4 py-3 text-sm text-indigo-50 flex items-center gap-2">
+          <div className="mt-8 rounded-xl border border-white/20 bg-white/10 px-4 py-3 text-sm text-white/80 flex items-center gap-2">
             <Shield className="w-4 h-4" />
             Authentication is handled by Supabase with secure session persistence.
           </div>

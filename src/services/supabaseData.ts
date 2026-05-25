@@ -4,10 +4,52 @@ import { isPlatformAdminRole, isScopedOwnerRole } from '../utils/roles';
 import { isValidStoredPhoneNumber as isValidStoredPhoneFromUtils, parseStoredPhone } from '../utils/phone';
 
 export type UserRole = 'owner' | 'owner_manager' | 'staff' | 'tenant' | 'platform_admin' | 'admin' | 'super_admin';
-export type TenantStatus = 'active' | 'inactive';
+export type TenantStatus =
+  | 'pending_onboarding'
+  | 'active'
+  | 'payment_overdue'
+  | 'notice_submitted'
+  | 'vacating'
+  | 'inactive'
+  | 'archived';
+
+export type OccupancyMode = 'BED_BASED' | 'ROOM_BASED';
+
+/** Statuses where tenant still physically occupies a room/bed */
+export const ACTIVE_IN_ROOM_STATUSES: TenantStatus[] = [
+  'active',
+  'payment_overdue',
+  'notice_submitted',
+  'vacating',
+];
+
+export const isTenantCurrentlyInRoom = (status: TenantStatus): boolean =>
+  ACTIVE_IN_ROOM_STATUSES.includes(status);
+
+export const TENANT_STATUS_LABELS: Record<TenantStatus, string> = {
+  pending_onboarding: 'Pending Onboarding',
+  active: 'Active',
+  payment_overdue: 'Payment Overdue',
+  notice_submitted: 'Notice Submitted',
+  vacating: 'Vacating',
+  inactive: 'Vacated',
+  archived: 'Archived',
+};
+
+export const TENANT_STATUS_COLORS: Record<TenantStatus, string> = {
+  pending_onboarding: 'bg-blue-100 text-blue-700',
+  active: 'bg-green-100 text-green-700',
+  payment_overdue: 'bg-red-100 text-red-700',
+  notice_submitted: 'bg-amber-100 text-amber-700',
+  vacating: 'bg-orange-100 text-orange-700',
+  inactive: 'bg-gray-100 text-gray-600',
+  archived: 'bg-gray-100 text-gray-500',
+};
+
 export type PaymentStatus = 'paid' | 'pending' | 'overdue';
-export type MaintenanceStatus = 'open' | 'in-progress' | 'resolved';
+export type MaintenanceStatus = 'open' | 'in-progress' | 'waiting' | 'resolved' | 'closed';
 export type MaintenancePriority = 'low' | 'medium' | 'high';
+export type MaintenanceSource = 'portal' | 'manual' | 'admin_created' | 'whatsapp' | 'staff_created';
 export type AnnouncementCategory = 'maintenance' | 'payment' | 'rules' | 'general';
 export type SupportTicketStatus = 'open' | 'in_progress' | 'resolved' | 'closed';
 export type SupportTicketPriority = 'low' | 'medium' | 'high' | 'urgent';
@@ -252,7 +294,70 @@ export interface TenantRecord {
   idDocumentUrl: string;
   joinDate: string;
   status: TenantStatus;
+  vacateDate?: string;
+  vacateReason?: string;
   createdAt: string;
+}
+
+export interface VacateRequest {
+  id: string;
+  tenantId: string;
+  tenantName: string;
+  propertyId: string;
+  room: string;
+  noticeDate: string;
+  plannedVacateDate: string;
+  reason: string;
+  finalSettlementAmount: number;
+  depositRefund: number;
+  depositDeduction: number;
+  deductionReason: string;
+  status: 'pending' | 'confirmed' | 'completed' | 'cancelled';
+  createdAt: string;
+}
+
+export interface VacateWorkflowInput {
+  tenantId: string;
+  vacateDate: string;
+  reason: string;
+  depositDeduction: number;
+  deductionReason: string;
+}
+
+export interface ActivityLogEntry {
+  id: string;
+  ownerId: string;
+  propertyId: string | null;
+  event: string;
+  detail: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface CSVTenantRow {
+  name: string;
+  phone: string;
+  email: string;
+  propertyName: string;
+  floor: string;
+  room: string;
+  bed: string;
+  monthlyRent: string;
+  securityDeposit: string;
+  rentDueDate: string;
+  parentName: string;
+  parentPhone: string;
+  idType: string;
+  idNumber: string;
+  joinDate: string;
+}
+
+export interface CSVImportResult {
+  total: number;
+  succeeded: number;
+  failed: number;
+  errors: Array<{ row: number; field: string; message: string }>;
+  createdTenants: TenantRecord[];
 }
 
 export interface TenantCreateInput {
@@ -291,6 +396,17 @@ export interface PaymentRecord {
   createdAt: string;
 }
 
+export interface MaintenanceThreadEntry {
+  id: string;
+  ticketId: string;
+  actorName: string;
+  actorRole: 'owner' | 'staff' | 'system';
+  message: string;
+  isInternal: boolean;
+  statusTransition?: { from: MaintenanceStatus; to: MaintenanceStatus };
+  createdAt: string;
+}
+
 export interface MaintenanceTicketRecord {
   id: string;
   ticketId: string;
@@ -299,12 +415,16 @@ export interface MaintenanceTicketRecord {
   room: string;
   issue: string;
   description: string;
-  source: 'whatsapp' | 'manual';
+  source: MaintenanceSource;
   status: MaintenanceStatus;
   priority: MaintenancePriority;
   date: string;
   phone: string;
   notes: string[];
+  threads?: MaintenanceThreadEntry[];
+  assignedTo?: string;
+  updatedAt?: string;
+  resolvedAt?: string;
 }
 
 export interface AnnouncementRecord {
@@ -319,14 +439,30 @@ export interface AnnouncementRecord {
   propertyId: string | null;
 }
 
+export type NotificationType = 'payment' | 'maintenance' | 'tenant' | 'announcement' | 'occupancy' | 'system';
+
 export interface NotificationRecord {
   id: string;
   ownerId: string;
-  type: 'payment' | 'maintenance' | 'tenant' | 'announcement';
+  type: NotificationType;
   title: string;
   message: string;
+  entityType?: string;
+  entityId?: string;
+  propertyId?: string | null;
   read: boolean;
   createdAt: string;
+}
+
+export interface WhatsAppQueueEntry {
+  id: string;
+  announcementId: string;
+  propertyId: string | null;
+  status: 'queued' | 'sending' | 'delivered' | 'failed';
+  recipientCount: number;
+  sentCount: number;
+  createdAt: string;
+  deliveredAt?: string;
 }
 
 export interface TeamScopeRecord {
@@ -3119,7 +3255,7 @@ export const supabaseOwnerDataApi = {
     issue: string;
     description: string;
     priority: MaintenancePriority;
-    source?: 'whatsapp' | 'manual';
+    source?: MaintenanceSource;
     phone?: string;
   }): Promise<MaintenanceTicketRecord> {
     const ownerId = await getOwnerId();
