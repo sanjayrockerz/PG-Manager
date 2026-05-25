@@ -1,659 +1,536 @@
 /**
- * QA Test Script — Full workflow validation
- * Tests: Payment, Tenant, Maintenance, Announcement, Notification workflows
- * Mode: DEMO (no Supabase auth required)
+ * QA Test Script — Full workflow validation with Supabase auth mocking
+ * Mocks: Supabase /auth/v1/user + /rest/v1/profiles so no real login needed
  */
 const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
 const BASE = 'http://127.0.0.1:4173';
+const SUPABASE_HOST = 'krkzklxfczukvllhucsg.supabase.co';
+const MOCK_USER_ID = '00000000-0000-0000-0000-000000000001';
+const MOCK_OWNER_SCOPE_ID = '00000000-0000-0000-0000-000000000002';
+
 const SHOTS_DIR = path.join(__dirname, 'qa-screenshots');
 if (!fs.existsSync(SHOTS_DIR)) fs.mkdirSync(SHOTS_DIR, { recursive: true });
+fs.readdirSync(SHOTS_DIR).forEach(f => {
+  try { fs.unlinkSync(path.join(SHOTS_DIR, f)); } catch {}
+});
 
 const results = [];
 let shotIndex = 0;
 
-async function shot(page, label) {
+function shot(page, label) {
   const file = path.join(SHOTS_DIR, `${String(++shotIndex).padStart(3, '0')}_${label.replace(/[^a-z0-9]/gi, '_')}.png`);
-  await page.screenshot({ path: file, fullPage: false });
-  console.log(`  📸 ${label}`);
-  return file;
+  return page.screenshot({ path: file, fullPage: false }).then(() => {
+    console.log(`  📸 ${label}`);
+    return file;
+  }).catch(() => {});
 }
 
 function pass(test, detail = '') {
   results.push({ status: 'PASS', test, detail });
   console.log(`  ✅ PASS: ${test}${detail ? ' — ' + detail : ''}`);
 }
-
 function fail(test, detail = '') {
   results.push({ status: 'FAIL', test, detail });
   console.log(`  ❌ FAIL: ${test}${detail ? ' — ' + detail : ''}`);
 }
-
 function warn(test, detail = '') {
   results.push({ status: 'WARN', test, detail });
   console.log(`  ⚠️  WARN: ${test}${detail ? ' — ' + detail : ''}`);
 }
 
-async function ensureDemoMode(page) {
-  await page.evaluate(() => {
-    localStorage.setItem('app_mode', 'demo');
-    localStorage.setItem('rentcare:selected-portal', 'owner');
+// ── Supabase mock responses ─────────────────────────────────────────────────
+const MOCK_AUTH_USER = {
+  id: MOCK_USER_ID,
+  aud: 'authenticated',
+  role: 'authenticated',
+  email: 'owner.demo@pgmanager.app',
+  email_confirmed_at: '2024-01-01T00:00:00.000Z',
+  created_at: '2024-01-01T00:00:00.000Z',
+  updated_at: '2024-01-01T00:00:00.000Z',
+  user_metadata: { name: 'Demo Owner', role: 'owner' },
+  app_metadata: { provider: 'email', providers: ['email'] },
+};
+
+const MOCK_PROFILE_ROW = {
+  id: MOCK_USER_ID,
+  email: 'owner.demo@pgmanager.app',
+  full_name: 'Demo Owner',
+  phone: '+919876500001',
+  role: 'owner',
+  owner_scope_id: MOCK_OWNER_SCOPE_ID,
+  pg_name: 'Khush Living',
+  city: 'Bengaluru',
+};
+
+const MOCK_SESSION_TOKEN = {
+  access_token: 'mock-access-token-qa-testing',
+  expires_at: Math.floor(Date.now() / 1000) + 86400,
+  expires_in: 86400,
+  refresh_token: 'mock-refresh-token-qa-testing',
+  token_type: 'bearer',
+  user: MOCK_AUTH_USER,
+};
+
+async function setupMocks(context) {
+  await context.route(`**/${SUPABASE_HOST}/auth/v1/user**`, async route => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(MOCK_AUTH_USER) });
   });
-  await page.reload({ waitUntil: 'networkidle' });
-  await page.waitForTimeout(1500);
+  await context.route(`**/${SUPABASE_HOST}/auth/v1/token**`, async route => {
+    await route.fulfill({
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({
+        access_token: 'mock-access-token-qa-testing',
+        expires_at: Math.floor(Date.now() / 1000) + 86400,
+        expires_in: 86400, refresh_token: 'mock-refresh-token-qa-testing',
+        token_type: 'bearer', user: MOCK_AUTH_USER,
+      }),
+    });
+  });
+  await context.route(`**/${SUPABASE_HOST}/rest/v1/profiles**`, async route => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([MOCK_PROFILE_ROW]) });
+  });
+  await context.route(`**/${SUPABASE_HOST}/rest/v1/users**`, async route => {
+    const method = route.request().method();
+    if (method === 'GET') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([]) });
+    } else {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({}) });
+    }
+  });
 }
 
-async function navigateTo(page, tab) {
-  // Try sidebar button first
-  const selectors = [
-    `[data-tab="${tab}"]`,
-    `button:has-text("${tab}")`,
-    `[aria-label="${tab}"]`,
-  ];
-  for (const sel of selectors) {
-    const el = page.locator(sel).first();
-    if (await el.isVisible({ timeout: 1000 }).catch(() => false)) {
-      await el.click();
-      await page.waitForTimeout(800);
-      return true;
+async function injectSession(page) {
+  await page.evaluate((token) => {
+    localStorage.setItem('sb-krkzklxfczukvllhucsg-auth-token', JSON.stringify(token));
+    localStorage.setItem('app_mode', 'demo');
+    localStorage.removeItem('rentcare:selected-portal');
+  }, MOCK_SESSION_TOKEN);
+}
+
+// ── Navigation helper ────────────────────────────────────────────────────────
+async function clickTab(page, tabName) {
+  const allClickable = page.locator('button, a[role="button"]');
+  const count = await allClickable.count();
+  for (let i = 0; i < count; i++) {
+    const el = allClickable.nth(i);
+    const txt = (await el.innerText().catch(() => '')).trim().toLowerCase();
+    if (txt === tabName.toLowerCase()) {
+      if (await el.isVisible().catch(() => false)) { await el.click(); await page.waitForTimeout(900); return true; }
     }
   }
-  // Fallback: look in sidebar for partial text match
-  const sidebarBtns = page.locator('nav button, aside button, [role="navigation"] button');
-  const count = await sidebarBtns.count();
   for (let i = 0; i < count; i++) {
-    const txt = await sidebarBtns.nth(i).innerText().catch(() => '');
-    if (txt.toLowerCase().includes(tab.toLowerCase())) {
-      await sidebarBtns.nth(i).click();
-      await page.waitForTimeout(800);
-      return true;
+    const el = allClickable.nth(i);
+    const txt = (await el.innerText().catch(() => '')).trim().toLowerCase();
+    if (txt.includes(tabName.toLowerCase())) {
+      if (await el.isVisible().catch(() => false)) { await el.click(); await page.waitForTimeout(900); return true; }
     }
   }
   return false;
 }
 
-// ═══════════════════════════════════════════════════════
-// TEST SUITE 1 — INITIAL LOAD & DEMO MODE
-// ═══════════════════════════════════════════════════════
-async function testInitialLoad(page) {
-  console.log('\n━━━ Suite 1: Initial Load & Demo Mode ━━━');
+async function getMainText(page) {
+  return page.locator('main, [role="main"], #root').innerText().catch(() => '');
+}
 
+async function isVisible(locator, timeout = 2000) {
+  return locator.isVisible({ timeout }).catch(() => false);
+}
+
+// ── SUITE 1: Auth & Load ─────────────────────────────────────────────────────
+async function testAuth(page) {
+  console.log('\n━━━ Suite 1: Auth & Initial Load ━━━');
   await page.goto(BASE, { waitUntil: 'domcontentloaded' });
-  await page.waitForTimeout(2000);
-  await shot(page, 'initial_load');
+  await page.waitForTimeout(800);
+  await injectSession(page);
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.waitForTimeout(3000);
+  await shot(page, '01_post_auth');
 
-  // Set demo mode + owner portal
-  await ensureDemoMode(page);
-  await shot(page, 'demo_mode_loaded');
-
-  // Check we're past auth screen
   const body = await page.content();
-  if (body.includes('dashboard') || body.includes('Dashboard') || body.includes('tenants') || body.includes('RentCare')) {
-    pass('App loads in demo mode');
+  if (!body.includes('Send Magic Link') && !body.includes('Sign In')) {
+    pass('Auth bypass via mock session — past login screen');
   } else {
-    fail('App loads in demo mode', 'Could not determine if past auth');
+    fail('Auth bypass failed', 'Still on login screen after session injection');
   }
 
-  // Check sidebar visible
-  const nav = page.locator('nav, aside, [role="navigation"]').first();
-  if (await nav.isVisible({ timeout: 3000 }).catch(() => false)) {
-    pass('Sidebar/nav visible');
+  const hasSidebar = await page.locator('aside, nav, [class*="sidebar" i]').first().isVisible({ timeout: 2000 }).catch(() => false);
+  const hasNavBtns = await page.locator('button').filter({ hasText: /dashboard|tenants|payments|maintenance/i }).count().then(c => c > 0);
+  if (hasSidebar || hasNavBtns) {
+    pass('App navigation visible');
   } else {
-    warn('Sidebar/nav visible', 'Not found — may be collapsed');
+    warn('Navigation', 'No sidebar or nav buttons found');
   }
 }
 
-// ═══════════════════════════════════════════════════════
-// TEST SUITE 2 — DASHBOARD
-// ═══════════════════════════════════════════════════════
+// ── SUITE 2: Dashboard ───────────────────────────────────────────────────────
 async function testDashboard(page) {
   console.log('\n━━━ Suite 2: Dashboard ━━━');
-
-  const navigated = await navigateTo(page, 'dashboard');
-  await page.waitForTimeout(1000);
-  await shot(page, 'dashboard');
-
-  // Check for stat cards or metrics
-  const hasStats = await page.locator('text=/total|revenue|occupancy|tenant/i').count() > 0;
-  if (hasStats) {
-    pass('Dashboard shows metrics/stats');
-  } else {
-    warn('Dashboard metrics', 'No metric labels found');
-  }
-
-  // Check activity log
-  const hasActivity = await page.locator('text=/activity|recent|event/i').count() > 0;
-  if (hasActivity) {
-    pass('Dashboard shows activity feed');
-  } else {
-    warn('Activity feed', 'No activity section found');
-  }
+  await clickTab(page, 'dashboard');
+  await page.waitForTimeout(1200);
+  await shot(page, '02_dashboard');
+  const text = await getMainText(page);
+  /occupancy|revenue|tenant|₹|\d+\s*%|\d+\s*room/i.test(text) ? pass('Dashboard metrics visible') : warn('Dashboard metrics', 'No metric text found');
+  /activity|recent|event|ticket|payment/i.test(text) ? pass('Dashboard activity feed visible') : warn('Dashboard activity', 'No activity text');
 }
 
-// ═══════════════════════════════════════════════════════
-// TEST SUITE 3 — PAYMENT WORKFLOW
-// ═══════════════════════════════════════════════════════
+// ── SUITE 3: Payments ────────────────────────────────────────────────────────
 async function testPayments(page) {
   console.log('\n━━━ Suite 3: Payment Workflow ━━━');
+  await clickTab(page, 'payments');
+  await page.waitForTimeout(1500);
+  await shot(page, '03_payments_list');
+  const text = await getMainText(page);
 
-  const navigated = await navigateTo(page, 'payments');
-  await page.waitForTimeout(1200);
-  await shot(page, 'payments_list');
+  if (!/payment|rent|₹|due|paid|pending/i.test(text)) { fail('Payments page', 'No payment data'); return; }
+  pass('Payments page has data');
 
-  // Check payment list loads
-  const paymentRows = page.locator('table tbody tr, [data-testid="payment-row"], .payment-row');
-  const rowCount = await paymentRows.count().catch(() => 0);
+  const rows = page.locator('tr, [class*="payment" i]').filter({ hasText: /₹|rent|paid|due|pending/i });
+  const rc = await rows.count();
+  rc > 0 ? pass('Payment rows visible', `${rc} items`) : warn('Payment rows', 'No rows found');
 
-  // Also check for card-based layout
-  const paymentCards = page.locator('[class*="payment"], [class*="Payment"]').filter({ hasText: /rent|₹|\$|paid|pending|due/i });
-  const cardCount = await paymentCards.count().catch(() => 0);
+  const filterTabs = page.locator('[role="tab"], button').filter({ hasText: /all|paid|due|overdue|pending/i });
+  (await filterTabs.count()) > 0 ? pass('Payment filter tabs visible') : warn('Payment filters', 'Not found');
 
-  if (rowCount > 0 || cardCount > 0) {
-    pass('Payment list loaded', `${rowCount} rows / ${cardCount} cards`);
-  } else {
-    warn('Payment list', 'No payment rows/cards found — checking content');
-    const pageText = await page.locator('main, [role="main"], #root').innerText().catch(() => '');
-    if (pageText.toLowerCase().includes('payment') || pageText.toLowerCase().includes('rent')) {
-      pass('Payment page has content', 'Found payment-related text');
+  // Mark as Paid
+  const markBtn = page.locator('button').filter({ hasText: /mark.*paid|collect|record payment/i }).first();
+  if (await isVisible(markBtn)) {
+    pass('Mark as Paid / Collect button visible');
+    await markBtn.click(); await page.waitForTimeout(1000);
+    await shot(page, '03b_mark_paid_action');
+    const dialog = page.locator('[role="dialog"]').first();
+    if (await isVisible(dialog)) {
+      pass('Mark as Paid confirmation dialog opened');
+      const confirmBtn = dialog.locator('button').filter({ hasText: /confirm|yes|mark|paid|save/i }).first();
+      if (await isVisible(confirmBtn)) { await confirmBtn.click(); await page.waitForTimeout(1200); pass('Payment confirmation submitted'); }
+      await page.keyboard.press('Escape'); await page.waitForTimeout(400);
     } else {
-      fail('Payment list', 'No payment content visible');
+      warn('Mark as Paid dialog', 'No dialog — inline action');
+    }
+  } else {
+    warn('Mark as Paid button', 'Not found (may need "pending" filter)');
+    // Try pending filter
+    const pendingTab = page.locator('button, [role="tab"]').filter({ hasText: /pending|due/i }).first();
+    if (await isVisible(pendingTab, 1000)) {
+      await pendingTab.click(); await page.waitForTimeout(800);
+      await shot(page, '03_pending_filter');
+      const btn2 = page.locator('button').filter({ hasText: /mark.*paid|collect/i }).first();
+      if (await isVisible(btn2, 1500)) { pass('Mark as Paid visible after pending filter'); }
     }
   }
 
-  // Try to find and click a "Mark as Paid" or status action
-  const markPaidBtn = page.locator('button:has-text("Mark as Paid"), button:has-text("mark paid"), [data-action="mark-paid"]').first();
-  if (await markPaidBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
-    await markPaidBtn.click();
-    await page.waitForTimeout(1000);
-    await shot(page, 'payment_mark_paid_clicked');
-    // Check for confirmation dialog or success
-    const dialog = page.locator('[role="dialog"], .modal, [data-radix-dialog]');
-    const hasDialog = await dialog.isVisible({ timeout: 1500 }).catch(() => false);
-    if (hasDialog) {
-      pass('Mark as Paid opens confirmation dialog');
-      // Confirm
-      const confirmBtn = page.locator('button:has-text("Confirm"), button:has-text("Yes"), button:has-text("Mark Paid")').first();
-      if (await confirmBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
-        await confirmBtn.click();
-        await page.waitForTimeout(1000);
-        pass('Payment marked as paid (confirmed)');
-      }
-      // Dismiss if still open
-      await page.keyboard.press('Escape');
-      await page.waitForTimeout(500);
-    } else {
-      pass('Mark as Paid action triggered (no dialog)');
-    }
-  } else {
-    // Try clicking a payment item first
-    const firstPayment = page.locator('table tbody tr, [class*="payment-item"], [class*="PaymentRow"]').first();
-    if (await firstPayment.isVisible({ timeout: 2000 }).catch(() => false)) {
-      await firstPayment.click();
-      await page.waitForTimeout(800);
-      await shot(page, 'payment_detail');
-      pass('Payment item clickable');
-      await page.keyboard.press('Escape');
-      await page.waitForTimeout(400);
-    } else {
-      warn('Mark as Paid button', 'Not found — may require specific filter state');
-    }
-  }
+  // Receipt
+  const receiptBtn = page.locator('button').filter({ hasText: /receipt|invoice|download/i }).first();
+  if (await isVisible(receiptBtn)) {
+    pass('Receipt/Invoice button visible');
+    await receiptBtn.click(); await page.waitForTimeout(800);
+    await shot(page, '03c_receipt'); await page.keyboard.press('Escape'); await page.waitForTimeout(400);
+  } else { warn('Receipt button', 'Not found'); }
 
-  // Check for export button
-  const exportBtn = page.locator('button:has-text("Export"), button:has-text("CSV"), button:has-text("Download")').first();
-  if (await exportBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
-    pass('Payment export button visible');
-    await exportBtn.click();
-    await page.waitForTimeout(800);
-    await shot(page, 'payment_export_clicked');
-    await page.keyboard.press('Escape');
-    await page.waitForTimeout(400);
-  } else {
-    warn('Payment export', 'Export/CSV button not found');
-  }
+  // Export CSV
+  const exportBtn = page.locator('button').filter({ hasText: /export|csv/i }).first();
+  if (await isVisible(exportBtn)) {
+    pass('Export CSV button visible');
+    await exportBtn.click(); await page.waitForTimeout(800);
+    await shot(page, '03d_export'); await page.keyboard.press('Escape'); await page.waitForTimeout(400);
+  } else { warn('Export CSV', 'Not found'); }
 
-  await shot(page, 'payments_final');
+  await shot(page, '03_payments_final');
 }
 
-// ═══════════════════════════════════════════════════════
-// TEST SUITE 4 — TENANT WORKFLOW
-// ═══════════════════════════════════════════════════════
+// ── SUITE 4: Tenants ─────────────────────────────────────────────────────────
 async function testTenants(page) {
   console.log('\n━━━ Suite 4: Tenant Workflow ━━━');
+  await clickTab(page, 'tenants');
+  await page.waitForTimeout(1500);
+  await shot(page, '04_tenants_list');
+  const text = await getMainText(page);
 
-  const navigated = await navigateTo(page, 'tenants');
-  await page.waitForTimeout(1200);
-  await shot(page, 'tenants_list');
+  if (!/tenant|resident|room/i.test(text)) { fail('Tenants page', 'No tenant data'); return; }
+  pass('Tenants page loaded');
 
-  // Check tenant list
-  const tenantContent = await page.locator('main, [role="main"], #root').innerText().catch(() => '');
-  if (tenantContent.toLowerCase().includes('tenant') || tenantContent.toLowerCase().includes('room')) {
-    pass('Tenant list page loaded');
-  } else {
-    warn('Tenant list', 'No tenant content detected');
-  }
+  const items = page.locator('tr, [class*="tenant" i]').filter({ hasText: /room|floor|₹|active|notice/i });
+  const count = await items.count();
+  count > 0 ? pass('Tenant items visible', `${count}`) : warn('Tenant items', 'No rows found');
 
-  // Count visible tenant items
-  const tenantRows = page.locator('table tbody tr, [class*="tenant"], [class*="Tenant"]').filter({ hasNotText: /header|title|label/i });
-  const count = await tenantRows.count().catch(() => 0);
-  if (count > 0) {
-    pass('Tenant rows visible', `${count} items`);
-  } else {
-    warn('Tenant rows', 'No rows found — checking for card layout');
-  }
-
-  // Try "Add Tenant" button
-  const addBtn = page.locator('button:has-text("Add Tenant"), button:has-text("Add New"), button:has-text("New Tenant"), button:has-text("+ Add")').first();
-  if (await addBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
-    pass('Add Tenant button visible');
-    await addBtn.click();
-    await page.waitForTimeout(1000);
-    await shot(page, 'add_tenant_dialog');
-
-    const dialog = page.locator('[role="dialog"], .modal, [data-radix-dialog-content]');
-    if (await dialog.isVisible({ timeout: 1500 }).catch(() => false)) {
+  // Add Tenant
+  const addBtn = page.locator('button').filter({ hasText: /add tenant|new tenant|\+/i }).first();
+  if (await isVisible(addBtn)) {
+    pass('Add Tenant button visible'); await addBtn.click(); await page.waitForTimeout(1000);
+    await shot(page, '04b_add_tenant_dialog');
+    const dialog = page.locator('[role="dialog"]').first();
+    if (await isVisible(dialog)) {
       pass('Add Tenant dialog opens');
-      await page.keyboard.press('Escape');
-      await page.waitForTimeout(500);
-    } else {
-      warn('Add Tenant dialog', 'Dialog did not open after click');
-    }
-  } else {
-    warn('Add Tenant button', 'Not found');
-  }
+      const inputCount = await dialog.locator('input').count();
+      pass('Add Tenant form fields', `${inputCount} inputs`);
+      await page.keyboard.press('Escape'); await page.waitForTimeout(500);
+    } else { warn('Add Tenant dialog', 'Did not open'); }
+  } else { warn('Add Tenant button', 'Not found'); }
 
-  // Try "Import CSV" or "Bulk Import" button
-  const importBtn = page.locator('button:has-text("Import"), button:has-text("CSV"), button:has-text("Bulk")').first();
-  if (await importBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
-    pass('CSV Import button visible');
-    await importBtn.click();
-    await page.waitForTimeout(800);
-    await shot(page, 'csv_import_dialog');
-    await page.keyboard.press('Escape');
-    await page.waitForTimeout(400);
-  } else {
-    warn('CSV Import button', 'Not found in tenant view');
-  }
+  // CSV Import
+  const importBtn = page.locator('button').filter({ hasText: /import|csv|bulk/i }).first();
+  if (await isVisible(importBtn)) {
+    pass('CSV Import button visible'); await importBtn.click(); await page.waitForTimeout(1000);
+    await shot(page, '04c_csv_import');
+    await isVisible(page.locator('[role="dialog"]').first()) ? pass('CSV Import dialog opens') : warn('CSV Import dialog', 'Did not open');
+    await page.keyboard.press('Escape'); await page.waitForTimeout(500);
+  } else { warn('CSV Import', 'Not found'); }
 
-  // Click first tenant to check detail view
-  const firstTenant = page.locator('table tbody tr, [class*="tenant-row"], [class*="TenantCard"]').first();
-  if (await firstTenant.isVisible({ timeout: 2000 }).catch(() => false)) {
-    await firstTenant.click();
-    await page.waitForTimeout(1000);
-    await shot(page, 'tenant_detail');
-
-    const detailContent = await page.locator('main, [role="main"]').innerText().catch(() => '');
-    if (detailContent.includes('room') || detailContent.includes('Room') || detailContent.includes('status') || detailContent.includes('Status')) {
-      pass('Tenant detail view shows lifecycle data');
-    } else {
-      warn('Tenant detail view', 'Limited lifecycle data visible');
-    }
-
-    // Check lifecycle status selector
-    const statusSelect = page.locator('select, [role="combobox"]').filter({ hasText: /active|notice|vacating|inactive/i }).first();
-    if (await statusSelect.isVisible({ timeout: 1500 }).catch(() => false)) {
-      pass('Lifecycle status selector visible in tenant detail');
-    } else {
-      warn('Lifecycle status selector', 'Not found in detail view');
-    }
-
-    await page.keyboard.press('Escape');
+  // Tenant detail
+  const firstRow = page.locator('tr, [class*="tenant-row" i]').filter({ hasText: /room|floor|₹|active/i }).first();
+  if (await isVisible(firstRow, 2000)) {
+    await firstRow.click(); await page.waitForTimeout(1200);
+    await shot(page, '04d_tenant_detail');
+    const det = await getMainText(page);
+    /room|lease|payment|history|floor/i.test(det) ? pass('Tenant detail shows lifecycle data') : warn('Tenant detail', 'Limited detail data');
+    const lifecycle = page.locator('select, [role="combobox"], [class*="status" i], [class*="badge" i]').filter({ hasText: /active|notice|vacating|inactive/i }).first();
+    await isVisible(lifecycle, 1500) ? pass('Lifecycle status visible') : warn('Lifecycle status', 'Not found in detail');
+    const backBtn = page.locator('button').filter({ hasText: /back|← tenant/i }).first();
+    if (await isVisible(backBtn, 1000)) await backBtn.click();
     await page.waitForTimeout(500);
-  }
+  } else { warn('Tenant detail', 'No clickable row'); }
 
-  await shot(page, 'tenants_final');
+  await shot(page, '04_tenants_final');
 }
 
-// ═══════════════════════════════════════════════════════
-// TEST SUITE 5 — MAINTENANCE WORKFLOW
-// ═══════════════════════════════════════════════════════
+// ── SUITE 5: Maintenance ─────────────────────────────────────────────────────
 async function testMaintenance(page) {
   console.log('\n━━━ Suite 5: Maintenance Workflow ━━━');
+  await clickTab(page, 'maintenance');
+  await page.waitForTimeout(1500);
+  await shot(page, '05_maintenance_list');
+  const text = await getMainText(page);
 
-  const navigated = await navigateTo(page, 'maintenance');
-  await page.waitForTimeout(1200);
-  await shot(page, 'maintenance_list');
+  if (!/ticket|maintenance|issue|repair/i.test(text)) { fail('Maintenance page', 'No ticket data'); return; }
+  pass('Maintenance page loaded with tickets');
 
-  const content = await page.locator('main, [role="main"], #root').innerText().catch(() => '');
-  if (content.toLowerCase().includes('ticket') || content.toLowerCase().includes('maintenance') || content.toLowerCase().includes('issue')) {
-    pass('Maintenance page loaded with ticket content');
-  } else {
-    warn('Maintenance page', 'No ticket content detected');
-  }
+  const tickets = page.locator('[class*="ticket" i], tbody tr').filter({ hasText: /open|progress|resolved|pending|room/i });
+  const tc = await tickets.count();
+  tc > 0 ? pass('Tickets visible', `${tc}`) : warn('Tickets', 'No ticket rows found');
 
-  // Check ticket count
-  const tickets = page.locator('[class*="ticket"], [class*="Ticket"], table tbody tr').filter({ hasNotText: /header/i });
-  const ticketCount = await tickets.count().catch(() => 0);
-  if (ticketCount > 0) {
-    pass('Maintenance tickets visible', `${ticketCount} items`);
-  } else {
-    warn('Maintenance tickets', 'No ticket items found');
-  }
+  const statusTabs = page.locator('[role="tab"], button').filter({ hasText: /all|open|progress|resolved|closed/i });
+  (await statusTabs.count()) > 0 ? pass('Status filter tabs visible') : warn('Status filters', 'Not found');
 
-  // Try "Create Ticket" / "New Ticket" button
-  const newTicketBtn = page.locator('button:has-text("New Ticket"), button:has-text("Create Ticket"), button:has-text("Add Ticket"), button:has-text("Report")').first();
-  if (await newTicketBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
-    pass('Create Ticket button visible');
-    await newTicketBtn.click();
-    await page.waitForTimeout(1000);
-    await shot(page, 'create_ticket_dialog');
-
-    const dialog = page.locator('[role="dialog"], [data-radix-dialog-content]');
-    if (await dialog.isVisible({ timeout: 1500 }).catch(() => false)) {
+  // Create ticket
+  const newBtn = page.locator('button').filter({ hasText: /new ticket|create|add ticket|report|raise/i }).first();
+  if (await isVisible(newBtn)) {
+    pass('Create Ticket button visible'); await newBtn.click(); await page.waitForTimeout(1000);
+    await shot(page, '05b_create_ticket');
+    const dialog = page.locator('[role="dialog"]').first();
+    if (await isVisible(dialog)) {
       pass('Create Ticket dialog opens');
+      const titleInput = dialog.locator('input').first();
+      if (await isVisible(titleInput, 1000)) { await titleInput.fill('QA Test — Plumbing Issue R101'); pass('Title fillable'); }
+      const descInput = dialog.locator('textarea').first();
+      if (await isVisible(descInput, 1000)) { await descInput.fill('Faucet dripping in bathroom.'); pass('Description fillable'); }
+      const priorityEl = dialog.locator('select, [role="combobox"]').filter({ hasText: /low|medium|high|urgent/i }).first();
+      await isVisible(priorityEl, 1000) ? pass('Priority selector visible') : warn('Priority selector', 'Not found');
+      await shot(page, '05c_ticket_filled');
+      await page.keyboard.press('Escape'); await page.waitForTimeout(500);
+    } else { warn('Create Ticket dialog', 'Did not open'); }
+  } else { warn('Create Ticket button', 'Not found'); }
 
-      // Fill title
-      const titleInput = dialog.locator('input[placeholder*="title" i], input[name*="title" i], input[placeholder*="issue" i]').first();
-      if (await titleInput.isVisible({ timeout: 1000 }).catch(() => false)) {
-        await titleInput.fill('QA Test Ticket — Plumbing Issue');
-        pass('Ticket title field fillable');
-      }
+  // Ticket detail + thread
+  const firstTicket = page.locator('[class*="ticket" i], tbody tr').filter({ hasText: /open|pending|room/i }).first();
+  if (await isVisible(firstTicket, 2000)) {
+    await firstTicket.click(); await page.waitForTimeout(1200);
+    await shot(page, '05d_ticket_detail');
+    const det = await getMainText(page);
+    /thread|note|comment|update|message/i.test(det) ? pass('Thread/notes section visible') : warn('Thread', 'No thread content');
+    const statusCtrl = page.locator('select, [role="combobox"], button').filter({ hasText: /open|progress|resolved|closed/i }).first();
+    await isVisible(statusCtrl, 1500) ? pass('Status control in detail') : warn('Status control', 'Not found');
+    const noteInput = page.locator('input, textarea').filter({ hasText: '' }).last();
+    if (await isVisible(noteInput, 1000)) { await noteInput.fill('QA note'); pass('Note input fillable'); }
+    await page.keyboard.press('Escape'); await page.waitForTimeout(500);
+  } else { warn('Ticket detail', 'No clickable ticket'); }
 
-      // Fill description
-      const descInput = dialog.locator('textarea, input[placeholder*="desc" i], input[placeholder*="detail" i]').first();
-      if (await descInput.isVisible({ timeout: 1000 }).catch(() => false)) {
-        await descInput.fill('QA automated test: faucet dripping in bathroom.');
-        pass('Ticket description field fillable');
-      }
-
-      await shot(page, 'create_ticket_filled');
-      await page.keyboard.press('Escape');
-      await page.waitForTimeout(500);
-    } else {
-      warn('Create Ticket dialog', 'Did not open');
-    }
-  } else {
-    warn('Create Ticket button', 'Not found');
-  }
-
-  // Click first ticket to view detail + thread
-  const firstTicket = tickets.first();
-  if (await firstTicket.isVisible({ timeout: 2000 }).catch(() => false)) {
-    await firstTicket.click();
-    await page.waitForTimeout(1000);
-    await shot(page, 'ticket_detail');
-
-    // Check for thread/notes section
-    const threadSection = page.locator('[class*="thread"], [class*="Thread"], [class*="note"], [class*="Note"], text=/thread|note|comment|update/i').first();
-    if (await threadSection.isVisible({ timeout: 2000 }).catch(() => false)) {
-      pass('Ticket thread/notes section visible');
-    } else {
-      warn('Ticket thread', 'No thread section found in detail');
-    }
-
-    // Check status change
-    const statusEl = page.locator('[class*="status"], select, [role="combobox"]').filter({ hasText: /open|progress|resolved|closed|pending/i }).first();
-    if (await statusEl.isVisible({ timeout: 1500 }).catch(() => false)) {
-      pass('Ticket status control visible in detail');
-    } else {
-      warn('Ticket status control', 'Not found in detail view');
-    }
-
-    await page.keyboard.press('Escape');
-    await page.waitForTimeout(500);
-  }
-
-  await shot(page, 'maintenance_final');
+  await shot(page, '05_maintenance_final');
 }
 
-// ═══════════════════════════════════════════════════════
-// TEST SUITE 6 — ANNOUNCEMENT WORKFLOW
-// ═══════════════════════════════════════════════════════
+// ── SUITE 6: Announcements ───────────────────────────────────────────────────
 async function testAnnouncements(page) {
   console.log('\n━━━ Suite 6: Announcement Workflow ━━━');
+  await clickTab(page, 'announcements');
+  await page.waitForTimeout(1500);
+  await shot(page, '06_announcements_list');
+  const text = await getMainText(page);
 
-  const navigated = await navigateTo(page, 'announcements');
-  await page.waitForTimeout(1200);
-  await shot(page, 'announcements_list');
+  if (!/announcement|notice|broadcast|post/i.test(text)) { fail('Announcements page', 'No data'); return; }
+  pass('Announcements page loaded');
 
-  const content = await page.locator('main, [role="main"], #root').innerText().catch(() => '');
-  if (content.toLowerCase().includes('announcement') || content.toLowerCase().includes('notice') || content.toLowerCase().includes('broadcast')) {
-    pass('Announcements page loaded');
-  } else {
-    warn('Announcements page', 'No announcement content detected');
-  }
+  const pinnedEl = page.locator('[class*="pin" i]').first();
+  await isVisible(pinnedEl, 1500) ? pass('Pin indicator visible') : warn('Pin indicator', 'Not visible');
 
-  // Check for pinned announcements indicator
-  const pinned = page.locator('[class*="pin"], [class*="Pin"], text=/pinned/i').first();
-  if (await pinned.isVisible({ timeout: 2000 }).catch(() => false)) {
-    pass('Pinned announcements indicator visible');
-  } else {
-    warn('Pinned announcements', 'Pin indicator not visible');
-  }
-
-  // Try "New Announcement" / "Create" button
-  const createBtn = page.locator('button:has-text("New Announcement"), button:has-text("Create"), button:has-text("Add Announcement"), button:has-text("Post")').first();
-  if (await createBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
-    pass('Create Announcement button visible');
-    await createBtn.click();
-    await page.waitForTimeout(1000);
-    await shot(page, 'create_announcement_dialog');
-
-    const dialog = page.locator('[role="dialog"], [data-radix-dialog-content]');
-    if (await dialog.isVisible({ timeout: 1500 }).catch(() => false)) {
+  const createBtn = page.locator('button').filter({ hasText: /new|create|add|post/i }).first();
+  if (await isVisible(createBtn)) {
+    pass('Create Announcement button visible'); await createBtn.click(); await page.waitForTimeout(1000);
+    await shot(page, '06b_create_dialog');
+    const dialog = page.locator('[role="dialog"]').first();
+    if (await isVisible(dialog)) {
       pass('Create Announcement dialog opens');
-
-      // Check for WhatsApp toggle
-      const waToggle = dialog.locator('[role="switch"], input[type="checkbox"]').filter({ hasText: /whatsapp/i }).first();
-      // Also check by proximity to WhatsApp label
+      const titleInput = dialog.locator('input').first();
+      if (await isVisible(titleInput, 1000)) { await titleInput.fill('Water Cut Tomorrow 10am-2pm'); pass('Title fillable'); }
       const waLabel = dialog.locator('text=/whatsapp/i').first();
-      if (await waLabel.isVisible({ timeout: 1500 }).catch(() => false)) {
-        pass('WhatsApp broadcast option visible in announcement dialog');
-      } else {
-        warn('WhatsApp toggle', 'Not found in announcement dialog');
-      }
+      if (await isVisible(waLabel, 1500)) {
+        pass('WhatsApp option visible');
+        const waSwitch = dialog.locator('[role="switch"], input[type="checkbox"]').first();
+        if (await isVisible(waSwitch, 1000)) { await waSwitch.click(); await page.waitForTimeout(400); pass('WhatsApp toggle clicked'); }
+      } else { warn('WhatsApp toggle', 'Not found'); }
+      const targetEl = dialog.locator('select, [role="combobox"]').first();
+      await isVisible(targetEl, 1500) ? pass('Property/floor targeting visible') : warn('Targeting selector', 'Not found');
+      await shot(page, '06c_announcement_filled');
+      await page.keyboard.press('Escape'); await page.waitForTimeout(500);
+    } else { warn('Create dialog', 'Did not open'); }
+  } else { warn('Create button', 'Not found'); }
 
-      // Check property/floor targeting
-      const targetSelect = dialog.locator('select, [role="combobox"]').filter({ hasText: /property|floor|all/i }).first();
-      // Also check for any select/dropdown in dialog
-      const anySelect = dialog.locator('select, [role="combobox"]').first();
-      if (await anySelect.isVisible({ timeout: 1500 }).catch(() => false)) {
-        pass('Targeting selector visible in announcement form');
-      } else {
-        warn('Announcement targeting', 'No property/floor selector found');
-      }
-
-      await shot(page, 'announcement_form_filled');
-      await page.keyboard.press('Escape');
-      await page.waitForTimeout(500);
-    } else {
-      warn('Create Announcement dialog', 'Did not open');
-    }
-  } else {
-    warn('Create Announcement button', 'Not found');
-  }
-
-  await shot(page, 'announcements_final');
+  await shot(page, '06_announcements_final');
 }
 
-// ═══════════════════════════════════════════════════════
-// TEST SUITE 7 — NOTIFICATION WORKFLOW
-// ═══════════════════════════════════════════════════════
+// ── SUITE 7: Notifications ───────────────────────────────────────────────────
 async function testNotifications(page) {
   console.log('\n━━━ Suite 7: Notification Workflow ━━━');
 
-  // Check notification bell in header
-  const bell = page.locator('[class*="bell"], [aria-label*="notification" i], [class*="NotificationBell"], button[class*="notification"]').first();
-  if (await bell.isVisible({ timeout: 3000 }).catch(() => false)) {
-    pass('Notification bell visible in header');
-
-    // Check for unread count badge
-    const badge = page.locator('[class*="badge"], [class*="Badge"], [class*="count"]').first();
-    if (await badge.isVisible({ timeout: 1500 }).catch(() => false)) {
-      const badgeText = await badge.innerText().catch(() => '');
-      pass('Notification unread count badge visible', `count: "${badgeText}"`);
-    } else {
-      warn('Notification badge', 'No unread count badge visible');
-    }
-
-    // Click bell to open notification panel
-    await bell.click();
-    await page.waitForTimeout(800);
-    await shot(page, 'notification_panel');
-
-    const panel = page.locator('[class*="dropdown"], [class*="Dropdown"], [class*="popover"], [class*="Popover"], [role="listbox"], [role="menu"]').first();
-    if (await panel.isVisible({ timeout: 2000 }).catch(() => false)) {
-      pass('Notification panel opens on bell click');
-
-      // Check mark all read
-      const markAllRead = page.locator('button:has-text("Mark all"), button:has-text("mark all read"), button:has-text("Clear all")').first();
-      if (await markAllRead.isVisible({ timeout: 1500 }).catch(() => false)) {
-        pass('Mark all read button visible');
-      } else {
-        warn('Mark all read', 'Button not found in notification panel');
-      }
-
-      await page.keyboard.press('Escape');
-      await page.waitForTimeout(400);
-    } else {
-      warn('Notification panel', 'Panel did not open after bell click');
-    }
+  const bell = page.locator('[class*="NotificationBell" i], [aria-label*="notification" i]').first();
+  if (await isVisible(bell, 2000)) {
+    pass('Notification bell visible');
+    const badge = bell.locator('span').filter({ hasText: /^\d+$/ }).first();
+    if (await isVisible(badge, 1000)) {
+      pass('Unread count badge visible', `count: ${await badge.innerText().catch(() => '?')}`);
+    } else { warn('Unread badge', 'No numeric badge (may be zero)'); }
+    await bell.click(); await page.waitForTimeout(800);
+    await shot(page, '07_notification_panel');
+    const panel = page.locator('[class*="dropdown" i], [class*="popover" i], [role="menu"]').first();
+    if (await isVisible(panel, 2000)) {
+      pass('Notification panel opens');
+      const markAllBtn = panel.locator('button').filter({ hasText: /mark all|read all|clear/i }).first();
+      if (await isVisible(markAllBtn, 1000)) { pass('Mark all read button visible'); await markAllBtn.click(); await page.waitForTimeout(500); pass('Mark all read clicked'); }
+      else { warn('Mark all read', 'Not found'); }
+    } else { warn('Notification panel', 'Did not open'); }
+    await page.keyboard.press('Escape'); await page.waitForTimeout(400);
   } else {
-    // Try navigating to notifications tab
-    const navigated = await navigateTo(page, 'notifications');
+    const navigated = await clickTab(page, 'notifications');
     await page.waitForTimeout(800);
-    await shot(page, 'notifications_page');
-
-    const content = await page.locator('main, [role="main"], #root').innerText().catch(() => '');
-    if (content.toLowerCase().includes('notification')) {
-      pass('Notifications page accessible via nav');
-    } else {
-      warn('Notification bell', 'Bell not in header, notifications page also unclear');
-    }
+    await shot(page, '07_notifications_tab');
+    /notification|alert/i.test(await getMainText(page)) ? pass('Notifications via tab') : warn('Notifications', 'Not found in header or tab');
   }
-
-  await shot(page, 'notifications_final');
+  await shot(page, '07_notifications_final');
 }
 
-// ═══════════════════════════════════════════════════════
-// TEST SUITE 8 — MODE TOGGLE & CROSS-MODULE SYNC
-// ═══════════════════════════════════════════════════════
-async function testModeToggle(page) {
-  console.log('\n━━━ Suite 8: Mode Toggle & Cross-Module ━━━');
-
-  // Check for demo/live mode toggle
-  const modeToggle = page.locator('[class*="mode"], [class*="Mode"], button:has-text("Demo"), button:has-text("Live"), [data-testid*="mode"]').first();
-  if (await modeToggle.isVisible({ timeout: 2000 }).catch(() => false)) {
-    pass('Mode toggle visible');
-    const toggleText = await modeToggle.innerText().catch(() => '');
-    pass('Mode toggle state', `showing: "${toggleText}"`);
-  } else {
-    warn('Mode toggle', 'Not visible in current view');
-  }
-
-  // Verify demo mode data loads across modules by checking dashboard has counts
-  await navigateTo(page, 'dashboard');
-  await page.waitForTimeout(1000);
-
-  const dashText = await page.locator('main, [role="main"], #root').innerText().catch(() => '');
-  const hasNumbers = /\d+/.test(dashText);
-  if (hasNumbers) {
-    pass('Dashboard shows numeric data (counts/metrics populated)');
-  } else {
-    warn('Dashboard numbers', 'No numeric data detected on dashboard');
-  }
-
-  await shot(page, 'mode_toggle_final');
-}
-
-// ═══════════════════════════════════════════════════════
-// TEST SUITE 9 — PROPERTIES VIEW
-// ═══════════════════════════════════════════════════════
+// ── SUITE 8: Properties ──────────────────────────────────────────────────────
 async function testProperties(page) {
-  console.log('\n━━━ Suite 9: Properties ━━━');
-
-  const navigated = await navigateTo(page, 'properties');
-  await page.waitForTimeout(1200);
-  await shot(page, 'properties');
-
-  const content = await page.locator('main, [role="main"], #root').innerText().catch(() => '');
-  if (content.toLowerCase().includes('propert') || content.toLowerCase().includes('room')) {
-    pass('Properties page loaded');
-  } else {
-    warn('Properties page', 'No property content detected');
-  }
-
-  const propCards = page.locator('[class*="property"], [class*="Property"]').filter({ hasNotText: /header/i });
-  const propCount = await propCards.count().catch(() => 0);
-  if (propCount > 0) {
-    pass('Property cards visible', `${propCount} items`);
-  } else {
-    warn('Property cards', 'No cards found');
-  }
+  console.log('\n━━━ Suite 8: Properties ━━━');
+  await clickTab(page, 'properties');
+  await page.waitForTimeout(1500);
+  await shot(page, '08_properties');
+  const text = await getMainText(page);
+  if (!/propert|room|floor|pg/i.test(text)) { fail('Properties page', 'No data'); return; }
+  pass('Properties page loaded');
+  const props = page.locator('[class*="property" i], [class*="card" i]').filter({ hasText: /room|floor|₹|occupied|vacant/i });
+  const pc = await props.count();
+  pc > 0 ? pass('Property cards visible', `${pc}`) : warn('Property cards', 'No cards');
 }
 
-// ═══════════════════════════════════════════════════════
-// MAIN RUN
-// ═══════════════════════════════════════════════════════
-(async () => {
-  const browser = await chromium.launch({ headless: false, slowMo: 100 });
-  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-  const page = await ctx.newPage();
+// ── SUITE 9: Mode Toggle ─────────────────────────────────────────────────────
+async function testModeToggle(page) {
+  console.log('\n━━━ Suite 9: Demo/Live Mode Toggle ━━━');
+  await clickTab(page, 'dashboard');
+  await page.waitForTimeout(800);
+  const demoBtn = page.locator('button').filter({ hasText: /^Demo$/ }).first();
+  if (await isVisible(demoBtn, 2000)) {
+    pass('Demo/Live mode toggle visible');
+    const pressed = await demoBtn.getAttribute('aria-pressed').catch(() => null);
+    pass('Demo mode state', `aria-pressed=${pressed}`);
+  } else { warn('Mode toggle', 'Not found'); }
+  await shot(page, '09_mode_toggle');
+}
 
-  // Capture console errors
+// ── SUITE 10: Cross-Module Checks ─────────────────────────────────────────────
+async function testCrossModule(page) {
+  console.log('\n━━━ Suite 10: Cross-Module Consistency ━━━');
+  await clickTab(page, 'dashboard');
+  await page.waitForTimeout(1000);
+  const text = await getMainText(page);
+  /\d+/.test(text) ? pass('Dashboard shows numeric counts') : warn('Dashboard numbers', 'No numerics');
+  const propSelector = page.locator('select, [role="combobox"]').filter({ hasText: /property|all propert|khush/i }).first();
+  await isVisible(propSelector, 2000) ? pass('Property selector visible (multi-property support)') : warn('Property selector', 'Not found');
+  await shot(page, '10_cross_module');
+}
+
+// ── MAIN ─────────────────────────────────────────────────────────────────────
+(async () => {
+  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-dev-shm-usage'] });
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, ignoreHTTPSErrors: true });
+  await setupMocks(context);
+  const page = await context.newPage();
+
   const consoleErrors = [];
-  page.on('console', msg => {
-    if (msg.type() === 'error') consoleErrors.push(msg.text());
+  const networkErrors = [];
+  page.on('console', msg => { if (msg.type() === 'error') consoleErrors.push(msg.text()); });
+  page.on('pageerror', err => consoleErrors.push(`PAGE: ${err.message}`));
+  page.on('requestfailed', req => {
+    const url = req.url();
+    if (!url.includes('supabase.co') && !url.includes('fonts.googleapis') && !url.includes('ws://')) {
+      networkErrors.push(`${req.method()} ${url} — ${req.failure()?.errorText}`);
+    }
   });
-  page.on('pageerror', err => consoleErrors.push(`PAGE ERROR: ${err.message}`));
 
   try {
-    await testInitialLoad(page);
+    await testAuth(page);
     await testDashboard(page);
     await testPayments(page);
     await testTenants(page);
     await testMaintenance(page);
     await testAnnouncements(page);
     await testNotifications(page);
-    await testModeToggle(page);
     await testProperties(page);
+    await testModeToggle(page);
+    await testCrossModule(page);
   } catch (err) {
     fail('Test runner crash', err.message);
-    await shot(page, 'crash_state').catch(() => {});
+    console.error(err);
+    await shot(page, 'CRASH').catch(() => {});
   } finally {
     await browser.close();
   }
 
-  // ── REPORT ──────────────────────────────────────────
-  console.log('\n' + '═'.repeat(60));
-  console.log('QA REPORT SUMMARY');
-  console.log('═'.repeat(60));
-
+  // ── REPORT ────────────────────────────────────────────────────────────────
+  console.log('\n' + '═'.repeat(65));
+  console.log('                   QA REPORT SUMMARY');
+  console.log('═'.repeat(65));
   const passed = results.filter(r => r.status === 'PASS');
   const failed = results.filter(r => r.status === 'FAIL');
   const warned = results.filter(r => r.status === 'WARN');
 
-  console.log(`\nTotal: ${results.length} | ✅ ${passed.length} PASS | ❌ ${failed.length} FAIL | ⚠️  ${warned.length} WARN`);
+  console.log(`\n  ✅ PASS : ${passed.length}`);
+  console.log(`  ❌ FAIL : ${failed.length}`);
+  console.log(`  ⚠️  WARN : ${warned.length}`);
+  console.log(`  Total  : ${results.length}`);
 
   if (failed.length > 0) {
-    console.log('\n❌ FAILURES:');
-    failed.forEach(r => console.log(`  - ${r.test}: ${r.detail}`));
+    console.log('\n── FAILURES ──────────────────────────────────────────────────');
+    failed.forEach(r => console.log(`  ❌ ${r.test}: ${r.detail}`));
   }
-
   if (warned.length > 0) {
-    console.log('\n⚠️  WARNINGS (missing/unclear):');
-    warned.forEach(r => console.log(`  - ${r.test}: ${r.detail}`));
+    console.log('\n── WARNINGS ──────────────────────────────────────────────────');
+    warned.forEach(r => console.log(`  ⚠️  ${r.test}: ${r.detail}`));
   }
-
   if (consoleErrors.length > 0) {
-    console.log(`\n🔴 CONSOLE ERRORS (${consoleErrors.length}):`);
-    consoleErrors.slice(0, 20).forEach(e => console.log(`  - ${e}`));
+    console.log(`\n── CONSOLE ERRORS (${consoleErrors.length}) ──────────────────────────────────`);
+    consoleErrors.slice(0, 20).forEach(e => console.log(`  🔴 ${e.substring(0, 130)}`));
   } else {
-    console.log('\n✅ No console errors detected');
+    console.log('\n  ✅ No browser console errors');
+  }
+  if (networkErrors.length > 0) {
+    console.log(`\n── NETWORK FAILURES (${networkErrors.length}) ────────────────────────────────`);
+    networkErrors.slice(0, 10).forEach(e => console.log(`  🔌 ${e}`));
   }
 
-  console.log(`\n📁 Screenshots saved to: ${SHOTS_DIR}`);
-  console.log('═'.repeat(60));
+  console.log(`\n📁 Screenshots: ${SHOTS_DIR}`);
+  console.log('═'.repeat(65));
 
-  // Write JSON report
-  const report = {
-    timestamp: new Date().toISOString(),
-    summary: { total: results.length, pass: passed.length, fail: failed.length, warn: warned.length },
-    results,
-    consoleErrors,
-  };
+  const report = { timestamp: new Date().toISOString(), summary: { total: results.length, pass: passed.length, fail: failed.length, warn: warned.length }, results, consoleErrors, networkErrors };
   fs.writeFileSync(path.join(__dirname, 'qa-report.json'), JSON.stringify(report, null, 2));
-  console.log('📄 Full report: qa-report.json');
+  console.log('📄 JSON report: qa-report.json\n');
 })();

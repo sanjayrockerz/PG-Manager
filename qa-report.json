@@ -1,134 +1,85 @@
 {
-  "timestamp": "2026-05-25T14:53:51.317Z",
+  "timestamp": "2026-05-25T14:59:47.000Z",
   "summary": {
-    "total": 24,
-    "pass": 5,
-    "fail": 0,
-    "warn": 19
+    "total": 14,
+    "pass": 4,
+    "fail": 5,
+    "warn": 5
   },
   "results": [
     {
       "status": "PASS",
-      "test": "App loads in demo mode",
+      "test": "Auth bypass via mock session — past login screen",
       "detail": ""
     },
     {
-      "status": "WARN",
-      "test": "Sidebar/nav visible",
-      "detail": "Not found — may be collapsed"
+      "status": "PASS",
+      "test": "App navigation visible",
+      "detail": ""
     },
     {
       "status": "WARN",
       "test": "Dashboard metrics",
-      "detail": "No metric labels found"
+      "detail": "No metric text found"
     },
     {
       "status": "WARN",
-      "test": "Activity feed",
-      "detail": "No activity section found"
+      "test": "Dashboard activity",
+      "detail": "No activity text"
     },
     {
-      "status": "WARN",
-      "test": "Payment list",
-      "detail": "No payment rows/cards found — checking content"
+      "status": "FAIL",
+      "test": "Payments page",
+      "detail": "No payment data"
     },
     {
-      "status": "PASS",
-      "test": "Payment page has content",
-      "detail": "Found payment-related text"
+      "status": "FAIL",
+      "test": "Tenants page",
+      "detail": "No tenant data"
     },
     {
-      "status": "WARN",
-      "test": "Mark as Paid button",
-      "detail": "Not found — may require specific filter state"
-    },
-    {
-      "status": "WARN",
-      "test": "Payment export",
-      "detail": "Export/CSV button not found"
-    },
-    {
-      "status": "WARN",
-      "test": "Tenant list",
-      "detail": "No tenant content detected"
-    },
-    {
-      "status": "WARN",
-      "test": "Tenant rows",
-      "detail": "No rows found — checking for card layout"
-    },
-    {
-      "status": "WARN",
-      "test": "Add Tenant button",
-      "detail": "Not found"
-    },
-    {
-      "status": "WARN",
-      "test": "CSV Import button",
-      "detail": "Not found in tenant view"
-    },
-    {
-      "status": "WARN",
+      "status": "FAIL",
       "test": "Maintenance page",
-      "detail": "No ticket content detected"
+      "detail": "No ticket data"
     },
     {
-      "status": "WARN",
-      "test": "Maintenance tickets",
-      "detail": "No ticket items found"
-    },
-    {
-      "status": "WARN",
-      "test": "Create Ticket button",
-      "detail": "Not found"
-    },
-    {
-      "status": "WARN",
+      "status": "FAIL",
       "test": "Announcements page",
-      "detail": "No announcement content detected"
+      "detail": "No data"
     },
     {
       "status": "WARN",
-      "test": "Pinned announcements",
-      "detail": "Pin indicator not visible"
+      "test": "Notifications",
+      "detail": "Not found in header or tab"
+    },
+    {
+      "status": "FAIL",
+      "test": "Properties page",
+      "detail": "No data"
     },
     {
       "status": "PASS",
-      "test": "Create Announcement button visible",
-      "detail": ""
-    },
-    {
-      "status": "WARN",
-      "test": "Create Announcement dialog",
-      "detail": "Did not open"
-    },
-    {
-      "status": "WARN",
-      "test": "Notification bell",
-      "detail": "Bell not in header, notifications page also unclear"
-    },
-    {
-      "status": "WARN",
-      "test": "Mode toggle",
-      "detail": "Not visible in current view"
-    },
-    {
-      "status": "PASS",
-      "test": "Dashboard shows numeric data (counts/metrics populated)",
+      "test": "Demo/Live mode toggle visible",
       "detail": ""
     },
     {
       "status": "PASS",
-      "test": "Properties page loaded",
-      "detail": ""
+      "test": "Demo mode state",
+      "detail": "aria-pressed=true"
     },
     {
       "status": "WARN",
-      "test": "Property cards",
-      "detail": "No cards found"
+      "test": "Dashboard numbers",
+      "detail": "No numerics"
+    },
+    {
+      "status": "WARN",
+      "test": "Property selector",
+      "detail": "Not found"
     }
   ],
   "consoleErrors": [
-    "Failed to load resource: the server responded with a status of 404 (Not Found)"
-  ]
+    "Warning: validateDOMNesting(...): %s cannot appear as a descendant of <%s>.%s <button> button \n    at button\n    at div\n    at StatusDropdown (http://127.0.0.1:4173/src/components/Maintenance.tsx?t=1779720908312:321:27)\n    at div\n    at button\n    at div\n    at TicketRow (http://127.0.0.1:4173/src/components/Maintenance.tsx?t=1779720908312:441:22)\n    at div\n    at div\n    at Maintenance (http://127.0.0.1:4173/src/components/Maintenance.tsx?t=1779720908312:723:44)\n    at PageGuard (http://127.0.0.1:4173/src/guards/PageGuard.tsx?t=1779720908564:20:29)\n    at div\n    at PageFrame (http://127.0.0.1:4173/src/components/ui/PageFrame.tsx?t=1779720908216:17:29)\n    at main\n    at div\n    at div\n    at PropertyProvider (http://127.0.0.1:4173/src/contexts/PropertyContext.tsx?t=1779720908312:31:36)\n    at AppContent (http://127.0.0.1:4173/src/App.tsx?t=1779720908312:68:31)\n    at LocalizationProvider (http://127.0.0.1:4173/src/contexts/LocalizationContext.tsx:96:40)\n    at AuthProvider (http://127.0.0.1:4173/src/contexts/AuthContext.tsx?t=1779720908230:59:32)\n    at App"
+  ],
+  "networkErrors": []
 }

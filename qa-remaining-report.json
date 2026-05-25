@@ -1,0 +1,83 @@
+{
+  "pass": [
+    {
+      "t": "Demo tickets all visible (Water leakage, Ceiling fan, AC, WiFi, Room lock)",
+      "d": ""
+    },
+    {
+      "t": "Status buttons on tickets",
+      "d": "5 visible"
+    },
+    {
+      "t": "Ticket row clicked (fallback)",
+      "d": ""
+    },
+    {
+      "t": "Demo announcements loaded (rent reminder, water supply, deep cleaning)",
+      "d": ""
+    },
+    {
+      "t": "Pinned section visible",
+      "d": ""
+    },
+    {
+      "t": "WhatsApp badges on announcements",
+      "d": ""
+    },
+    {
+      "t": "Payment status changed to trigger notification event",
+      "d": ""
+    },
+    {
+      "t": "Property selector found",
+      "d": ""
+    },
+    {
+      "t": "Sunrise Residency selected",
+      "d": ""
+    },
+    {
+      "t": "Dashboard after Sunrise filter",
+      "d": "RentCare  Owner Portal  MANAGEMENT  Dashboard Properties Tenants  FINANCE  Payments  OPERATIONS  Maintenance Announcements  SUPPORT  Support  PREFEREN"
+    },
+    {
+      "t": "Payments filtered to Sunrise Residency",
+      "d": "8 rows"
+    },
+    {
+      "t": "Tenants filtered to Sunrise Residency",
+      "d": ""
+    },
+    {
+      "t": "Reset to All Properties",
+      "d": ""
+    }
+  ],
+  "fail": [
+    {
+      "t": "Tenant detail navigation",
+      "d": "No view/edit buttons on tenant rows"
+    },
+    {
+      "t": "+ New Ticket button",
+      "d": "Not found"
+    },
+    {
+      "t": "+ New Announcement button",
+      "d": "Not found"
+    },
+    {
+      "t": "Notification bell",
+      "d": "Button with Bell icon not found in header"
+    }
+  ],
+  "warn": [
+    {
+      "t": "Status dropdown",
+      "d": "Did not open"
+    }
+  ],
+  "consoleErrors": [
+    "Warning: validateDOMNesting(...): %s cannot appear as a descendant of <%s>.%s <button> button \n    at button\n    at div\n    at StatusDropdown (http://127.0.0.1:4173/src/components/Maintenance.tsx?t=1779720908312:321:27)\n    at div\n    at button\n    at div\n    at TicketRow (http://127.0.0.1:4173/src/components/Maintenance.tsx?t=1779720908312:441:22)\n    at div\n    at div\n    at Maintenance (http://127.0.0.1:4173/src/components/Maintenance.tsx?t=1779720908312:723:44)\n    at PageGuard (http://127.0.0.1:4173/src/guards/PageGuard.tsx?t=1779720908564:20:29)\n    at div\n    at PageFrame (http://127.0.0.1:4173/src/components/ui/PageFrame.tsx?t=1779720908216:17:29)\n    at main\n    at div\n    at div\n    at PropertyProvider (http://127.0.0.1:4173/src/contexts/PropertyContext.tsx?t=1779720908312:31:36)\n    at AppContent (http://127.0.0.1:4173/src/App.tsx?t=1779720908312:68:31)\n    at LocalizationProvider (http://127.0.0.1:4173/src/contexts/LocalizationContext.tsx:96:40)\n    at AuthProvider (http://127.0.0.1:4173/src/contexts/AuthContext.tsx?t=1779720908230:59:32)\n    at App"
+  ]
+}

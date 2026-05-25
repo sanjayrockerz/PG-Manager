@@ -1,0 +1,67 @@
+{
+  "timestamp": "2026-05-25T15:04:53.842Z",
+  "summary": {
+    "passes": 11,
+    "bugs": 2,
+    "consoleErrors": 1
+  },
+  "bugs": [
+    {
+      "label": "Lifecycle filters",
+      "detail": "Only 0/6 tabs visible"
+    },
+    {
+      "label": "Test runner crash",
+      "detail": "fileInput.isAttached is not a function"
+    }
+  ],
+  "passes": [
+    {
+      "label": "Payment stats cards render with correct totals",
+      "detail": ""
+    },
+    {
+      "label": "Overdue warning banner visible",
+      "detail": ""
+    },
+    {
+      "label": "Export CSV button visible",
+      "detail": ""
+    },
+    {
+      "label": "Export CSV — feedback shown after click",
+      "detail": ""
+    },
+    {
+      "label": "Payment filter tabs all visible (All/Paid/Pending/Overdue)",
+      "detail": ""
+    },
+    {
+      "label": "Receipt button accessible via aria-label",
+      "detail": ""
+    },
+    {
+      "label": "Payment list row count",
+      "detail": "9 rows in All view"
+    },
+    {
+      "label": "Tenant summary stats visible (10 tenants, ₹77,100 revenue)",
+      "detail": ""
+    },
+    {
+      "label": "Import CSV button visible",
+      "detail": ""
+    },
+    {
+      "label": "CSV Import dialog opens",
+      "detail": ""
+    },
+    {
+      "label": "CSV Import dialog has template/format guidance",
+      "detail": ""
+    }
+  ],
+  "consoleErrors": [
+    "Warning: Function components cannot be given refs. Attempts to access this ref will fail. Did you mean to use React.forwardRef()?%s%s \n\nCheck the render method of `Primitive.div.SlotClone`. \n    at DialogOverlay (http://127.0.0.1:4173/src/components/ui/dialog.tsx:62:3)\n    at http://127.0.0.1:4173/node_modules/.vite/deps/chunk-NTYFTBVT.js?v=4f224795:157:13\n    at http://127.0.0.1:4173/node_modules/.vite/deps/chunk-NTYFTBVT.js?v=4f224795:134:13\n    at http://127.0.0.1:4173/node_modules/.vite/deps/chunk-NTYFTBVT.js?v=4f224795:247:13\n    at http://127.0.0.1:4173/node_modules/.vite/deps/chunk-KBWOGL6N.js?v=4f224795:464:22\n    at Presence (http://127.0.0.1:4173/node_modules/.vite/deps/chunk-RZ7LBVAE.js?v=4f224795:24:11)\n    at Provider (http://127.0.0.1:4173/node_modules/.vite/deps/chunk-NTYFTBVT.js?v=4f224795:55:15)\n    at DialogPortal (http://127.0.0.1:4173/node_modules/.vite/deps/chunk-5GAQZH6F.js?v=4f224795:199:11)\n    at DialogPortal (http://127.0.0.1:4173/src/components/ui/dialog.tsx:42:6)\n    at DialogContent (http://127.0.0.1:4173/src/components/ui/dialog.tsx:87:3)\n    at Provider (http://127.0.0.1:4173/node_modules/.vite/deps/chunk-NTYFTBVT.js?v=4f224795:55:15)\n    at Dialog (http://127.0.0.1:4173/node_modules/.vite/deps/chunk-5GAQZH6F.js?v=4f224795:139:5)\n    at Dialog (http://127.0.0.1:4173/src/components/ui/dialog.tsx:22:6)\n    at div\n    at Payments (http://127.0.0.1:4173/src/components/Payments.tsx?t=1779720908312:54:44)\n    at PageGuard (http://127.0.0.1:4173/src/guards/PageGuard.tsx?t=1779720908564:20:29)\n    at div\n    at PageFrame (http://127.0.0.1:4173/src/components/ui/PageFrame.tsx?t=1779720908216:17:29)\n    at main\n    at div\n    at div\n    at PropertyProvider (http://127.0.0.1:4173/src/contexts/PropertyContext.tsx?t=1779720908312:31:36)\n    at AppContent (http://127.0.0.1:4173/src/App.tsx?t=1779720908312:68:31)\n    at LocalizationProvider (http://127.0.0.1:4173/src/contexts/LocalizationContext.tsx:96:40)\n    at AuthProvider (http://127.0.0.1:4173/src/contexts/AuthContext.tsx?t=1779720908230:59:32)\n    at App"
+  ]
+}
