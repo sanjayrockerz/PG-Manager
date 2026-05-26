@@ -6,6 +6,7 @@ import { LiveStatusBadge } from './LiveStatusBadge';
 
 interface NotificationsProps {
   onBack?: () => void;
+  onNavigate?: (tab: string, entityId?: string) => void;
 }
 
 function formatRelativeTime(value: string): string {
@@ -38,7 +39,17 @@ const notificationTypeClass: Record<NotificationRecord['type'], string> = {
   system: 'bg-gray-500',
 };
 
-export function Notifications({ onBack }: NotificationsProps) {
+function getNotificationRoute(notification: NotificationRecord): string {
+  switch (notification.type) {
+    case 'payment': return 'payments';
+    case 'maintenance': return 'maintenance';
+    case 'tenant': return 'tenants';
+    case 'announcement': return 'announcements';
+    default: return 'dashboard';
+  }
+}
+
+export function Notifications({ onBack, onNavigate }: NotificationsProps) {
   const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState('');
@@ -153,13 +164,19 @@ export function Notifications({ onBack }: NotificationsProps) {
           {notifications.map((notification) => (
             <button
               key={notification.id}
-              onClick={() => void markAsRead(notification.id)}
+              onClick={() => {
+                void markAsRead(notification.id);
+                if (onNavigate) {
+                  const tab = getNotificationRoute(notification);
+                  onNavigate(tab, notification.entityId);
+                }
+              }}
               className={`w-full text-left px-4 py-4 hover:bg-gray-50 transition-colors ${notification.read ? 'bg-white' : 'bg-blue-50'}`}
             >
               <div className="flex items-start gap-3">
-                <div
-                  className={`w-2 h-2 rounded-full mt-2 flex-shrink-0 ${notification.read ? 'bg-gray-300' : notificationTypeClass[notification.type]}`}
-                />
+                <div className="flex-shrink-0 mt-1">
+                  <div className={`w-2 h-2 rounded-full ${notification.read ? 'bg-gray-300' : notificationTypeClass[notification.type]}`} />
+                </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-start justify-between gap-2">
                     <p className="text-sm font-medium text-gray-900">{notification.title}</p>
@@ -168,6 +185,11 @@ export function Notifications({ onBack }: NotificationsProps) {
                     </span>
                   </div>
                   <p className="text-sm text-gray-600 mt-1">{notification.message}</p>
+                  {onNavigate && (
+                    <p className="text-xs text-indigo-500 mt-1 flex items-center gap-1">
+                      View {getNotificationRoute(notification)} →
+                    </p>
+                  )}
                 </div>
               </div>
             </button>

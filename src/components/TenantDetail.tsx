@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
@@ -9,7 +9,8 @@ import {
   MapPin, Phone, Mail, IndianRupee, CheckCircle,
   Clock, AlertCircle, Loader2, ShieldCheck, LogOut,
   AlertTriangle, Archive, ChevronRight, ChevronLeft,
-  ReceiptText,
+  ReceiptText, Plus, Trash2, Printer, History,
+  Upload, Eye, Download,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useProperty } from '../contexts/PropertyContext';
@@ -28,6 +29,14 @@ import {
   TENANT_STATUS_COLORS,
   isTenantCurrentlyInRoom,
 } from '../services/supabaseData';
+import {
+  type SettlementDeductionItem,
+  type DeductionCategory,
+  DEDUCTION_CATEGORY_LABELS,
+  calculateSettlement,
+  printSettlementReceipt,
+  createDeductionItem,
+} from '../services/depositSettlementService';
 
 interface TenantDetailProps {
   tenantId: string;
@@ -58,57 +67,128 @@ const ticketStatusLabel: Record<string, string> = {
   resolved: 'Resolved',
 };
 
-// ─── Vacate Workflow Modal ────────────────────────────────────────────────────
+// ─── Enhanced Vacate Workflow Modal ───────────────────────────────────────────
 
 interface VacateModalProps {
   tenant: TenantRecord;
+  pendingPayments: PaymentRecord[];
+  propertyName: string;
+  ownerName: string;
   open: boolean;
   onClose: () => void;
   onComplete: (updated: TenantRecord) => void;
 }
 
-function VacateWorkflowModal({ tenant, open, onClose, onComplete }: VacateModalProps) {
+function VacateWorkflowModal({
+  tenant,
+  pendingPayments,
+  propertyName,
+  ownerName,
+  open,
+  onClose,
+  onComplete,
+}: VacateModalProps) {
   const [step, setStep] = useState(1);
   const [saving, setSaving] = useState(false);
 
-  // Step 1 fields
+  // Step 1
   const [vacateDate, setVacateDate] = useState('');
   const [reason, setReason] = useState('');
 
-  // Step 2 fields
-  const [depositDeduction, setDepositDeduction] = useState('0');
-  const [deductionReason, setDeductionReason] = useState('');
+  // Step 2 — deductions
+  const [deductions, setDeductions] = useState<SettlementDeductionItem[]>([]);
+  const [adjustPendingRent, setAdjustPendingRent] = useState(true);
+  const [newCategory, setNewCategory] = useState<DeductionCategory>('other');
+  const [newDesc, setNewDesc] = useState('');
+  const [newAmount, setNewAmount] = useState('');
 
   const minDate = new Date().toISOString().split('T')[0];
-  const depositRefund = Math.max(0, tenant.securityDeposit - (Number(depositDeduction) || 0));
+
+  const pendingTotal = pendingPayments.reduce((sum, p) => sum + p.totalAmount, 0);
+
+  const settlement = calculateSettlement({
+    tenantId: tenant.id,
+    tenantName: tenant.name,
+    room: tenant.room,
+    floor: String(tenant.floor),
+    propertyId: tenant.propertyId,
+    securityDeposit: tenant.securityDeposit,
+    monthlyRent: tenant.rent,
+    vacateDate: vacateDate || new Date().toISOString().split('T')[0],
+    reason,
+    pendingPayments: pendingPayments.map((p) => ({
+      id: p.id,
+      dueDate: p.dueDate,
+      totalAmount: p.totalAmount,
+      status: p.status as 'pending' | 'overdue',
+    })),
+    deductions,
+    adjustPendingRentFromDeposit: adjustPendingRent,
+  });
 
   const resetAndClose = () => {
     setStep(1);
     setVacateDate('');
     setReason('');
-    setDepositDeduction('0');
-    setDeductionReason('');
+    setDeductions([]);
+    setAdjustPendingRent(true);
+    setNewCategory('other');
+    setNewDesc('');
+    setNewAmount('');
     onClose();
   };
 
-  const handleConfirm = async () => {
-    if (!vacateDate) {
-      toast.error('Please select a move-out date.');
+  const addDeduction = () => {
+    const amt = Number(newAmount);
+    if (!newDesc.trim() || !amt || amt <= 0) {
+      toast.error('Enter a description and valid amount.');
       return;
     }
-    if (!reason.trim()) {
-      toast.error('Please provide a vacate reason.');
+    setDeductions((prev) => [...prev, createDeductionItem(newCategory, newDesc.trim(), amt)]);
+    setNewDesc('');
+    setNewAmount('');
+  };
+
+  const removeDeduction = (id: string) => setDeductions((prev) => prev.filter((d) => d.id !== id));
+
+  const handlePrint = () => {
+    if (!vacateDate) return;
+    printSettlementReceipt({
+      tenantName: tenant.name,
+      room: tenant.room,
+      floor: String(tenant.floor),
+      joinDate: tenant.joinDate,
+      vacateDate,
+      reason,
+      securityDeposit: tenant.securityDeposit,
+      deductionBreakdown: settlement.deductionBreakdown,
+      totalDeductions: settlement.totalDeductions,
+      netRefund: settlement.netRefund,
+      pendingRentTotal: settlement.pendingRentTotal,
+      settledAt: new Date().toISOString(),
+      propertyName,
+      ownerName,
+    });
+  };
+
+  const handleConfirm = async () => {
+    if (!vacateDate || !reason.trim()) {
+      toast.error('Please fill in all required fields.');
       return;
     }
 
     setSaving(true);
     try {
+      const totalDeduction = settlement.totalDeductions;
+
       const updated = await processVacateWorkflow({
         tenantId: tenant.id,
         vacateDate,
         reason: reason.trim(),
-        depositDeduction: Number(depositDeduction) || 0,
-        deductionReason: deductionReason.trim(),
+        depositDeduction: totalDeduction,
+        deductionReason: settlement.deductionBreakdown.map((d) => d.description).join('; '),
+        deductionItems: settlement.deductionBreakdown,
+        adjustPendingRentFromDeposit: adjustPendingRent,
       });
 
       const isImmediate = new Date(vacateDate) <= new Date();
@@ -128,9 +208,11 @@ function VacateWorkflowModal({ tenant, open, onClose, onComplete }: VacateModalP
 
   const stepTitles = ['Notice Details', 'Settlement', 'Confirm'];
 
+  const canProceedStep1 = vacateDate && reason.trim();
+
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) resetAndClose(); }}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-red-600">
             <LogOut className="w-5 h-5" /> Submit Vacate Notice
@@ -154,23 +236,31 @@ function VacateWorkflowModal({ tenant, open, onClose, onComplete }: VacateModalP
                 }`}>
                   {done ? '✓' : num}
                 </div>
-                <span className={`text-xs ${active ? 'text-gray-900 font-semibold' : 'text-gray-400'}`}>
-                  {title}
-                </span>
+                <span className={`text-xs ${active ? 'text-gray-900 font-semibold' : 'text-gray-400'}`}>{title}</span>
                 {i < stepTitles.length - 1 && <ChevronRight className="w-3 h-3 text-gray-300 ml-1" />}
               </div>
             );
           })}
         </div>
 
-        {/* Step 1: Notice Details */}
+        {/* ── Step 1: Notice Details ── */}
         {step === 1 && (
           <div className="space-y-4">
             <div className="bg-gray-50 rounded-lg p-3 text-sm">
               <p className="font-semibold text-gray-900">{tenant.name}</p>
-              <p className="text-gray-500">Room {tenant.room} · Floor {tenant.floor} · Bed {tenant.bed}</p>
+              <p className="text-gray-500">Room {tenant.room} · Floor {tenant.floor}{tenant.bed ? ` · Bed ${tenant.bed}` : ''}</p>
               <p className="text-gray-500">Security Deposit: ₹{tenant.securityDeposit.toLocaleString('en-IN')}</p>
             </div>
+
+            {pendingPayments.length > 0 && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm">
+                <p className="font-semibold text-amber-800 mb-1 flex items-center gap-1.5">
+                  <AlertCircle className="w-3.5 h-3.5" />
+                  {pendingPayments.length} pending payment{pendingPayments.length > 1 ? 's' : ''} — ₹{pendingTotal.toLocaleString('en-IN')}
+                </p>
+                <p className="text-amber-600 text-xs">You can adjust these from the deposit in the next step.</p>
+              </div>
+            )}
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -184,7 +274,7 @@ function VacateWorkflowModal({ tenant, open, onClose, onComplete }: VacateModalP
                 className="w-full"
               />
               <p className="text-xs text-gray-400 mt-1">
-                Set to today for an immediate vacate. Future date submits a notice.
+                Set to today for immediate vacate. Future date submits a notice.
               </p>
             </div>
 
@@ -203,65 +293,112 @@ function VacateWorkflowModal({ tenant, open, onClose, onComplete }: VacateModalP
           </div>
         )}
 
-        {/* Step 2: Settlement */}
+        {/* ── Step 2: Settlement ── */}
         {step === 2 && (
           <div className="space-y-4">
+            {/* Deposit summary */}
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
               <h4 className="text-sm font-semibold text-blue-900 mb-2 flex items-center gap-1.5">
-                <ReceiptText className="w-4 h-4" /> Final Settlement Summary
+                <ReceiptText className="w-4 h-4" /> Deposit Settlement
               </h4>
-              <div className="space-y-1.5 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Final Month Rent</span>
-                  <span className="font-medium">₹{tenant.rent.toLocaleString('en-IN')}</span>
-                </div>
+              <div className="space-y-1 text-sm">
                 <div className="flex justify-between">
                   <span className="text-gray-600">Security Deposit Held</span>
-                  <span className="font-medium">₹{tenant.securityDeposit.toLocaleString('en-IN')}</span>
+                  <span className="font-semibold text-gray-900">₹{tenant.securityDeposit.toLocaleString('en-IN')}</span>
+                </div>
+                {settlement.totalDeductions > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Total Deductions</span>
+                    <span className="font-semibold text-red-600">− ₹{settlement.totalDeductions.toLocaleString('en-IN')}</span>
+                  </div>
+                )}
+                <div className="flex justify-between border-t border-blue-200 pt-1.5 mt-1.5">
+                  <span className="font-semibold text-gray-800">Net Refund</span>
+                  <span className={`text-lg font-bold ${settlement.netRefund >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                    ₹{settlement.netRefund.toLocaleString('en-IN')}
+                  </span>
                 </div>
               </div>
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Deposit Deduction (₹)
-              </label>
-              <Input
-                type="number"
-                min="0"
-                max={tenant.securityDeposit}
-                value={depositDeduction}
-                onChange={(e) => setDepositDeduction(e.target.value)}
-                placeholder="0"
-              />
-              <p className="text-xs text-gray-400 mt-1">Leave 0 if full deposit is refunded.</p>
-            </div>
-
-            {Number(depositDeduction) > 0 && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Deduction Reason
-                </label>
-                <Input
-                  value={deductionReason}
-                  onChange={(e) => setDeductionReason(e.target.value)}
-                  placeholder="e.g. Minor wall damage, missing furniture…"
+            {/* Pending rent toggle */}
+            {pendingPayments.length > 0 && (
+              <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                <input
+                  id="adjust-rent"
+                  type="checkbox"
+                  checked={adjustPendingRent}
+                  onChange={(e) => setAdjustPendingRent(e.target.checked)}
+                  className="mt-0.5 accent-amber-600"
                 />
+                <label htmlFor="adjust-rent" className="text-sm cursor-pointer">
+                  <span className="font-semibold text-amber-800">Deduct pending rent from deposit</span>
+                  <p className="text-amber-600 text-xs mt-0.5">
+                    ₹{pendingTotal.toLocaleString('en-IN')} across {pendingPayments.length} payment{pendingPayments.length > 1 ? 's' : ''} will be auto-deducted
+                  </p>
+                </label>
               </div>
             )}
 
-            <div className={`rounded-lg p-3 border ${depositRefund >= 0 ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
-              <div className="flex justify-between items-center">
-                <span className="text-sm font-semibold text-gray-700">Deposit Refund to Tenant</span>
-                <span className={`text-lg font-bold ${depositRefund >= 0 ? 'text-green-700' : 'text-red-700'}`}>
-                  ₹{Math.max(0, depositRefund).toLocaleString('en-IN')}
-                </span>
+            {/* Manual deduction items */}
+            <div>
+              <p className="text-sm font-medium text-gray-700 mb-2">Additional Deductions</p>
+
+              {deductions.length > 0 && (
+                <div className="space-y-1.5 mb-3">
+                  {deductions.map((d) => (
+                    <div key={d.id} className="flex items-center gap-2 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+                      <span className="text-xs text-red-600 font-medium flex-shrink-0">{DEDUCTION_CATEGORY_LABELS[d.category as DeductionCategory]}</span>
+                      <span className="text-xs text-gray-700 flex-1 truncate">{d.description}</span>
+                      <span className="text-xs font-semibold text-red-700 flex-shrink-0">₹{d.amount.toLocaleString('en-IN')}</span>
+                      <button
+                        onClick={() => removeDeduction(d.id)}
+                        className="text-gray-400 hover:text-red-500 transition-colors"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Add deduction row */}
+              <div className="grid grid-cols-12 gap-2">
+                <select
+                  value={newCategory}
+                  onChange={(e) => setNewCategory(e.target.value as DeductionCategory)}
+                  className="col-span-4 border border-gray-300 rounded-md px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                >
+                  {(Object.keys(DEDUCTION_CATEGORY_LABELS) as DeductionCategory[]).map((key) => (
+                    <option key={key} value={key}>{DEDUCTION_CATEGORY_LABELS[key]}</option>
+                  ))}
+                </select>
+                <input
+                  className="col-span-5 border border-gray-300 rounded-md px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                  placeholder="Description…"
+                  value={newDesc}
+                  onChange={(e) => setNewDesc(e.target.value)}
+                />
+                <input
+                  className="col-span-2 border border-gray-300 rounded-md px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                  placeholder="₹"
+                  type="number"
+                  min="1"
+                  value={newAmount}
+                  onChange={(e) => setNewAmount(e.target.value)}
+                />
+                <button
+                  onClick={addDeduction}
+                  className="col-span-1 flex items-center justify-center bg-indigo-600 hover:bg-indigo-700 text-white rounded-md transition-colors"
+                >
+                  <Plus className="w-4 h-4" />
+                </button>
               </div>
             </div>
           </div>
         )}
 
-        {/* Step 3: Confirm */}
+        {/* ── Step 3: Confirm ── */}
         {step === 3 && (
           <div className="space-y-3">
             <div className="bg-red-50 border border-red-200 rounded-lg p-3">
@@ -271,18 +408,16 @@ function VacateWorkflowModal({ tenant, open, onClose, onComplete }: VacateModalP
               <p className="text-sm text-red-700">
                 {new Date(vacateDate) <= new Date()
                   ? `This will immediately mark ${tenant.name} as vacated and release the room.`
-                  : `A vacate notice will be submitted for ${tenant.name}. Room will be released on ${new Date(vacateDate).toLocaleDateString('en-IN')}.`}
+                  : `A vacate notice will be submitted for ${tenant.name}. Room released on ${new Date(vacateDate).toLocaleDateString('en-IN')}.`}
               </p>
             </div>
 
-            <div className="text-sm space-y-2">
+            <div className="text-sm space-y-1.5">
               {[
                 ['Tenant', tenant.name],
-                ['Room', `${tenant.room} · Floor ${tenant.floor} · Bed ${tenant.bed}`],
+                ['Room', `${tenant.room} · Floor ${tenant.floor}${tenant.bed ? ` · Bed ${tenant.bed}` : ''}`],
                 ['Move-Out Date', new Date(vacateDate).toLocaleDateString('en-IN')],
                 ['Reason', reason],
-                ['Deposit Refund', `₹${Math.max(0, depositRefund).toLocaleString('en-IN')}`],
-                ...(Number(depositDeduction) > 0 ? [['Deduction', `₹${Number(depositDeduction).toLocaleString('en-IN')} — ${deductionReason || 'No reason specified'}`]] : []),
               ].map(([label, value]) => (
                 <div key={label} className="flex justify-between gap-4">
                   <span className="text-gray-500 flex-shrink-0">{label}</span>
@@ -290,6 +425,38 @@ function VacateWorkflowModal({ tenant, open, onClose, onComplete }: VacateModalP
                 </div>
               ))}
             </div>
+
+            {/* Settlement summary */}
+            <div className="bg-gray-50 rounded-lg border border-gray-200 p-3 space-y-1">
+              <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Settlement</p>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-600">Security Deposit</span>
+                <span className="font-medium">₹{tenant.securityDeposit.toLocaleString('en-IN')}</span>
+              </div>
+              {settlement.deductionBreakdown.map((d) => (
+                <div key={d.id} className="flex justify-between text-sm">
+                  <span className="text-gray-500 truncate max-w-[200px]">{d.description}</span>
+                  <span className="text-red-600 font-medium">− ₹{d.amount.toLocaleString('en-IN')}</span>
+                </div>
+              ))}
+              <div className="flex justify-between text-sm border-t border-gray-200 pt-1.5 mt-1">
+                <span className="font-semibold text-gray-800">Net Refund</span>
+                <span className={`font-bold text-base ${settlement.netRefund >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                  ₹{settlement.netRefund.toLocaleString('en-IN')}
+                </span>
+              </div>
+            </div>
+
+            {/* Print receipt */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handlePrint}
+              className="w-full border-dashed text-gray-600 gap-2"
+            >
+              <Printer className="w-4 h-4" />
+              Print Settlement Receipt
+            </Button>
           </div>
         )}
 
@@ -305,7 +472,7 @@ function VacateWorkflowModal({ tenant, open, onClose, onComplete }: VacateModalP
           {step < 3 ? (
             <Button
               onClick={() => {
-                if (step === 1 && (!vacateDate || !reason.trim())) {
+                if (step === 1 && !canProceedStep1) {
                   toast.error('Please fill in the move-out date and reason.');
                   return;
                 }
@@ -331,6 +498,133 @@ function VacateWorkflowModal({ tenant, open, onClose, onComplete }: VacateModalP
   );
 }
 
+// ─── Document Vault ───────────────────────────────────────────────────────────
+
+interface DocumentItem {
+  name: string;
+  label: string;
+  url: string | null | undefined;
+  category: 'id' | 'photo' | 'agreement' | 'other';
+}
+
+function DocumentVaultTab({ tenant }: { tenant: TenantRecord }) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const isDemoMode = isDemoModeEnabled();
+
+  const documents: DocumentItem[] = [
+    { name: 'ID Document', label: `${tenant.idType || 'ID'} · ${tenant.idNumber || '—'}`, url: tenant.idDocumentUrl, category: 'id' },
+    { name: 'Profile Photo', label: 'Tenant photo', url: tenant.photoUrl, category: 'photo' },
+  ];
+
+  const existing = documents.filter((d) => d.url);
+  const missing = documents.filter((d) => !d.url);
+
+  const handleUploadClick = () => {
+    if (isDemoMode) {
+      toast.info('Document upload is available in live mode. Connect Supabase to enable.');
+      return;
+    }
+    fileInputRef.current?.click();
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Upload prompt */}
+      <div
+        className="border-2 border-dashed border-gray-200 rounded-xl p-6 text-center cursor-pointer hover:border-indigo-300 hover:bg-indigo-50/30 transition-all"
+        onClick={handleUploadClick}
+      >
+        <Upload className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+        <p className="text-sm font-medium text-gray-600">Upload Documents</p>
+        <p className="text-xs text-gray-400 mt-1">Aadhaar, Passport, ID proof, agreements…</p>
+        {isDemoMode && (
+          <span className="mt-2 inline-block text-xs text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded-full">
+            Live mode only
+          </span>
+        )}
+        <input ref={fileInputRef} type="file" className="hidden" multiple accept="image/*,.pdf" />
+      </div>
+
+      {/* Existing documents */}
+      {existing.length > 0 && (
+        <>
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Uploaded Documents</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {existing.map((doc) => (
+              <Card key={doc.name} className="border-gray-200 hover:shadow-md transition-shadow">
+                <CardContent className="p-4">
+                  <div className="flex items-start gap-3">
+                    <div className="p-2.5 bg-purple-100 rounded-lg flex-shrink-0">
+                      <FileText className="w-5 h-5 text-purple-600" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-semibold text-gray-900 text-sm">{doc.name}</h3>
+                      <p className="text-xs text-gray-500 truncate mt-0.5">{doc.label}</p>
+                    </div>
+                  </div>
+                  <div className="flex gap-2 mt-3">
+                    <Button
+                      size="sm"
+                      className="flex-1 bg-[#4F46E5] hover:bg-[#4338CA] text-white h-8 text-xs gap-1"
+                      onClick={() => window.open(doc.url!, '_blank')}
+                    >
+                      <Eye className="w-3.5 h-3.5" /> View
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 text-xs gap-1"
+                      onClick={() => {
+                        const a = document.createElement('a');
+                        a.href = doc.url!;
+                        a.download = doc.name;
+                        a.click();
+                      }}
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* Missing documents */}
+      {missing.length > 0 && (
+        <>
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Pending Upload</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {missing.map((doc) => (
+              <div
+                key={doc.name}
+                className="border border-dashed border-gray-200 rounded-lg p-4 flex items-center gap-3 opacity-60 cursor-pointer hover:opacity-80 transition-opacity"
+                onClick={handleUploadClick}
+              >
+                <div className="p-2 bg-gray-100 rounded-lg">
+                  <FileText className="w-4 h-4 text-gray-400" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium text-gray-600">{doc.name}</p>
+                  <p className="text-xs text-gray-400">Not uploaded yet</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {existing.length === 0 && missing.length === 0 && (
+        <div className="text-center py-8 text-gray-400">
+          <FileText className="w-10 h-10 mx-auto mb-2 opacity-20" />
+          <p className="text-sm">No documents configured</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main TenantDetail ────────────────────────────────────────────────────────
 
 export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
@@ -343,6 +637,7 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
   const [vacateOpen, setVacateOpen] = useState(false);
   const [archiving, setArchiving] = useState(false);
 
+  const property = properties.find((p) => p.id === tenant?.propertyId);
   const getPropertyName = (propertyId: string) =>
     properties.find((p) => p.id === propertyId)?.name ?? propertyId;
 
@@ -483,7 +778,7 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
                         onClick={() => setVacateOpen(true)}
                         className="border-red-300 text-red-600 hover:bg-red-50 hover:border-red-400 h-8 text-xs"
                       >
-                        <LogOut className="w-3.5 h-3.5 mr-1.5" /> Submit Vacate Notice
+                        <LogOut className="w-3.5 h-3.5 mr-1.5" /> Vacate
                       </Button>
                     )}
                     {canArchive && (
@@ -559,6 +854,11 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
           <TabsTrigger value="documents" className="data-[state=active]:bg-[#4F46E5] data-[state=active]:text-white">
             <FileText className="w-4 h-4 mr-1.5" /> Documents
           </TabsTrigger>
+          {tenant.vacateDate && (
+            <TabsTrigger value="settlement" className="data-[state=active]:bg-[#4F46E5] data-[state=active]:text-white">
+              <History className="w-4 h-4 mr-1.5" /> Settlement
+            </TabsTrigger>
+          )}
         </TabsList>
 
         {/* Payments tab */}
@@ -582,7 +882,7 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
                     </thead>
                     <tbody>
                       {payments.map((p) => (
-                        <tr key={p.id} className="border-b border-gray-100 hover:bg-gray-50">
+                        <tr key={p.id} className={`border-b border-gray-100 hover:bg-gray-50 ${!isCurrentlyInRoom && p.status !== 'paid' ? 'opacity-60' : ''}`}>
                           <td className="py-3 px-4 text-sm text-gray-900">{new Date(p.dueDate).toLocaleDateString('en-IN')}</td>
                           <td className="py-3 px-4 text-sm text-gray-900">₹{p.monthlyRent.toLocaleString()}</td>
                           <td className="py-3 px-4 text-sm text-purple-700">₹{p.extraCharges.toLocaleString()}</td>
@@ -611,9 +911,7 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
         {/* Maintenance tab */}
         <TabsContent value="maintenance">
           <Card className="border-gray-200">
-            <CardHeader>
-              <CardTitle>Maintenance Requests</CardTitle>
-            </CardHeader>
+            <CardHeader><CardTitle>Maintenance Requests</CardTitle></CardHeader>
             <CardContent>
               {tickets.length === 0 ? (
                 <p className="text-center py-8 text-gray-400 text-sm">No maintenance tickets found</p>
@@ -657,9 +955,7 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
         <TabsContent value="profile">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <Card className="border-gray-200">
-              <CardHeader>
-                <CardTitle className="text-base">ID Proof</CardTitle>
-              </CardHeader>
+              <CardHeader><CardTitle className="text-base">ID Proof</CardTitle></CardHeader>
               <CardContent className="space-y-3 text-sm">
                 <div className="flex justify-between">
                   <span className="text-gray-600">Type</span>
@@ -678,9 +974,7 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
             </Card>
 
             <Card className="border-gray-200">
-              <CardHeader>
-                <CardTitle className="text-base">Guardian / Emergency Contact</CardTitle>
-              </CardHeader>
+              <CardHeader><CardTitle className="text-base">Guardian / Emergency Contact</CardTitle></CardHeader>
               <CardContent className="space-y-3 text-sm">
                 <div className="flex justify-between">
                   <span className="text-gray-600">Name</span>
@@ -697,47 +991,83 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
 
         {/* Documents tab */}
         <TabsContent value="documents">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {[
-              { name: 'ID Document', url: tenant.idDocumentUrl, label: `${tenant.idType} — ${tenant.idNumber}` },
-              { name: 'Photo', url: tenant.photoUrl, label: 'Profile photo' },
-            ].filter((d) => d.url).map((doc) => (
-              <Card key={doc.name} className="border-gray-200 hover:shadow-lg transition-shadow">
-                <CardContent className="p-6">
-                  <div className="flex items-start gap-4">
-                    <div className="p-3 bg-purple-100 rounded-lg">
-                      <FileText className="w-6 h-6 text-purple-600" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-semibold text-gray-900 mb-1">{doc.name}</h3>
-                      <p className="text-xs text-gray-500 truncate">{doc.label}</p>
-                    </div>
-                  </div>
-                  <Button
-                    className="w-full mt-4 bg-[#4F46E5] hover:bg-[#4338CA] text-white"
-                    onClick={() => window.open(doc.url!, '_blank')}
-                  >
-                    View
-                  </Button>
-                </CardContent>
-              </Card>
-            ))}
-            {!tenant.idDocumentUrl && !tenant.photoUrl && (
-              <div className="col-span-full text-center py-8 text-gray-400 text-sm">
-                No documents uploaded yet
-              </div>
-            )}
-          </div>
+          <DocumentVaultTab tenant={tenant} />
         </TabsContent>
+
+        {/* Settlement tab (shown only after vacate) */}
+        {tenant.vacateDate && (
+          <TabsContent value="settlement">
+            <Card className="border-gray-200">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <ReceiptText className="w-5 h-5 text-indigo-600" /> Deposit Settlement Record
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4 text-sm">
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    ['Move-Out Date', new Date(tenant.vacateDate).toLocaleDateString('en-IN')],
+                    ['Reason', tenant.vacateReason ?? '—'],
+                    ['Security Deposit', `₹${tenant.securityDeposit.toLocaleString('en-IN')}`],
+                    ['Status', TENANT_STATUS_LABELS[tenant.status]],
+                  ].map(([label, value]) => (
+                    <div key={label} className="bg-gray-50 rounded-lg p-3">
+                      <p className="text-xs text-gray-500 mb-0.5">{label}</p>
+                      <p className="font-semibold text-gray-900">{value}</p>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="bg-amber-50 border border-amber-100 rounded-lg p-3">
+                  <p className="text-xs text-amber-700">
+                    Full settlement breakdown is generated at time of vacate. Print the receipt from the vacate workflow for complete records.
+                  </p>
+                </div>
+
+                <Button
+                  variant="outline"
+                  className="gap-2 text-gray-600"
+                  onClick={() => {
+                    printSettlementReceipt({
+                      tenantName: tenant.name,
+                      room: tenant.room,
+                      floor: String(tenant.floor),
+                      joinDate: tenant.joinDate,
+                      vacateDate: tenant.vacateDate!,
+                      reason: tenant.vacateReason ?? '',
+                      securityDeposit: tenant.securityDeposit,
+                      deductionBreakdown: [],
+                      totalDeductions: 0,
+                      netRefund: tenant.securityDeposit,
+                      pendingRentTotal: 0,
+                      settledAt: new Date().toISOString(),
+                      propertyName: property?.name ?? '',
+                      ownerName: '',
+                    });
+                  }}
+                >
+                  <Printer className="w-4 h-4" /> Print Settlement Receipt
+                </Button>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        )}
       </Tabs>
 
       {/* Vacate workflow modal */}
       {vacateOpen && (
         <VacateWorkflowModal
           tenant={tenant}
+          pendingPayments={pendingPayments}
+          propertyName={property?.name ?? ''}
+          ownerName=""
           open={vacateOpen}
           onClose={() => setVacateOpen(false)}
-          onComplete={(updated) => setTenant(updated)}
+          onComplete={(updated) => {
+            setTenant(updated);
+            // Reload all data after vacate
+            void load();
+          }}
         />
       )}
     </div>

@@ -702,6 +702,22 @@ export async function updatePaymentStatusRecord(paymentId: string, status: Payme
             });
           }
         }
+
+        appendDemoActivity(store, {
+          propertyId: payment.propertyId,
+          event: 'PAYMENT_RECEIVED',
+          detail: `Payment of ₹${updated.totalAmount.toLocaleString('en-IN')} received from ${updated.tenant} (Room ${updated.room})`,
+          metadata: { paymentId: updated.id, tenantId: updated.tenantId, amount: updated.totalAmount },
+        });
+
+        // Emit payment received event for notifications
+        domainEvents.paymentReceived({
+          paymentId: updated.id,
+          tenantId: updated.tenantId,
+          tenantName: updated.tenant,
+          propertyId: updated.propertyId,
+          amount: updated.totalAmount,
+        });
       }
 
       return updated;
@@ -1189,7 +1205,12 @@ export async function processVacateWorkflow(input: VacateWorkflowInput): Promise
       const isImmediateVacate = vacateDate <= today;
 
       const newStatus = isImmediateVacate ? 'inactive' : 'notice_submitted';
-      const depositRefund = Math.max(0, tenant.securityDeposit - (Number(input.depositDeduction) || 0));
+
+      // Use multi-item deductions if provided; fall back to legacy single deduction
+      const totalDeduction = input.deductionItems && input.deductionItems.length > 0
+        ? input.deductionItems.reduce((sum, d) => sum + d.amount, 0)
+        : Number(input.depositDeduction) || 0;
+      const depositRefund = Math.max(0, tenant.securityDeposit - totalDeduction);
 
       const updated: TenantRecord = {
         ...tenant,
@@ -1199,7 +1220,22 @@ export async function processVacateWorkflow(input: VacateWorkflowInput): Promise
       };
       store.tenants[tenantIndex] = updated;
 
+      // Archive pending/overdue payments for this tenant on immediate vacate
+      if (isImmediateVacate) {
+        store.payments = store.payments.map((p) => {
+          if (p.tenantId !== tenant.id) return p;
+          if (p.status === 'pending' || p.status === 'overdue') {
+            return { ...p, status: 'overdue' as const }; // keep as overdue but track separately
+          }
+          return p;
+        });
+      }
+
       // Create vacate request record
+      const deductionSummary = input.deductionItems && input.deductionItems.length > 0
+        ? input.deductionItems.map((d) => d.description).join('; ')
+        : input.deductionReason;
+
       const vacateRequest: VacateRequest = {
         id: createDemoId('vacate'),
         tenantId: tenant.id,
@@ -1211,21 +1247,21 @@ export async function processVacateWorkflow(input: VacateWorkflowInput): Promise
         reason: input.reason,
         finalSettlementAmount: tenant.rent,
         depositRefund,
-        depositDeduction: Number(input.depositDeduction) || 0,
-        deductionReason: input.deductionReason,
+        depositDeduction: totalDeduction,
+        deductionReason: deductionSummary,
         status: isImmediateVacate ? 'completed' : 'confirmed',
         createdAt: new Date().toISOString(),
       };
       store.vacateRequests.unshift(vacateRequest);
 
-      // If immediate vacate, release the room
+      // If immediate vacate: release room + emit events
       if (isImmediateVacate) {
         syncDemoRoomOccupancy(store, tenant.propertyId);
         appendDemoActivity(store, {
           propertyId: tenant.propertyId,
           event: 'TENANT_VACATED',
           detail: `${tenant.name} vacated Room ${tenant.room} — deposit refund ₹${depositRefund.toLocaleString('en-IN')}`,
-          metadata: { tenantId: tenant.id, room: tenant.room, depositRefund, vacateDate: input.vacateDate },
+          metadata: { tenantId: tenant.id, room: tenant.room, depositRefund, totalDeduction, vacateDate: input.vacateDate },
         });
         appendDemoActivity(store, {
           propertyId: tenant.propertyId,
@@ -1233,6 +1269,14 @@ export async function processVacateWorkflow(input: VacateWorkflowInput): Promise
           detail: `Room ${tenant.room} is now vacant at ${store.properties.find((p) => p.id === tenant.propertyId)?.name ?? tenant.propertyId}`,
           metadata: { room: tenant.room, floor: tenant.floor },
         });
+        if (totalDeduction > 0) {
+          appendDemoActivity(store, {
+            propertyId: tenant.propertyId,
+            event: 'DEPOSIT_SETTLED',
+            detail: `Deposit settlement: ₹${tenant.securityDeposit.toLocaleString('en-IN')} held, ₹${totalDeduction.toLocaleString('en-IN')} deducted, ₹${depositRefund.toLocaleString('en-IN')} refunded to ${tenant.name}`,
+            metadata: { tenantId: tenant.id, securityDeposit: tenant.securityDeposit, totalDeduction, depositRefund, items: input.deductionItems ?? [] },
+          });
+        }
       } else {
         appendDemoActivity(store, {
           propertyId: tenant.propertyId,
@@ -1242,11 +1286,22 @@ export async function processVacateWorkflow(input: VacateWorkflowInput): Promise
         });
       }
 
+      // Emit domain event for notifications
+      domainEvents.tenantVacated({
+        tenantId: tenant.id,
+        tenantName: tenant.name,
+        propertyId: tenant.propertyId,
+        room: tenant.room,
+        depositRefund,
+        isImmediate: isImmediateVacate,
+      });
+
       return updated;
     }));
   }
 
-  throw new Error('Live vacate workflow not yet implemented. Use demo mode or contact support.');
+  // ─── Live Supabase vacate workflow ────────────────────────────────────────
+  return runSupabase(mode, () => supabaseOwnerDataApi.processVacate(input));
 }
 
 export async function archiveTenantRecord(tenantId: string): Promise<TenantRecord> {
@@ -1275,7 +1330,7 @@ export async function archiveTenantRecord(tenantId: string): Promise<TenantRecor
     }));
   }
 
-  throw new Error('Live archive not yet implemented.');
+  return runSupabase(mode, () => supabaseOwnerDataApi.archiveTenant(tenantId));
 }
 
 // ─── Vacate requests ──────────────────────────────────────────────────────────
@@ -1298,7 +1353,7 @@ export async function getActivityLog(propertyId: string | 'all' = 'all', limit =
     const filtered = propertyId === 'all' ? all : all.filter((e) => e.propertyId === propertyId || e.propertyId === null);
     return clone(filtered.slice(0, limit));
   }
-  return [];
+  return runSupabase(mode, () => supabaseOwnerDataApi.getActivityLog(propertyId, limit));
 }
 
 // ─── WhatsApp Queue ───────────────────────────────────────────────────────────

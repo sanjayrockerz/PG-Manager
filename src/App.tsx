@@ -11,6 +11,8 @@ import { Settings } from './components/Settings';
 import { Properties } from './components/Properties';
 import { Notifications } from './components/Notifications';
 import { Support } from './components/Support';
+import { AuditLog } from './components/AuditLog';
+import { TeamMembers } from './components/TeamMembers';
 import { AdminSection } from './components/AdminSection';
 import { TenantPortal } from './components/TenantPortal';
 import { Sidebar } from './components/Sidebar';
@@ -222,13 +224,22 @@ function AppContent() {
           </PageGuard>
         );
       case 'notifications':
-        return <Notifications onBack={() => setActiveTab('dashboard')} />;
+        return (
+          <Notifications
+            onBack={() => setActiveTab('dashboard')}
+            onNavigate={(tab) => setActiveTabWithRoleGuard(tab)}
+          />
+        );
       case 'support':
         return (
           <PageGuard action="page:support">
             <Support />
           </PageGuard>
         );
+      case 'audit-log':
+        return <AuditLog onBack={() => setActiveTab('dashboard')} />;
+      case 'team':
+        return <TeamMembers />;
       case 'pricing':
         return <Pricing />;
       case 'admin-section':

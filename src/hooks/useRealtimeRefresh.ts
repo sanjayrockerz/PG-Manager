@@ -16,7 +16,9 @@ type TableName =
   | 'owner_user_property_scopes'
   | 'owner_subscriptions'
   | 'support_tickets'
-  | 'support_ticket_comments';
+  | 'support_ticket_comments'
+  | 'activity_logs'
+  | 'vacate_requests';
 
 interface UseRealtimeRefreshOptions {
   key: string;

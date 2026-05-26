@@ -1,7 +1,7 @@
 import {
-  Bell, CreditCard, Home, LayoutGrid, LifeBuoy,
+  Activity, Bell, CreditCard, Home, LayoutGrid, LifeBuoy,
   LogOut, Settings, Shield, Users, Wrench, X,
-  ChevronRight, Zap,
+  ChevronRight, Zap, UserCog,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { isPlatformAdminRole } from '../utils/roles';
@@ -38,6 +38,13 @@ const ownerSections: { title: string; items: NavItem[] }[] = [
     items: [
       { id: 'maintenance',   label: 'Maintenance',   icon: Wrench },
       { id: 'announcements', label: 'Announcements', icon: Bell },
+      { id: 'audit-log',     label: 'Audit Log',     icon: Activity },
+    ],
+  },
+  {
+    title: 'Team',
+    items: [
+      { id: 'team',    label: 'Team Members', icon: UserCog },
     ],
   },
   {

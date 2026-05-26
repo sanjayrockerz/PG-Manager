@@ -11,13 +11,16 @@
 export type DomainEventType =
   | 'TENANT_ASSIGNED'
   | 'TENANT_VACATED'
+  | 'TENANT_ARCHIVED'
   | 'TENANT_STATUS_CHANGED'
   | 'ROOM_VACATED'
   | 'ROOM_OCCUPIED'
   | 'ROOM_MAINTENANCE'
   | 'OCCUPANCY_UPDATED'
   | 'PAYMENT_RECORDED'
+  | 'PAYMENT_RECEIVED'
   | 'PAYMENT_OVERDUE'
+  | 'DEPOSIT_SETTLED'
   | 'CSV_IMPORT_COMPLETED'
   | 'PROPERTY_UPDATED'
   | 'ACTIVITY_LOGGED'
@@ -27,6 +30,7 @@ export type DomainEventType =
   | 'MAINTENANCE_CLOSED'
   | 'ANNOUNCEMENT_CREATED'
   | 'WHATSAPP_QUEUED'
+  | 'TEAM_ACCESS_CHANGED'
   | 'NOTIFICATION_GENERATED';
 
 export interface DomainEvent<T = Record<string, unknown>> {
@@ -98,10 +102,34 @@ export const domainEvents = {
     tenantName: string;
     propertyId: string;
     room: string;
-    vacateDate: string;
     depositRefund: number;
+    isImmediate?: boolean;
+    vacateDate?: string;
   }): void {
     emit({ type: 'TENANT_VACATED', propertyId: payload.propertyId, payload, timestamp: new Date().toISOString() });
+  },
+
+  tenantArchived(payload: { tenantId: string; tenantName: string; propertyId: string }): void {
+    emit({ type: 'TENANT_ARCHIVED', propertyId: payload.propertyId, payload, timestamp: new Date().toISOString() });
+  },
+
+  depositSettled(payload: {
+    tenantId: string;
+    tenantName: string;
+    propertyId: string;
+    securityDeposit: number;
+    totalDeduction: number;
+    netRefund: number;
+  }): void {
+    emit({ type: 'DEPOSIT_SETTLED', propertyId: payload.propertyId, payload, timestamp: new Date().toISOString() });
+  },
+
+  paymentReceived(payload: { tenantId: string; tenantName: string; propertyId: string; amount: number; paymentId: string }): void {
+    emit({ type: 'PAYMENT_RECEIVED', propertyId: payload.propertyId, payload, timestamp: new Date().toISOString() });
+  },
+
+  teamAccessChanged(payload: { ownerId: string; targetEmail: string; action: 'invited' | 'revoked' | 'accepted' }): void {
+    emit({ type: 'TEAM_ACCESS_CHANGED', propertyId: null, payload, timestamp: new Date().toISOString() });
   },
 
   tenantStatusChanged(payload: {

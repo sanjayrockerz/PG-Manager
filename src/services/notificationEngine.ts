@@ -175,14 +175,68 @@ export function initNotificationEngine(): void {
   );
 
   // Tenant vacated
-  subscribe<{ tenantId: string; tenantName: string; propertyId: string; room: string }>(
+  subscribe<{ tenantId: string; tenantName: string; propertyId: string; room: string; depositRefund: number; isImmediate?: boolean }>(
     'TENANT_VACATED',
     ({ payload }) => {
+      const isImmediate = payload.isImmediate !== false;
       store!.push(makeNotification(
         'tenant',
-        `Tenant vacated: ${payload.tenantName}`,
-        `Room ${payload.room} is now available`,
+        isImmediate
+          ? `${payload.tenantName} has vacated`
+          : `Vacate notice from ${payload.tenantName}`,
+        isImmediate
+          ? `Room ${payload.room} is now available · Refund ₹${payload.depositRefund.toLocaleString('en-IN')}`
+          : `Room ${payload.room} · Scheduled move-out`,
         { entityType: 'tenant', entityId: payload.tenantId, propertyId: payload.propertyId },
+      ));
+    },
+  );
+
+  // Deposit settled
+  subscribe<{ tenantId: string; tenantName: string; propertyId: string; securityDeposit: number; totalDeduction: number; netRefund: number }>(
+    'DEPOSIT_SETTLED',
+    ({ payload }) => {
+      store!.push(makeNotification(
+        'payment',
+        `Deposit settled: ${payload.tenantName}`,
+        `₹${payload.netRefund.toLocaleString('en-IN')} refund after ₹${payload.totalDeduction.toLocaleString('en-IN')} deductions`,
+        { entityType: 'tenant', entityId: payload.tenantId, propertyId: payload.propertyId },
+      ));
+    },
+  );
+
+  // Payment received (marked paid)
+  subscribe<{ tenantId: string; tenantName: string; propertyId: string; amount: number; paymentId: string }>(
+    'PAYMENT_RECEIVED',
+    ({ payload }) => {
+      store!.push(makeNotification(
+        'payment',
+        `Payment received: ₹${payload.amount.toLocaleString('en-IN')}`,
+        `From ${payload.tenantName}`,
+        { entityType: 'payment', entityId: payload.paymentId, propertyId: payload.propertyId },
+      ));
+    },
+  );
+
+  // Team access changed
+  subscribe<{ ownerId: string; targetEmail: string; action: 'invited' | 'revoked' | 'accepted' }>(
+    'TEAM_ACCESS_CHANGED',
+    ({ payload }) => {
+      const titles: Record<string, string> = {
+        invited: `Team invite sent`,
+        accepted: `Team member joined`,
+        revoked: `Team access revoked`,
+      };
+      const messages: Record<string, string> = {
+        invited: `Invite sent to ${payload.targetEmail}`,
+        accepted: `${payload.targetEmail} accepted the invite`,
+        revoked: `Access removed for ${payload.targetEmail}`,
+      };
+      store!.push(makeNotification(
+        'system',
+        titles[payload.action] ?? 'Team access changed',
+        messages[payload.action] ?? payload.targetEmail,
+        { entityType: 'team', propertyId: null },
       ));
     },
   );

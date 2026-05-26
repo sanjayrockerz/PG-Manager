@@ -133,7 +133,10 @@ interface TenantRow {
   id_document_url: string | null;
   join_date: string;
   status: TenantStatus;
+  vacate_date?: string | null;
+  vacate_reason?: string | null;
   created_at: string;
+  updated_at?: string | null;
 }
 
 interface PaymentRow {
@@ -316,12 +319,21 @@ export interface VacateRequest {
   createdAt: string;
 }
 
+export interface VacateDeductionItem {
+  id: string;
+  category: string;
+  description: string;
+  amount: number;
+}
+
 export interface VacateWorkflowInput {
   tenantId: string;
   vacateDate: string;
   reason: string;
   depositDeduction: number;
   deductionReason: string;
+  deductionItems?: VacateDeductionItem[];
+  adjustPendingRentFromDeposit?: boolean;
 }
 
 export interface ActivityLogEntry {
@@ -1390,6 +1402,8 @@ function mapTenant(row: TenantRow): TenantRecord {
     idDocumentUrl: row.id_document_url ?? '',
     joinDate: toDateOnly(row.join_date),
     status: row.status,
+    vacateDate: row.vacate_date ? toDateOnly(row.vacate_date) : undefined,
+    vacateReason: row.vacate_reason ?? undefined,
     createdAt: row.created_at,
   };
 }
@@ -4211,6 +4225,168 @@ export const supabaseOwnerDataApi = {
     } catch (error) {
       throw normalizeError(error);
     }
+  },
+
+  async processVacate(input: VacateWorkflowInput): Promise<TenantRecord> {
+    const ownerId = await getOwnerId();
+
+    const vacateDate = new Date(input.vacateDate);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const isImmediateVacate = vacateDate <= today;
+
+    const newStatus: TenantStatus = isImmediateVacate ? 'inactive' : 'notice_submitted';
+
+    const totalDeduction = input.deductionItems && input.deductionItems.length > 0
+      ? input.deductionItems.reduce((sum, d) => sum + d.amount, 0)
+      : Number(input.depositDeduction) || 0;
+
+    // Fetch tenant to compute deposit refund
+    const { data: tenantRow, error: fetchError } = await supabase
+      .from('tenants')
+      .select('*')
+      .eq('id', input.tenantId)
+      .eq('owner_id', ownerId)
+      .single<TenantRow>();
+
+    if (fetchError || !tenantRow) {
+      throw fetchError ?? new Error('Tenant not found');
+    }
+
+    const depositRefund = Math.max(0, Number(tenantRow.security_deposit ?? 0) - totalDeduction);
+
+    // Update tenant status
+    const { data: updatedRow, error: updateError } = await supabase
+      .from('tenants')
+      .update({
+        status: newStatus,
+        vacate_date: input.vacateDate,
+        vacate_reason: input.reason,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', input.tenantId)
+      .eq('owner_id', ownerId)
+      .select('*')
+      .single<TenantRow>();
+
+    if (updateError) throw updateError;
+
+    // Create vacate_requests record
+    const deductionSummary = input.deductionItems && input.deductionItems.length > 0
+      ? input.deductionItems.map((d) => d.description).join('; ')
+      : input.deductionReason;
+
+    await supabase.from('vacate_requests').insert({
+      owner_id: ownerId,
+      tenant_id: input.tenantId,
+      property_id: tenantRow.property_id,
+      notice_date: new Date().toISOString().split('T')[0],
+      planned_vacate_date: input.vacateDate,
+      reason: input.reason,
+      final_settlement_amount: tenantRow.monthly_rent ?? 0,
+      deposit_refund: depositRefund,
+      deposit_deduction: totalDeduction,
+      deduction_reason: deductionSummary,
+      status: isImmediateVacate ? 'completed' : 'confirmed',
+    });
+
+    // Log activity
+    await supabase.from('activity_logs').insert({
+      owner_id: ownerId,
+      property_id: tenantRow.property_id,
+      event: 'TENANT_VACATED',
+      detail: isImmediateVacate
+        ? `${tenantRow.name} vacated Room ${tenantRow.room} — deposit refund ₹${depositRefund.toLocaleString('en-IN')}`
+        : `${tenantRow.name} submitted vacate notice — planned move-out ${input.vacateDate}`,
+      metadata: {
+        tenantId: input.tenantId,
+        room: tenantRow.room,
+        depositRefund,
+        totalDeduction,
+        vacateDate: input.vacateDate,
+      },
+    });
+
+    // If immediate vacate, sync room occupancy
+    if (isImmediateVacate && tenantRow.property_id) {
+      try {
+        await syncRoomOccupancyForProperty(ownerId, tenantRow.property_id);
+      } catch {
+        // Non-fatal: room sync failure should not block vacate
+      }
+    }
+
+    // Notify owner
+    void createOwnerNotification(ownerId, {
+      type: 'tenant',
+      title: isImmediateVacate ? `${tenantRow.name} has vacated` : `Vacate notice: ${tenantRow.name}`,
+      message: isImmediateVacate
+        ? `Room ${tenantRow.room} is now available · Refund ₹${depositRefund.toLocaleString('en-IN')}`
+        : `Scheduled move-out: ${input.vacateDate}`,
+    }).catch(() => {});
+
+    emitOwnerDataUpdated();
+    return mapTenant(updatedRow!);
+  },
+
+  async archiveTenant(tenantId: string): Promise<TenantRecord> {
+    const ownerId = await getOwnerId();
+
+    const { data, error } = await supabase
+      .from('tenants')
+      .update({ status: 'archived', updated_at: new Date().toISOString() })
+      .eq('id', tenantId)
+      .eq('owner_id', ownerId)
+      .select('*')
+      .single<TenantRow>();
+
+    if (error) throw error;
+
+    await supabase.from('activity_logs').insert({
+      owner_id: ownerId,
+      property_id: data!.property_id,
+      event: 'TENANT_ARCHIVED',
+      detail: `${data!.name} archived`,
+      metadata: { tenantId },
+    });
+
+    emitOwnerDataUpdated();
+    return mapTenant(data!);
+  },
+
+  async getActivityLog(propertyId: string | 'all' = 'all', limit = 100): Promise<ActivityLogEntry[]> {
+    const context = await getCurrentUserContext();
+
+    let query = supabase
+      .from('activity_logs')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (!context.isPlatformAdmin) {
+      query = query.eq('owner_id', context.ownerId);
+    }
+
+    if (propertyId !== 'all') {
+      query = query.eq('property_id', propertyId);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      if (isMissingRelationError(error, 'activity_logs')) return [];
+      throw error;
+    }
+
+    return (data ?? []).map((row: Record<string, unknown>) => ({
+      id: String(row.id),
+      ownerId: String(row.owner_id),
+      propertyId: row.property_id ? String(row.property_id) : null,
+      event: String(row.event),
+      detail: String(row.detail),
+      metadata: (row.metadata as Record<string, unknown>) ?? {},
+      createdAt: String(row.created_at),
+    }));
   },
 };
 
