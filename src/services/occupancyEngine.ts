@@ -23,6 +23,8 @@ export interface RoomOccupancy {
   isVacant: boolean;
   isUnderMaintenance: boolean;
   hasUpcomingVacate: boolean;
+  hasOverdueRisk: boolean;
+  overdueCount: number;
   tenantsInRoom: TenantRecord[];
 }
 
@@ -68,6 +70,10 @@ export function computePropertyOccupancy(
       (t) => t.status === 'notice_submitted' || t.status === 'vacating',
     );
 
+    const overdueTenants = tenantsInRoom.filter((t) => t.status === 'payment_overdue');
+    const hasOverdueRisk = overdueTenants.length > 0;
+    const overdueCount = overdueTenants.length;
+
     let occupiedCount: number;
     let totalCapacity: number;
 
@@ -96,6 +102,8 @@ export function computePropertyOccupancy(
       isVacant: !isUnderMaintenance && occupiedCount === 0,
       isUnderMaintenance,
       hasUpcomingVacate,
+      hasOverdueRisk,
+      overdueCount,
       tenantsInRoom,
     };
   });

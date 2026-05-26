@@ -37,6 +37,7 @@ import {
   printSettlementReceipt,
   createDeductionItem,
 } from '../services/depositSettlementService';
+import { printAgreement, downloadAgreementHtml } from '../services/agreementService';
 
 interface TenantDetailProps {
   tenantId: string;
@@ -498,6 +499,109 @@ function VacateWorkflowModal({
   );
 }
 
+// ─── Agreement Generator ──────────────────────────────────────────────────────
+
+function AgreementTab({ tenant, property }: { tenant: TenantRecord; property?: { name: string; address: string; city: string; state: string } | null }) {
+  const [ownerName, setOwnerName] = useState('');
+  const [ownerPhone, setOwnerPhone] = useState('');
+
+  const agreementData = {
+    tenant,
+    propertyName: property?.name ?? 'PG Accommodation',
+    propertyAddress: property?.address ?? '',
+    propertyCity: property ? `${property.city}, ${property.state}` : '',
+    ownerName: ownerName || 'Property Owner',
+    ownerPhone: ownerPhone || '—',
+    generatedAt: new Date().toISOString(),
+  };
+
+  return (
+    <div className="space-y-5">
+      <Card className="border-gray-200">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <ReceiptText className="w-5 h-5 text-indigo-600" /> Rental Agreement Generator
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4 text-sm">
+          <p className="text-gray-500 text-sm">
+            Generate a pre-filled rental agreement for <strong>{tenant.name}</strong> using existing tenant and property data. Customize owner details below before printing.
+          </p>
+
+          {/* Auto-filled preview */}
+          <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 space-y-2.5">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Auto-Filled Details</p>
+            {[
+              ['Tenant Name', tenant.name],
+              ['Phone', tenant.phone || '—'],
+              ['Email', tenant.email || '—'],
+              ['ID', `${tenant.idType || '—'} · ${tenant.idNumber || '—'}`],
+              ['Property', property?.name ?? '—'],
+              ['Room / Bed', [tenant.floor ? `Floor ${tenant.floor}` : null, tenant.room ? `Room ${tenant.room}` : null, tenant.bed ? `Bed ${tenant.bed}` : null].filter(Boolean).join(', ') || '—'],
+              ['Monthly Rent', `₹${tenant.rent.toLocaleString('en-IN')}`],
+              ['Security Deposit', `₹${tenant.securityDeposit.toLocaleString('en-IN')}`],
+              ['Move-In Date', tenant.joinDate ? new Date(tenant.joinDate).toLocaleDateString('en-IN') : '—'],
+              ['Rent Due', `${tenant.rentDueDate}th of month`],
+            ].map(([label, value]) => (
+              <div key={label} className="flex items-center justify-between">
+                <span className="text-gray-500 text-xs">{label}</span>
+                <span className="text-gray-900 text-xs font-medium">{String(value)}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Owner customization */}
+          <div className="space-y-3">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Owner Details (for Agreement)</p>
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">Owner / PG Manager Name</label>
+              <input
+                type="text"
+                value={ownerName}
+                onChange={(e) => setOwnerName(e.target.value)}
+                placeholder="Your full name"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-600 mb-1">Owner Phone</label>
+              <input
+                type="tel"
+                value={ownerPhone}
+                onChange={(e) => setOwnerPhone(e.target.value)}
+                placeholder="+91 XXXXX XXXXX"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-3 pt-2">
+            <Button
+              className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white gap-2"
+              onClick={() => printAgreement(agreementData)}
+            >
+              <Printer className="w-4 h-4" /> Print Agreement
+            </Button>
+            <Button
+              variant="outline"
+              className="flex-1 gap-2"
+              onClick={() => downloadAgreementHtml(agreementData)}
+            >
+              <Download className="w-4 h-4" /> Download (HTML)
+            </Button>
+          </div>
+
+          <div className="bg-blue-50 border border-blue-100 rounded-lg p-3">
+            <p className="text-xs text-blue-700">
+              The agreement is generated from existing tenant data and standard PG terms. Both parties should sign printed copies. Keep one copy with records and give one to the tenant.
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 // ─── Document Vault ───────────────────────────────────────────────────────────
 
 interface DocumentItem {
@@ -854,6 +958,9 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
           <TabsTrigger value="documents" className="data-[state=active]:bg-[#4F46E5] data-[state=active]:text-white">
             <FileText className="w-4 h-4 mr-1.5" /> Documents
           </TabsTrigger>
+          <TabsTrigger value="agreement" className="data-[state=active]:bg-[#4F46E5] data-[state=active]:text-white">
+            <ReceiptText className="w-4 h-4 mr-1.5" /> Agreement
+          </TabsTrigger>
           {tenant.vacateDate && (
             <TabsTrigger value="settlement" className="data-[state=active]:bg-[#4F46E5] data-[state=active]:text-white">
               <History className="w-4 h-4 mr-1.5" /> Settlement
@@ -992,6 +1099,11 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
         {/* Documents tab */}
         <TabsContent value="documents">
           <DocumentVaultTab tenant={tenant} />
+        </TabsContent>
+
+        {/* Agreement tab */}
+        <TabsContent value="agreement">
+          <AgreementTab tenant={tenant} property={property} />
         </TabsContent>
 
         {/* Settlement tab (shown only after vacate) */}
