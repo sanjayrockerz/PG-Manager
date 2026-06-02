@@ -575,12 +575,13 @@ export function Tenants({ onViewTenant }: TenantsProps) {
                   <td style={{ padding: '10px 14px' }}>
                     <div className="flex items-center gap-1">
                       <button
-                        title="View details"
-                        onClick={() => { setViewingTenant(tenant); setViewOpen(true); }}
-                        className="ds-btn ds-btn-secondary"
-                        style={{ fontSize: 11, padding: '4px 6px', minWidth: 0 }}
+                        title="View full profile"
+                        onClick={() => onViewTenant(tenant.id)}
+                        className="ds-btn ds-btn-primary"
+                        style={{ fontSize: 11, padding: '4px 8px', gap: 4 }}
                       >
                         <Eye style={{ width: 13, height: 13 }} />
+                        View
                       </button>
                       <button
                         title="Edit"
@@ -650,7 +651,7 @@ export function Tenants({ onViewTenant }: TenantsProps) {
 
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => { setViewingTenant(tenant); setViewOpen(true); }}
+                  onClick={() => onViewTenant(tenant.id)}
                   className="ds-btn ds-btn-primary"
                   style={{ flex: 1, fontSize: 12, padding: '6px 0', justifyContent: 'center', gap: 4 }}
                 >

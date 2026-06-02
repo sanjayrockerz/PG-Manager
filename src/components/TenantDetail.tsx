@@ -10,7 +10,8 @@ import {
   Clock, AlertCircle, Loader2, ShieldCheck, LogOut,
   AlertTriangle, Archive, ChevronRight, ChevronLeft,
   ReceiptText, Plus, Trash2, Printer, History,
-  Upload, Eye, Download,
+  Upload, Eye, Download, Activity, CreditCard, X,
+  ImageIcon,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useProperty } from '../contexts/PropertyContext';
@@ -22,6 +23,7 @@ import {
   getMaintenanceForTenant,
   processVacateWorkflow,
   archiveTenantRecord,
+  updateTenantRecord,
 } from '../services/dataService';
 import type { TenantRecord, PaymentRecord, MaintenanceTicketRecord } from '../services/supabaseData';
 import {
@@ -602,6 +604,276 @@ function AgreementTab({ tenant, property }: { tenant: TenantRecord; property?: {
   );
 }
 
+// ─── Activity Timeline ────────────────────────────────────────────────────────
+
+interface ActivityEvent {
+  id: string;
+  date: string;
+  type: 'payment_paid' | 'payment_overdue' | 'payment_pending' | 'maintenance' | 'status' | 'joined';
+  title: string;
+  detail: string;
+}
+
+function ActivityTimeline({
+  payments,
+  tickets,
+  tenant,
+}: {
+  payments: PaymentRecord[];
+  tickets: MaintenanceTicketRecord[];
+  tenant: TenantRecord;
+}) {
+  const events: ActivityEvent[] = [];
+
+  // Join event
+  events.push({
+    id: 'joined',
+    date: tenant.joinDate,
+    type: 'joined',
+    title: 'Tenant moved in',
+    detail: `Joined ${tenant.pgName ?? ''} · Room ${tenant.room}${tenant.bed ? ` · Bed ${tenant.bed}` : ''}`,
+  });
+
+  // Payment events
+  for (const p of payments) {
+    const dateStr = p.paidDate ?? p.dueDate;
+    events.push({
+      id: `pay-${p.id}`,
+      date: dateStr,
+      type: p.status === 'paid' ? 'payment_paid' : p.status === 'overdue' ? 'payment_overdue' : 'payment_pending',
+      title: p.status === 'paid'
+        ? `Rent paid — ₹${p.totalAmount.toLocaleString('en-IN')}`
+        : p.status === 'overdue'
+          ? `Rent overdue — ₹${p.totalAmount.toLocaleString('en-IN')}`
+          : `Rent due — ₹${p.totalAmount.toLocaleString('en-IN')}`,
+      detail: `Due ${new Date(p.dueDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}${p.paidDate ? ` · Paid ${new Date(p.paidDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}` : ''}${p.extraCharges > 0 ? ` · +₹${p.extraCharges.toLocaleString('en-IN')} extra charges` : ''}`,
+    });
+  }
+
+  // Maintenance events
+  for (const t of tickets) {
+    events.push({
+      id: `maint-${t.id}`,
+      date: t.date,
+      type: 'maintenance',
+      title: t.issue,
+      detail: `${t.priority.toUpperCase()} priority · ${t.status === 'resolved' ? 'Resolved' : t.status === 'in-progress' ? 'In progress' : 'Open'} · ${t.ticketId}`,
+    });
+  }
+
+  // Sort newest first
+  events.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+  const iconForType = (type: ActivityEvent['type']) => {
+    switch (type) {
+      case 'payment_paid': return { icon: CheckCircle, color: '#059669', bg: '#ECFDF5' };
+      case 'payment_overdue': return { icon: AlertCircle, color: '#DC2626', bg: '#FEF2F2' };
+      case 'payment_pending': return { icon: Clock, color: '#D97706', bg: '#FFFBEB' };
+      case 'maintenance': return { icon: Wrench, color: '#7C3AED', bg: '#F5F3FF' };
+      case 'joined': return { icon: User, color: '#6366F1', bg: '#EEF2FF' };
+      default: return { icon: Activity, color: '#71717A', bg: '#F4F4F6' };
+    }
+  };
+
+  if (events.length === 0) {
+    return (
+      <div className="text-center py-12" style={{ color: '#A1A1AA' }}>
+        <Activity className="w-8 h-8 mx-auto mb-2 opacity-30" />
+        <p style={{ fontSize: 13 }}>No activity yet</p>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+      {events.map((ev, idx) => {
+        const { icon: Icon, color, bg } = iconForType(ev.type);
+        const isLast = idx === events.length - 1;
+        return (
+          <div key={ev.id} className="flex gap-3" style={{ position: 'relative', paddingBottom: isLast ? 0 : 16 }}>
+            {/* Vertical line */}
+            {!isLast && (
+              <div style={{
+                position: 'absolute', left: 15, top: 32, bottom: 0, width: 1, background: '#F1F1F3',
+              }} />
+            )}
+            {/* Icon */}
+            <div
+              className="flex-shrink-0 flex items-center justify-center rounded-full"
+              style={{ width: 32, height: 32, background: bg, zIndex: 1 }}
+            >
+              <Icon style={{ width: 14, height: 14, color }} />
+            </div>
+            {/* Content */}
+            <div className="flex-1 min-w-0 pt-1">
+              <div className="flex items-start justify-between gap-2">
+                <p style={{ fontSize: 13, fontWeight: 500, color: '#0A0A0B' }}>{ev.title}</p>
+                <p style={{ fontSize: 11, color: '#A1A1AA', flexShrink: 0, marginTop: 1 }}>
+                  {new Date(ev.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                </p>
+              </div>
+              <p style={{ fontSize: 12, color: '#71717A', marginTop: 2 }}>{ev.detail}</p>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── ID Proof Upload ──────────────────────────────────────────────────────────
+
+function IdProofSection({
+  tenant,
+  onUpdate,
+}: {
+  tenant: TenantRecord;
+  onUpdate: (updated: TenantRecord) => void;
+}) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(tenant.idDocumentUrl || null);
+  const [previewType, setPreviewType] = useState<'image' | 'pdf' | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const isDemoMode = isDemoModeEnabled();
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) { toast.error('File must be under 10 MB.'); return; }
+
+    const objectUrl = URL.createObjectURL(file);
+    setPreviewUrl(objectUrl);
+    setPreviewType(file.type.startsWith('image/') ? 'image' : 'pdf');
+  };
+
+  const handleSave = async () => {
+    if (!previewUrl) return;
+    setUploading(true);
+    try {
+      if (isDemoMode) {
+        // In demo mode: update the demo store with the object URL (session-only)
+        const updated = await updateTenantRecord(tenant.id, { idType: tenant.idType, idNumber: tenant.idNumber } as any);
+        // Manually patch idDocumentUrl in the returned object for UI (demo store doesn't persist objectURLs)
+        onUpdate({ ...updated, idDocumentUrl: previewUrl });
+        toast.success('ID proof saved (demo mode — resets on refresh).');
+      } else {
+        // Live mode: upload file to Supabase storage
+        const { supabase } = await import('../lib/supabase');
+        const fileInput = fileInputRef.current?.files?.[0];
+        if (!fileInput) { toast.error('Please select a file first.'); return; }
+
+        const ext = fileInput.name.split('.').pop() ?? 'jpg';
+        const path = `tenant-ids/${tenant.id}/id-proof.${ext}`;
+        const { error: uploadError } = await supabase.storage
+          .from('tenant-documents')
+          .upload(path, fileInput, { upsert: true, contentType: fileInput.type });
+
+        if (uploadError) throw uploadError;
+
+        const { data: { publicUrl } } = supabase.storage
+          .from('tenant-documents')
+          .getPublicUrl(path);
+
+        const updated = await updateTenantRecord(tenant.id, {} as any);
+        onUpdate({ ...updated, idDocumentUrl: publicUrl });
+        setPreviewUrl(publicUrl);
+        toast.success('ID proof uploaded successfully.');
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Upload failed.');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* ID info row */}
+      <div className="ds-card" style={{ padding: '14px 16px' }}>
+        <p style={{ fontSize: 11, fontWeight: 600, color: '#71717A', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10 }}>ID Details</p>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <div style={{ padding: '8px 10px', background: '#F8FAFC', borderRadius: 8 }}>
+            <p style={{ fontSize: 10, color: '#A1A1AA', marginBottom: 3 }}>ID Type</p>
+            <p style={{ fontSize: 13, fontWeight: 600, color: '#0A0A0B' }}>{tenant.idType || '—'}</p>
+          </div>
+          <div style={{ padding: '8px 10px', background: '#F8FAFC', borderRadius: 8 }}>
+            <p style={{ fontSize: 10, color: '#A1A1AA', marginBottom: 3 }}>ID Number</p>
+            <p style={{ fontSize: 13, fontWeight: 600, color: '#0A0A0B', fontFamily: 'monospace' }}>{tenant.idNumber || '—'}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Upload section */}
+      <div className="ds-card" style={{ padding: '14px 16px' }}>
+        <p style={{ fontSize: 11, fontWeight: 600, color: '#71717A', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 12 }}>ID Proof Document</p>
+
+        {/* Preview */}
+        {previewUrl && (
+          <div style={{ marginBottom: 12, position: 'relative' }}>
+            {previewType === 'image' || (previewUrl && !previewUrl.endsWith('.pdf')) ? (
+              <div style={{ position: 'relative', display: 'inline-block', width: '100%' }}>
+                <img
+                  src={previewUrl}
+                  alt="ID proof"
+                  style={{ width: '100%', maxHeight: 280, objectFit: 'contain', borderRadius: 8, border: '1px solid #E4E4E7', background: '#F8FAFC' }}
+                  onError={() => setPreviewType('pdf')}
+                />
+                <div style={{ position: 'absolute', top: 6, right: 6, display: 'flex', gap: 4 }}>
+                  <button
+                    onClick={() => window.open(previewUrl, '_blank')}
+                    style={{ padding: '4px 8px', borderRadius: 6, background: '#0A0A0B99', color: '#fff', fontSize: 11, fontWeight: 600, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
+                  >
+                    <Eye style={{ width: 11, height: 11 }} /> View Full
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div
+                style={{ padding: '20px 16px', background: '#F8FAFC', border: '1px solid #E4E4E7', borderRadius: 8, textAlign: 'center', cursor: 'pointer' }}
+                onClick={() => window.open(previewUrl, '_blank')}
+              >
+                <FileText style={{ width: 32, height: 32, color: '#6366F1', margin: '0 auto 8px' }} />
+                <p style={{ fontSize: 13, fontWeight: 500, color: '#6366F1' }}>PDF Document — Click to view</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Upload area */}
+        <div
+          onClick={() => fileInputRef.current?.click()}
+          style={{
+            border: '2px dashed #E4E4E7', borderRadius: 10, padding: '20px 16px', textAlign: 'center',
+            cursor: 'pointer', transition: 'all 0.15s',
+          }}
+          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = '#6366F1'; (e.currentTarget as HTMLElement).style.background = '#EEF2FF50'; }}
+          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = '#E4E4E7'; (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
+        >
+          <ImageIcon style={{ width: 24, height: 24, color: '#A1A1AA', margin: '0 auto 8px' }} />
+          <p style={{ fontSize: 13, fontWeight: 500, color: '#52525B' }}>
+            {previewUrl ? 'Replace document' : 'Upload ID proof'}
+          </p>
+          <p style={{ fontSize: 11, color: '#A1A1AA', marginTop: 4 }}>Aadhaar, PAN, Passport, Driving License · JPG, PNG, PDF · Max 10 MB</p>
+          <input ref={fileInputRef} type="file" className="hidden" accept="image/*,.pdf" onChange={handleFileChange} />
+        </div>
+
+        {/* Save button — show only after selecting a new file */}
+        {previewUrl && (
+          <button
+            onClick={() => void handleSave()}
+            disabled={uploading}
+            className="ds-btn ds-btn-primary"
+            style={{ width: '100%', marginTop: 10, justifyContent: 'center', gap: 6, fontSize: 13, padding: '8px 0' }}
+          >
+            {uploading ? <Loader2 style={{ width: 14, height: 14 }} className="animate-spin" /> : <Upload style={{ width: 14, height: 14 }} />}
+            {uploading ? 'Saving…' : 'Save ID Proof'}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Document Vault ───────────────────────────────────────────────────────────
 
 interface DocumentItem {
@@ -737,7 +1009,7 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
   const [tickets, setTickets] = useState<MaintenanceTicketRecord[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('payments');
+  const [activeTab, setActiveTab] = useState('activity');
   const [vacateOpen, setVacateOpen] = useState(false);
   const [archiving, setArchiving] = useState(false);
 
@@ -854,8 +1126,11 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
       <Card className="border-gray-200 mb-6">
         <CardContent className="p-6">
           <div className="flex items-start gap-4 md:gap-6">
-            <div className="w-20 h-20 md:w-24 md:h-24 bg-gradient-to-br from-purple-500 to-blue-500 rounded-2xl flex items-center justify-center shadow-xl flex-shrink-0">
-              <span className="text-white font-bold text-2xl md:text-3xl">{initials}</span>
+            <div
+              className="flex-shrink-0 flex items-center justify-center rounded-2xl text-white font-bold"
+              style={{ width: 72, height: 72, background: '#EEF2FF', color: '#6366F1', fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em' }}
+            >
+              {initials}
             </div>
 
             <div className="flex-1 min-w-0">
@@ -946,6 +1221,9 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="mb-6 bg-white border border-gray-200 flex-wrap h-auto gap-1">
+          <TabsTrigger value="activity" className="data-[state=active]:bg-[#4F46E5] data-[state=active]:text-white">
+            <Activity className="w-4 h-4 mr-1.5" /> Activity
+          </TabsTrigger>
           <TabsTrigger value="payments" className="data-[state=active]:bg-[#4F46E5] data-[state=active]:text-white">
             <IndianRupee className="w-4 h-4 mr-1.5" /> Payments
           </TabsTrigger>
@@ -967,6 +1245,20 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
             </TabsTrigger>
           )}
         </TabsList>
+
+        {/* Activity tab */}
+        <TabsContent value="activity">
+          <Card className="border-gray-200">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Activity className="w-4 h-4 text-indigo-600" /> Tenant Activity Timeline
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ActivityTimeline payments={payments} tickets={tickets} tenant={tenant} />
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         {/* Payments tab */}
         <TabsContent value="payments">
@@ -1061,24 +1353,7 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
         {/* ID & Guardian tab */}
         <TabsContent value="profile">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <Card className="border-gray-200">
-              <CardHeader><CardTitle className="text-base">ID Proof</CardTitle></CardHeader>
-              <CardContent className="space-y-3 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Type</span>
-                  <span className="font-semibold text-gray-900">{tenant.idType || '—'}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Number</span>
-                  <span className="font-semibold text-gray-900">{tenant.idNumber || '—'}</span>
-                </div>
-                {tenant.idDocumentUrl && (
-                  <Button variant="outline" size="sm" className="w-full mt-2" onClick={() => window.open(tenant.idDocumentUrl, '_blank')}>
-                    <FileText className="w-4 h-4 mr-2" /> View Document
-                  </Button>
-                )}
-              </CardContent>
-            </Card>
+            <IdProofSection tenant={tenant} onUpdate={(updated) => setTenant(updated)} />
 
             <Card className="border-gray-200">
               <CardHeader><CardTitle className="text-base">Guardian / Emergency Contact</CardTitle></CardHeader>
