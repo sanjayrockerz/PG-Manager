@@ -542,25 +542,26 @@ export function Maintenance() {
   }
 
   return (
-    <div className="bg-white min-h-screen pb-20 md:pb-6">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       {/* Header */}
-      <div className="sticky top-0 z-20 flex items-center justify-between px-6 py-3 border-b border-zinc-100 bg-white">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-lg font-bold text-zinc-900">Maintenance</h1>
-          <p className="text-xs text-zinc-500 mt-0.5">
+          <h1 className="ds-page-title">Maintenance</h1>
+          <p style={{ fontSize: 13, color: '#A1A1AA', marginTop: 2 }}>
             {stats.open + stats['in-progress']} active · {stats.resolved} resolved · {stats.total} total
           </p>
         </div>
-        <Button
+        <button
           onClick={() => setCreateOpen(true)}
-          className="bg-indigo-600 hover:bg-indigo-700 text-white h-8 text-xs px-3"
+          className="ds-btn ds-btn-primary"
+          style={{ fontSize: 12, padding: '6px 14px', gap: 6 }}
         >
-          <Plus className="w-3.5 h-3.5 mr-1.5" /> New Ticket
-        </Button>
+          <Plus style={{ width: 13, height: 13 }} /> New Ticket
+        </button>
       </div>
 
       {/* Stats bar */}
-      <div className="flex items-center gap-px px-6 py-3 border-b border-zinc-100 overflow-x-auto">
+      <div className="ds-card flex items-center gap-px overflow-x-auto" style={{ padding: '8px 12px' }}>
         {([
           { key: 'all',         label: 'All',         count: stats.total,             color: 'text-zinc-700' },
           { key: 'open',        label: 'Open',        count: stats.open,              color: 'text-red-600' },
@@ -586,7 +587,7 @@ export function Maintenance() {
 
       {/* Needs Attention First */}
       {attentionTickets.length > 0 && filterStatus === 'all' && (
-        <div className="px-6 pt-4 pb-2">
+        <div>
           <div
             className="rounded-xl overflow-hidden"
             style={{ border: '1px solid #FDE68A', background: '#FFFBEB' }}
@@ -631,7 +632,7 @@ export function Maintenance() {
       )}
 
       {/* Ticket list */}
-      <div className="px-6 py-4 space-y-2">
+      <div className="space-y-2">
         {filteredTickets.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-zinc-400">
             <Wrench className="w-8 h-8 mb-2 opacity-30" />

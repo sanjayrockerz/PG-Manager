@@ -96,9 +96,9 @@ function AnnouncementCard({ ann, waEntry, isPinnedSection, onPin, onEdit, onDele
     <div
       className="rounded-xl transition-all"
       style={{
-        background: isPinnedSection ? 'linear-gradient(to right, #F5F3FF, #EFF6FF)' : '#FFFFFF',
-        border: isPinnedSection ? '1px solid #DDD6FE' : '1px solid #E4E4E7',
-        boxShadow: isPinnedSection ? '0 2px 12px -4px rgb(99 102 241 / 0.15)' : '0 1px 4px -2px rgb(0 0 0 / 0.06)',
+        background: '#FFFFFF',
+        border: '1px solid #E4E4E7',
+        borderLeft: isPinnedSection ? '3px solid #6366F1' : '1px solid #E4E4E7',
       }}
     >
       <div className="p-5">
@@ -106,10 +106,10 @@ function AnnouncementCard({ ann, waEntry, isPinnedSection, onPin, onEdit, onDele
           {/* Icon */}
           <div
             className="flex-shrink-0 flex items-center justify-center rounded-xl mt-0.5"
-            style={{ width: 36, height: 36, background: isPinnedSection ? '#EDE9FE' : '#F4F4F6' }}
+            style={{ width: 36, height: 36, background: '#F4F4F6' }}
           >
             {isPinnedSection
-              ? <Pin className="w-4 h-4" style={{ color: '#7C3AED' }} />
+              ? <Pin className="w-4 h-4" style={{ color: '#6366F1' }} />
               : <Megaphone className="w-4 h-4" style={{ color: '#A1A1AA' }} />
             }
           </div>
@@ -366,15 +366,12 @@ export function Announcements() {
   }
 
   return (
-    <div className="p-6 bg-zinc-50 min-h-screen pb-20 md:pb-6">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       {/* Header */}
-      <div
-        className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6 pb-5"
-        style={{ borderBottom: '1px solid #E4E4E7' }}
-      >
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-xl font-bold text-zinc-900">Announcements</h1>
-          <p className="text-sm text-zinc-500 mt-0.5">Broadcast updates to tenants across your properties</p>
+          <h1 className="ds-page-title">Announcements</h1>
+          <p style={{ fontSize: 13, color: '#A1A1AA', marginTop: 2 }}>Broadcast updates to tenants across your properties</p>
         </div>
         <div className="flex items-center gap-2">
           {waQueue.length > 0 && (
@@ -411,8 +408,8 @@ export function Announcements() {
       {/* WhatsApp Queue Panel */}
       {showWaPanel && waQueue.length > 0 && (
         <div
-          className="rounded-xl mb-6"
-          style={{ background: '#FFFFFF', border: '1px solid #BBF7D0', boxShadow: '0 2px 12px -4px rgb(16 185 129 / 0.12)' }}
+          className="rounded-xl"
+          style={{ background: '#FFFFFF', border: '1px solid #E4E4E7' }}
         >
           <div className="flex items-center justify-between px-4 py-3 border-b border-green-100">
             <div className="flex items-center gap-2">
@@ -460,7 +457,7 @@ export function Announcements() {
       )}
 
       {/* Stats row */}
-      <div className="grid grid-cols-3 gap-3 mb-6">
+      <div className="grid grid-cols-3 gap-3">
         {[
           { label: 'Total', value: announcements.length, color: '#6366F1' },
           { label: 'Pinned', value: announcements.filter((a) => a.isPinned).length, color: '#7C3AED' },
@@ -478,7 +475,7 @@ export function Announcements() {
       </div>
 
       {/* Filter chips */}
-      <div className="flex gap-2 mb-5 overflow-x-auto pb-1">
+      <div className="flex gap-2 overflow-x-auto pb-1">
         {(['all', 'maintenance', 'payment', 'rules', 'general'] as FilterCat[]).map((c) => {
           const count = c === 'all' ? announcements.length : announcements.filter((a) => a.category === c).length;
           return (

@@ -504,7 +504,7 @@ export function Properties({ onNavigate }: PropertiesV2Props) {
       <Dialog open={addPropertyOpen} onOpenChange={setAddPropertyOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="text-2xl font-bold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">
+            <DialogTitle style={{ fontSize: 16, fontWeight: 700, color: '#0A0A0B' }}>
               Add New Property
             </DialogTitle>
             <DialogDescription>Enter the details of your new property</DialogDescription>
@@ -558,7 +558,7 @@ export function Properties({ onNavigate }: PropertiesV2Props) {
           </div>
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setAddPropertyOpen(false)}>Cancel</Button>
-            <Button onClick={() => void handleAddProperty()} disabled={addSaving} className="bg-gradient-to-r from-[#4F46E5] to-[#7C3AED] hover:from-[#4338CA] hover:to-[#6D28D9]">
+            <Button onClick={() => void handleAddProperty()} disabled={addSaving} className="bg-indigo-600 hover:bg-indigo-700 text-white">
               {addSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
               Add Property
             </Button>
@@ -570,7 +570,7 @@ export function Properties({ onNavigate }: PropertiesV2Props) {
       <Dialog open={editPropertyOpen} onOpenChange={setEditPropertyOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+            <DialogTitle style={{ fontSize: 16, fontWeight: 700, color: '#0A0A0B' }}>
               Edit Property
             </DialogTitle>
             <DialogDescription>Update the property details</DialogDescription>
@@ -626,7 +626,7 @@ export function Properties({ onNavigate }: PropertiesV2Props) {
           )}
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setEditPropertyOpen(false)}>Cancel</Button>
-            <Button onClick={() => void handleEditProperty()} disabled={editSaving} className="bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600">
+            <Button onClick={() => void handleEditProperty()} disabled={editSaving} className="bg-indigo-600 hover:bg-indigo-700 text-white">
               {editSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
               Update Property
             </Button>
@@ -682,7 +682,7 @@ export function Properties({ onNavigate }: PropertiesV2Props) {
       <Dialog open={addRoomOpen} onOpenChange={setAddRoomOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle className="text-2xl font-bold bg-gradient-to-r from-green-600 to-emerald-600 bg-clip-text text-transparent">
+            <DialogTitle style={{ fontSize: 16, fontWeight: 700, color: '#0A0A0B' }}>
               Add New Room
             </DialogTitle>
             <DialogDescription>Enter room details</DialogDescription>
@@ -717,7 +717,7 @@ export function Properties({ onNavigate }: PropertiesV2Props) {
           </div>
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setAddRoomOpen(false)}>Cancel</Button>
-            <Button onClick={handleAddRoom} className="bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600">
+            <Button onClick={handleAddRoom} className="bg-indigo-600 hover:bg-indigo-700 text-white">
               <Save className="w-4 h-4 mr-2" /> Add Room
             </Button>
           </DialogFooter>
@@ -728,7 +728,7 @@ export function Properties({ onNavigate }: PropertiesV2Props) {
       <Dialog open={editRoomOpen} onOpenChange={setEditRoomOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle className="text-2xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+            <DialogTitle style={{ fontSize: 16, fontWeight: 700, color: '#0A0A0B' }}>
               Edit Room
             </DialogTitle>
             <DialogDescription>Update room details</DialogDescription>
@@ -780,7 +780,7 @@ export function Properties({ onNavigate }: PropertiesV2Props) {
           )}
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setEditRoomOpen(false)}>Cancel</Button>
-            <Button onClick={handleEditRoom} className="bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600">
+            <Button onClick={handleEditRoom} className="bg-indigo-600 hover:bg-indigo-700 text-white">
               <Save className="w-4 h-4 mr-2" /> Update Room
             </Button>
           </DialogFooter>

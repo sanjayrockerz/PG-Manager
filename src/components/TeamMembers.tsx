@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+﻿import { useCallback, useEffect, useState } from 'react';
 import {
   Check,
   ChevronDown,
@@ -53,17 +53,17 @@ const DEFAULT_CAPS_FOR_ROLE: Record<DisplayRole, InviteCapabilities> = {
 
 function roleColor(role: DisplayRole) {
   switch (role) {
-    case 'viewer': return 'bg-gray-100 text-gray-700';
-    case 'editor': return 'bg-blue-100 text-blue-700';
-    case 'manager': return 'bg-purple-100 text-purple-700';
+    case 'viewer': return 'bg-gray-100 text-gray-600';
+    case 'editor': return 'bg-indigo-50 text-indigo-700';
+    case 'manager': return 'bg-indigo-100 text-indigo-800';
   }
 }
 
 function statusColor(status: InviteRecord['status']) {
   switch (status) {
-    case 'pending': return 'bg-yellow-100 text-yellow-700';
-    case 'accepted': return 'bg-green-100 text-green-700';
-    case 'revoked': return 'bg-red-100 text-red-700';
+    case 'pending': return 'bg-amber-50 text-amber-700';
+    case 'accepted': return 'bg-green-50 text-green-700';
+    case 'revoked': return 'bg-red-50 text-red-700';
     case 'expired': return 'bg-gray-100 text-gray-500';
   }
 }
@@ -73,7 +73,7 @@ const buildInviteLink = (token: string): string => {
   return `${window.location.origin}/accept-invite?token=${token}`;
 };
 
-// ─── Capability Toggle Row ─────────────────────────────────────────────────────
+// â”€â”€â”€ Capability Toggle Row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function CapabilityRow({
   label,
@@ -94,7 +94,7 @@ function CapabilityRow({
         disabled={disabled}
         onClick={() => onChange(!enabled)}
         className={`w-9 h-5 rounded-full transition-colors relative flex-shrink-0 ${
-          enabled ? 'bg-blue-600' : 'bg-gray-200'
+          enabled ? 'bg-indigo-600' : 'bg-gray-200'
         } ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
       >
         <span
@@ -107,7 +107,7 @@ function CapabilityRow({
   );
 }
 
-// ─── Edit Scope Dialog ─────────────────────────────────────────────────────────
+// â”€â”€â”€ Edit Scope Dialog â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 interface EditScopeDialogProps {
   memberId: string;
@@ -171,7 +171,7 @@ function EditScopeDialog({
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
           <div>
             <h3 className="text-sm font-semibold text-gray-900">Edit Property Access</h3>
-            <p className="text-xs text-gray-500 mt-0.5 truncate max-w-[220px]">{propertyName} · {memberEmail}</p>
+            <p className="text-xs text-gray-500 mt-0.5 truncate max-w-[220px]">{propertyName} Â· {memberEmail}</p>
           </div>
           <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-lg">
             <X className="w-4 h-4 text-gray-500" />
@@ -190,7 +190,7 @@ function EditScopeDialog({
                   onClick={() => handleRoleChange(opt.value)}
                   className={`flex-1 py-2 px-2 text-xs rounded-lg border transition-colors ${
                     displayRole === opt.value
-                      ? 'border-blue-500 bg-blue-50 text-blue-700 font-semibold'
+                      ? 'border-indigo-500 bg-indigo-50 text-indigo-700 font-semibold'
                       : 'border-gray-200 text-gray-600 hover:border-gray-300'
                   }`}
                 >
@@ -242,7 +242,7 @@ function EditScopeDialog({
             <button
               type="submit"
               disabled={isSubmitting}
-              className="flex-1 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-60"
+              className="flex-1 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 disabled:opacity-60"
             >
               {isSubmitting ? 'Saving...' : 'Save Changes'}
             </button>
@@ -253,7 +253,7 @@ function EditScopeDialog({
   );
 }
 
-// ─── Add Property Scope Dialog ─────────────────────────────────────────────────
+// â”€â”€â”€ Add Property Scope Dialog â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 interface AddPropertyScopeDialogProps {
   memberId: string;
@@ -328,7 +328,7 @@ function AddPropertyScopeDialog({
                       key={prop.id}
                       className={`flex items-center gap-2.5 p-2 rounded-lg cursor-pointer transition-colors ${
                         selectedPropertyId === prop.id
-                          ? 'bg-blue-50 border border-blue-200'
+                          ? 'bg-indigo-50 border border-indigo-200'
                           : 'hover:bg-gray-50 border border-transparent'
                       }`}
                     >
@@ -338,7 +338,7 @@ function AddPropertyScopeDialog({
                         value={prop.id}
                         checked={selectedPropertyId === prop.id}
                         onChange={() => setSelectedPropertyId(prop.id)}
-                        className="text-blue-600"
+                        className="text-indigo-600"
                       />
                       <div>
                         <p className="text-sm font-medium text-gray-900">{prop.name}</p>
@@ -360,7 +360,7 @@ function AddPropertyScopeDialog({
                       onClick={() => handleRoleChange(opt.value)}
                       className={`flex-1 py-2 px-2 text-xs rounded-lg border transition-colors ${
                         displayRole === opt.value
-                          ? 'border-blue-500 bg-blue-50 text-blue-700 font-semibold'
+                          ? 'border-indigo-500 bg-indigo-50 text-indigo-700 font-semibold'
                           : 'border-gray-200 text-gray-600 hover:border-gray-300'
                       }`}
                     >
@@ -410,7 +410,7 @@ function AddPropertyScopeDialog({
                 <button
                   type="submit"
                   disabled={isSubmitting || !selectedPropertyId}
-                  className="flex-1 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-60"
+                  className="flex-1 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 disabled:opacity-60"
                 >
                   {isSubmitting ? 'Granting...' : 'Grant Access'}
                 </button>
@@ -433,7 +433,7 @@ function AddPropertyScopeDialog({
   );
 }
 
-// ─── Invite Dialog ────────────────────────────────────────────────────────────
+// â”€â”€â”€ Invite Dialog â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 interface InviteDialogProps {
   onClose: () => void;
@@ -538,7 +538,7 @@ function InviteDialog({ onClose, onSuccess }: InviteDialogProps) {
               required
               value={formData.invitedEmail}
               onChange={(e) => setFormData({ ...formData, invitedEmail: e.target.value })}
-              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+              className="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
               placeholder="member@example.com"
             />
             <p className="text-xs text-gray-500 mt-1">
@@ -557,7 +557,7 @@ function InviteDialog({ onClose, onSuccess }: InviteDialogProps) {
                   key={opt.value}
                   className={`flex items-start gap-3 p-3 border rounded-lg cursor-pointer transition-colors ${
                     formData.displayRole === opt.value
-                      ? 'border-blue-500 bg-blue-50'
+                      ? 'border-blue-500 bg-indigo-50'
                       : 'border-gray-200 hover:border-gray-300'
                   }`}
                 >
@@ -594,7 +594,7 @@ function InviteDialog({ onClose, onSuccess }: InviteDialogProps) {
                     key={prop.id}
                     className={`flex items-center gap-3 p-2.5 rounded-lg cursor-pointer transition-colors ${
                       formData.propertyIds.includes(prop.id)
-                        ? 'bg-blue-50 border border-blue-200'
+                        ? 'bg-indigo-50 border border-indigo-200'
                         : 'hover:bg-gray-50 border border-transparent'
                     }`}
                   >
@@ -602,7 +602,7 @@ function InviteDialog({ onClose, onSuccess }: InviteDialogProps) {
                       type="checkbox"
                       checked={formData.propertyIds.includes(prop.id)}
                       onChange={() => toggleProperty(prop.id)}
-                      className="w-4 h-4 text-blue-600"
+                      className="w-4 h-4 text-indigo-600"
                     />
                     <div>
                       <p className="text-sm font-medium text-gray-900">{prop.name}</p>
@@ -623,9 +623,9 @@ function InviteDialog({ onClose, onSuccess }: InviteDialogProps) {
           {selectedRole && (
             <div className="rounded-lg bg-gray-50 border border-gray-200 px-4 py-3 text-xs text-gray-600 space-y-1">
               <p className="font-medium text-gray-700 mb-1">Default capabilities for {selectedRole.label}:</p>
-              <p>{selectedRole.value === 'viewer' ? '✓ View only — no edits' : ''}</p>
-              <p>{selectedRole.value === 'editor' ? '✓ Tenants, maintenance' : ''}</p>
-              <p>{selectedRole.value === 'manager' ? '✓ Tenants, payments, maintenance, announcements' : ''}</p>
+              <p>{selectedRole.value === 'viewer' ? 'âœ“ View only â€” no edits' : ''}</p>
+              <p>{selectedRole.value === 'editor' ? 'âœ“ Tenants, maintenance' : ''}</p>
+              <p>{selectedRole.value === 'manager' ? 'âœ“ Tenants, payments, maintenance, announcements' : ''}</p>
             </div>
           )}
 
@@ -661,7 +661,7 @@ function InviteDialog({ onClose, onSuccess }: InviteDialogProps) {
               <button
                 type="submit"
                 disabled={isSubmitting || !formData.propertyIds.length}
-                className="px-5 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60"
+                className="px-5 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-60"
               >
                 {isSubmitting ? 'Sending...' : 'Send Invite'}
               </button>
@@ -673,7 +673,7 @@ function InviteDialog({ onClose, onSuccess }: InviteDialogProps) {
   );
 }
 
-// ─── Main TeamMembers Component ───────────────────────────────────────────────
+// â”€â”€â”€ Main TeamMembers Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 interface EditScopeState {
   memberId: string;
@@ -794,14 +794,14 @@ export function TeamMembers() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h2 className="text-xl font-semibold text-gray-900">Team Members</h2>
-          <p className="text-sm text-gray-500 mt-0.5">
+          <h1 className="ds-page-title">Team</h1>
+          <p style={{ fontSize: 13, color: '#A1A1AA', marginTop: 2 }}>
             Invite people and grant them access to specific properties.
           </p>
         </div>
         <button
           onClick={() => setShowInviteDialog(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors"
+          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition-colors"
         >
           <Plus className="w-4 h-4" />
           Invite Member
@@ -870,7 +870,7 @@ export function TeamMembers() {
                           memberEmail: member.email,
                           assignedIds: member.propertyAssignments.map((s) => s.propertyId),
                         })}
-                        className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 px-2 py-1 rounded hover:bg-blue-50 transition-colors"
+                        className="flex items-center gap-1 text-xs text-indigo-600 hover:text-blue-700 px-2 py-1 rounded hover:bg-indigo-50 transition-colors"
                       >
                         <Plus className="w-3 h-3" />
                         Add Property
@@ -930,7 +930,7 @@ export function TeamMembers() {
                               ['Announcements', scope.canManageAnnouncements],
                             ].map(([label, enabled]) => (
                               <span key={String(label)} className={`text-xs ${enabled ? 'text-green-700' : 'text-gray-400'}`}>
-                                {enabled ? '✓' : '✗'} {label}
+                                {enabled ? 'âœ“' : 'âœ—'} {label}
                               </span>
                             ))}
                           </div>
@@ -994,7 +994,7 @@ export function TeamMembers() {
                       </button>
                       <button
                         onClick={() => void handleRefreshInvite(invite.id)}
-                        className="p-1.5 hover:bg-blue-50 rounded-lg transition-colors"
+                        className="p-1.5 hover:bg-indigo-50 rounded-lg transition-colors"
                         title="Renew invite for 7 more days"
                       >
                         <RefreshCw className="w-4 h-4 text-blue-500" />
@@ -1039,14 +1039,14 @@ export function TeamMembers() {
       )}
 
       {/* How it works */}
-      <div className="rounded-xl bg-blue-50 border border-blue-200 px-5 py-4">
-        <p className="text-sm font-semibold text-blue-900 mb-2">How invites work</p>
-        <ul className="text-xs text-blue-700 space-y-1 list-disc list-inside">
+      <div className="rounded-xl px-5 py-4" style={{ background: '#F8FAFC', border: '1px solid #E4E4E7' }}>
+        <p className="text-sm font-semibold text-gray-700 mb-2">How invites work</p>
+        <ul className="text-xs text-gray-500 space-y-1 list-disc list-inside">
           <li>Enter the email address and role for the person you want to invite.</li>
           <li>Select which properties they can access.</li>
           <li>When they sign up or log in with that exact email, they will automatically get access.</li>
           <li>Invites expire after 7 days. You can refresh them at any time.</li>
-          <li>Members can only see data for their assigned properties — never other owners' data.</li>
+          <li>Members can only see data for their assigned properties â€” never other owners' data.</li>
           <li>You can edit or remove individual property access at any time from the member row.</li>
         </ul>
       </div>
@@ -1074,3 +1074,4 @@ export function TeamMembers() {
     </div>
   );
 }
+
