@@ -1,4 +1,4 @@
-import { CreditCard, Home, Settings, Shield, UserCircle, Users, LifeBuoy } from 'lucide-react';
+import { Building2, CreditCard, Home, Settings, Shield, UserCircle, Users, Wrench } from 'lucide-react';
 import { useLocalization } from '../contexts/LocalizationContext';
 import { isPlatformAdminRole, isScopedOwnerRole } from '../utils/roles';
 
@@ -9,19 +9,19 @@ interface MobileNavProps {
 }
 
 const ownerNavItems = [
-  { id: 'dashboard', label: 'Home', icon: Home },
-  { id: 'tenants', label: 'Tenants', icon: Users },
-  { id: 'payments', label: 'Payments', icon: CreditCard },
-  { id: 'support', label: 'Support', icon: LifeBuoy },
-  { id: 'settings', label: 'Settings', icon: Settings },
+  { id: 'dashboard',     label: 'Home',     icon: Home },
+  { id: 'building-view', label: 'Building',  icon: Building2 },
+  { id: 'tenants',       label: 'Tenants',   icon: Users },
+  { id: 'payments',      label: 'Payments',  icon: CreditCard },
+  { id: 'settings',      label: 'Settings',  icon: Settings },
 ];
 
 const staffNavItems = [
-  { id: 'dashboard', label: 'Home', icon: Home },
-  { id: 'tenants', label: 'Tenants', icon: Users },
-  { id: 'payments', label: 'Payments', icon: CreditCard },
-  { id: 'support', label: 'Support', icon: LifeBuoy },
-  { id: 'tenant-portal', label: 'Portal', icon: UserCircle },
+  { id: 'dashboard',     label: 'Home',       icon: Home },
+  { id: 'building-view', label: 'Building',   icon: Building2 },
+  { id: 'tenants',       label: 'Tenants',    icon: Users },
+  { id: 'maintenance',   label: 'Repairs',    icon: Wrench },
+  { id: 'tenant-portal', label: 'Portal',     icon: UserCircle },
 ];
 
 const adminNavItems = [
@@ -53,7 +53,7 @@ export function MobileNav({ activeTab, setActiveTab, userRole = 'owner' }: Mobil
         {navItems.map((item) => {
           const Icon = item.icon;
           const isActive = activeTab === item.id;
-          
+
           return (
             <button
               key={item.id}
@@ -61,20 +61,18 @@ export function MobileNav({ activeTab, setActiveTab, userRole = 'owner' }: Mobil
               className={`
                 flex-1 flex flex-col items-center gap-1 py-3
                 transition-colors
-                ${isActive ? 'text-blue-600' : 'text-gray-500'}
+                ${isActive ? 'text-indigo-600' : 'text-gray-500'}
               `}
             >
-              <Icon className="w-5 h-5" />
-              <span className="text-xs">{
-                item.id === 'dashboard' ? t('mobile.home', item.label)
-                  : item.id === 'tenants' ? t('mobile.tenants', item.label)
-                    : item.id === 'properties' ? t('mobile.properties', item.label)
-                      : item.id === 'payments' ? t('mobile.payments', item.label)
-                        : item.id === 'support' ? t('mobile.support', item.label)
-                            : item.id === 'settings' ? t('mobile.settings', item.label)
-                              : item.id === 'admin-section' ? t('mobile.admin', item.label)
-                                : item.id === 'tenant-portal' ? t(userRole === 'tenant' ? 'mobile.portal' : 'mobile.tenant', item.label)
-                                  : item.label
+              <Icon className="w-5 h-5" strokeWidth={isActive ? 2.25 : 1.75} />
+              <span className="text-xs font-medium">{
+                item.id === 'dashboard'     ? t('mobile.home', item.label)
+                : item.id === 'tenants'     ? t('mobile.tenants', item.label)
+                : item.id === 'payments'    ? t('mobile.payments', item.label)
+                : item.id === 'settings'    ? t('mobile.settings', item.label)
+                : item.id === 'admin-section' ? t('mobile.admin', item.label)
+                : item.id === 'tenant-portal' ? t(userRole === 'tenant' ? 'mobile.portal' : 'mobile.tenant', item.label)
+                : item.label
               }</span>
             </button>
           );

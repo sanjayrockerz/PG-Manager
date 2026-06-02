@@ -1,10 +1,11 @@
 import {
   Activity, Bell, CreditCard, Home, LayoutGrid, LifeBuoy,
   LogOut, Settings, Shield, Users, Wrench, X,
-  ChevronRight, Zap, UserCog,
+  ChevronRight, Zap, UserCog, Building2,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { isPlatformAdminRole } from '../utils/roles';
+import { hasPermission } from '../utils/permissions';
 
 interface SidebarProps {
   activeTab: string;
@@ -23,8 +24,9 @@ const ownerSections: { title: string; items: NavItem[] }[] = [
     title: 'Management',
     items: [
       { id: 'dashboard',    label: 'Dashboard',    icon: Home },
-      { id: 'properties',   label: 'Properties',   icon: LayoutGrid },
-      { id: 'tenants',      label: 'Tenants',       icon: Users },
+      { id: 'properties',     label: 'Properties',     icon: LayoutGrid },
+      { id: 'building-view', label: 'Building View', icon: Building2 },
+      { id: 'tenants',       label: 'Tenants',        icon: Users },
     ],
   },
   {
@@ -78,9 +80,29 @@ export function Sidebar({
 
   const isPlatformAdmin = isPlatformAdminRole(userRole as any);
   const isTenant = userRole === 'tenant';
-  const sections = isPlatformAdmin ? adminSections : ownerSections;
-  const showSettings   = !isTenant;
+  const showSettings   = !isTenant && hasPermission(userRole, 'page:settings');
   const showUpgradePro = !isPlatformAdmin && !isTenant;
+
+  // Filter nav sections by permission — explicit guard per item
+  const filteredOwnerSections = ownerSections.map((section) => ({
+    ...section,
+    items: section.items.filter((item) => {
+      switch (item.id) {
+        case 'building-view':
+        case 'properties':    return hasPermission(userRole, 'page:properties');
+        case 'tenants':       return hasPermission(userRole, 'page:tenants');
+        case 'payments':      return hasPermission(userRole, 'page:payments');
+        case 'maintenance':   return hasPermission(userRole, 'page:maintenance');
+        case 'announcements': return hasPermission(userRole, 'page:announcements');
+        case 'support':       return hasPermission(userRole, 'page:support');
+        case 'audit-log':     return hasPermission(userRole, 'page:dashboard');
+        case 'team':          return hasPermission(userRole, 'team:manage');
+        default:              return true;
+      }
+    }),
+  })).filter((section) => section.items.length > 0);
+
+  const sections = isPlatformAdmin ? adminSections : filteredOwnerSections;
 
   const handleNav = (tab: string) => {
     setActiveTab(tab);

@@ -9,8 +9,10 @@ interface User {
   email: string;
   phone: string;
   role: UserRole;
+  ownerScopeId: string | null;
   pgName: string;
   city: string;
+  photoUrl: string | null;
 }
 
 interface SignupDraft {
@@ -25,6 +27,9 @@ interface AuthContextType {
   sendLoginMagicLink: (email: string) => Promise<boolean>;
   signInWithGoogle: () => Promise<boolean>;
   sendSignupMagicLink: (draft: SignupDraft) => Promise<boolean>;
+  sendPhoneOtp: (phone: string) => Promise<boolean>;
+  verifyPhoneOtp: (phone: string, token: string) => Promise<boolean>;
+  signInAsDemo: () => void;
   refreshProfile: () => Promise<void>;
   logout: () => Promise<void>;
   isLoading: boolean;
@@ -60,6 +65,20 @@ const DEMO_LOGIN_METADATA: Record<string, {
     pgName: 'Khush Living',
     city: 'Bengaluru',
   },
+};
+
+const DEMO_USER_KEY = 'pg-manager:demo-session';
+
+const DEMO_USER: User = {
+  id: 'demo-owner-001',
+  name: 'Demo Owner',
+  email: 'owner.demo@pgmanager.app',
+  phone: '+919876500001',
+  role: 'owner',
+  ownerScopeId: null,
+  pgName: 'Khush Living',
+  city: 'Bengaluru',
+  photoUrl: null,
 };
 
 const normalizeEmail = (email: string): string => email.trim().toLowerCase();
@@ -146,8 +165,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     email: appUser.email,
     phone: appUser.phone,
     role: appUser.role,
+    ownerScopeId: appUser.ownerScopeId,
     pgName: appUser.pgName,
     city: appUser.city,
+    photoUrl: appUser.photoUrl,
   });
 
   const resolveSessionUser = async (authUserId: string): Promise<User | null> => {
@@ -195,6 +216,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const loadSession = async () => {
       try {
+        // Check for demo session first
+        const demoFlag = localStorage.getItem(DEMO_USER_KEY);
+        if (demoFlag === 'true') {
+          if (!cancelled) {
+            setUser(DEMO_USER);
+            setIsLoading(false);
+          }
+          return;
+        }
+
         const { data, error } = await supabase.auth.getSession();
         if (error) {
           throw error;
@@ -325,6 +356,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const sendPhoneOtp = async (phone: string): Promise<boolean> => {
+    setIsLoading(true);
+    setAuthError('');
+    try {
+      const { error } = await supabase.auth.signInWithOtp({ phone: phone.trim() });
+      if (error) throw error;
+      return true;
+    } catch (error) {
+      setAuthError(toAuthMessage(error, 'Unable to send phone OTP.'));
+      return false;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const verifyPhoneOtp = async (phone: string, token: string): Promise<boolean> => {
+    setIsLoading(true);
+    setAuthError('');
+    try {
+      const { data, error } = await supabase.auth.verifyOtp({
+        phone: phone.trim(),
+        token: token.trim(),
+        type: 'sms',
+      });
+      if (error) throw error;
+      const authUser = data.user;
+      if (!authUser?.id) throw new Error('Verification succeeded but user is missing.');
+      const sessionUser = await ensureProfileFromAuthUser({
+        id: authUser.id,
+        email: authUser.email,
+        user_metadata: authUser.user_metadata as Record<string, unknown> | undefined,
+      });
+      setUser(sessionUser);
+      return true;
+    } catch (error) {
+      setAuthError(toAuthMessage(error, 'Invalid or expired verification code.'));
+      return false;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const signInWithGoogle = async (): Promise<boolean> => {
     setIsLoading(true);
     setAuthError('');
@@ -363,9 +436,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const signInAsDemo = () => {
+    localStorage.setItem('app_mode', 'demo');
+    localStorage.setItem(DEMO_USER_KEY, 'true');
+    setUser(DEMO_USER);
+  };
+
   const logout = async () => {
     setIsLoading(true);
     try {
+      const isDemo = localStorage.getItem(DEMO_USER_KEY) === 'true';
+      if (isDemo) {
+        localStorage.removeItem(DEMO_USER_KEY);
+        localStorage.removeItem('app_mode');
+        setUser(null);
+        return;
+      }
       await supabase.auth.signOut();
       setUser(null);
     } finally {
@@ -392,7 +478,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, authError, sendLoginMagicLink, signInWithGoogle, sendSignupMagicLink, refreshProfile, logout, isLoading }}>
+    <AuthContext.Provider value={{ user, authError, sendLoginMagicLink, signInWithGoogle, sendSignupMagicLink, sendPhoneOtp, verifyPhoneOtp, signInAsDemo, refreshProfile, logout, isLoading }}>
       {children}
     </AuthContext.Provider>
   );

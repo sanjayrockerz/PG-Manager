@@ -35,6 +35,16 @@ export interface CreateInviteInput {
   capabilities?: Partial<InviteCapabilities>;
 }
 
+export interface InviteTokenInfo {
+  id: string;
+  ownerId: string;
+  invitedEmail: string;
+  displayRole: DisplayRole;
+  propertyIds: string[];
+  expiresAt: string;
+  status: InviteStatus;
+}
+
 interface InviteRow {
   id: string;
   owner_id: string;
@@ -54,6 +64,30 @@ interface InviteRow {
   expires_at: string;
   accepted_at: string | null;
   accepted_by: string | null;
+}
+
+interface InviteTokenRow {
+  id: string;
+  owner_id: string;
+  invited_email: string;
+  display_role: DisplayRole;
+  property_ids: string[];
+  expires_at: string;
+  status: InviteStatus;
+}
+
+interface InviteTokenRpcResult {
+  found: boolean;
+  invite?: InviteTokenRow;
+  status?: InviteStatus;
+  expired?: boolean;
+}
+
+interface AcceptInviteResult {
+  success: boolean;
+  owner_id?: string;
+  role?: string;
+  reason?: string;
 }
 
 function mapInvite(row: InviteRow): InviteRecord {
@@ -77,6 +111,37 @@ function mapInvite(row: InviteRow): InviteRecord {
     acceptedAt: row.accepted_at,
     acceptedBy: row.accepted_by,
   };
+}
+
+function mapInviteTokenInfo(row: InviteTokenRow): InviteTokenInfo {
+  return {
+    id: row.id,
+    ownerId: row.owner_id,
+    invitedEmail: row.invited_email,
+    displayRole: row.display_role,
+    propertyIds: row.property_ids ?? [],
+    expiresAt: row.expires_at,
+    status: row.status,
+  };
+}
+
+async function logInviteActivity(input: {
+  ownerId: string;
+  event: string;
+  detail: string;
+  metadata?: Record<string, unknown>;
+}): Promise<void> {
+  try {
+    await supabase.from('activity_logs').insert({
+      owner_id: input.ownerId,
+      property_id: null,
+      event: input.event,
+      detail: input.detail,
+      metadata: input.metadata ?? {},
+    });
+  } catch {
+    // Audit logging is best-effort; do not block workflows.
+  }
 }
 
 function capabilitiesToRow(displayRole: DisplayRole, caps?: Partial<InviteCapabilities>) {
@@ -134,7 +199,18 @@ export const inviteService = {
       .single<InviteRow>();
 
     if (error) throw error;
-    return mapInvite(data);
+    const record = mapInvite(data);
+    void logInviteActivity({
+      ownerId: record.ownerId,
+      event: 'TEAM_INVITE_SENT',
+      detail: `Invite sent to ${record.invitedEmail} (${record.displayRole})`,
+      metadata: {
+        inviteId: record.id,
+        role: record.displayRole,
+        propertyCount: record.propertyIds.length,
+      },
+    });
+    return record;
   },
 
   /**
@@ -155,29 +231,71 @@ export const inviteService = {
    * Revoke a pending invite.
    */
   async revokeInvite(inviteId: string): Promise<void> {
+    const { data: current, error: fetchError } = await supabase
+      .from('owner_invites')
+      .select('*')
+      .eq('id', inviteId)
+      .maybeSingle<InviteRow>();
+
+    if (fetchError) throw fetchError;
+
     const { error } = await supabase
       .from('owner_invites')
       .update({ status: 'revoked' })
       .eq('id', inviteId);
 
     if (error) throw error;
+    if (current) {
+      void logInviteActivity({
+        ownerId: current.owner_id,
+        event: 'TEAM_INVITE_REVOKED',
+        detail: `Invite revoked for ${current.invited_email}`,
+        metadata: { inviteId: current.id },
+      });
+    }
   },
 
   /**
    * Resend / refresh an invite (reset token + expires_at).
    */
   async refreshInvite(inviteId: string): Promise<InviteRecord> {
+    const nextExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+
+    const { error: rpcError } = await supabase
+      .rpc('refresh_owner_invite_token', { p_invite_id: inviteId, p_expires_at: nextExpiry });
+
+    if (rpcError) {
+      const message = String((rpcError as { message?: string } | null)?.message ?? '').toLowerCase();
+      if (!message.includes('refresh_owner_invite_token')) {
+        throw rpcError;
+      }
+
+      const { error: fallbackError } = await supabase
+        .from('owner_invites')
+        .update({
+          status: 'pending',
+          expires_at: nextExpiry,
+        })
+        .eq('id', inviteId);
+
+      if (fallbackError) throw fallbackError;
+    }
+
     const { data, error } = await supabase
       .from('owner_invites')
-      .update({
-        status: 'pending',
-        expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-      })
+      .select('*')
       .eq('id', inviteId)
-      .select()
       .single<InviteRow>();
 
     if (error) throw error;
+
+    void logInviteActivity({
+      ownerId: data.owner_id,
+      event: 'TEAM_INVITE_REFRESHED',
+      detail: `Invite renewed for ${data.invited_email}`,
+      metadata: { inviteId: data.id },
+    });
+
     return mapInvite(data);
   },
 
@@ -192,7 +310,55 @@ export const inviteService = {
     });
 
     if (error) throw error;
-    return data as { success: boolean; ownerId?: string; role?: string };
+    const result = data as { success: boolean; ownerId?: string; role?: string };
+
+    if (result.success && result.ownerId) {
+      void logInviteActivity({
+        ownerId: result.ownerId,
+        event: 'TEAM_INVITE_ACCEPTED',
+        detail: `Invite accepted by ${email.toLowerCase()}`,
+        metadata: { userId },
+      });
+    }
+
+    return result;
+  },
+
+  /**
+   * Fetch invite details using the token for pre-auth UI.
+   */
+  async getInviteByToken(token: string): Promise<InviteTokenInfo | null> {
+    const { data, error } = await supabase.rpc('get_invite_by_token', { p_token: token });
+    if (error) throw error;
+
+    const result = data as InviteTokenRpcResult;
+    if (!result?.found || !result.invite) return null;
+    return mapInviteTokenInfo(result.invite);
+  },
+
+  /**
+   * Accept invite using token (for logged-in users).
+   */
+  async acceptInviteByToken(userId: string, email: string, token: string): Promise<AcceptInviteResult> {
+    const { data, error } = await supabase.rpc('accept_invite_by_token', {
+      p_user_id: userId,
+      p_email: email,
+      p_token: token,
+    });
+
+    if (error) throw error;
+    const result = data as AcceptInviteResult;
+
+    if (result.success && result.owner_id) {
+      void logInviteActivity({
+        ownerId: result.owner_id,
+        event: 'TEAM_INVITE_ACCEPTED',
+        detail: `Invite accepted by ${email.toLowerCase()}`,
+        metadata: { userId, token },
+      });
+    }
+
+    return result;
   },
 };
 
@@ -332,6 +498,14 @@ export const teamService = {
    * Does NOT delete the auth user account.
    */
   async removeMember(userId: string): Promise<void> {
+    const { data: profileRow, error: profileFetchError } = await supabase
+      .from('profiles')
+      .select('id,email,owner_scope_id')
+      .eq('id', userId)
+      .maybeSingle<{ id: string; email: string | null; owner_scope_id: string | null }>();
+
+    if (profileFetchError) throw profileFetchError;
+
     const { error: scopeError } = await supabase
       .from('owner_user_property_scopes')
       .delete()
@@ -347,5 +521,139 @@ export const teamService = {
       .eq('id', userId);
 
     if (profileError) throw profileError;
+
+    if (profileRow?.owner_scope_id) {
+      void logInviteActivity({
+        ownerId: profileRow.owner_scope_id,
+        event: 'TEAM_MEMBER_REMOVED',
+        detail: `Team member removed: ${profileRow.email ?? userId}`,
+        metadata: { userId },
+      });
+    }
+  },
+
+  /**
+   * Add a new property scope for an existing team member.
+   * Uses upsert so calling with an existing (user_id, property_id) pair is safe.
+   */
+  async addPropertyScope(
+    userId: string,
+    propertyId: string,
+    displayRole: DisplayRole,
+    caps: Partial<InviteCapabilities>,
+  ): Promise<void> {
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    if (!authUser) throw new Error('Not authenticated');
+
+    const { data: memberProfile } = await supabase
+      .from('profiles')
+      .select('id,email,owner_scope_id')
+      .eq('id', userId)
+      .maybeSingle<{ id: string; email: string | null; owner_scope_id: string | null }>();
+
+    const capabilities = capabilitiesToRow(displayRole, caps);
+
+    const { error } = await supabase
+      .from('owner_user_property_scopes')
+      .upsert(
+        {
+          owner_id: authUser.id,
+          user_id: userId,
+          property_id: propertyId,
+          can_view: true,
+          can_manage_properties: false,
+          can_manage_tenants: capabilities.can_manage_tenants,
+          can_manage_payments: capabilities.can_manage_payments,
+          can_manage_maintenance: capabilities.can_manage_maintenance,
+          can_manage_announcements: capabilities.can_manage_announcements,
+          display_role: displayRole,
+        },
+        { onConflict: 'user_id,property_id', ignoreDuplicates: false },
+      );
+
+    if (error) throw error;
+
+    void logInviteActivity({
+      ownerId: authUser.id,
+      event: 'PROPERTY_SCOPE_ADDED',
+      detail: `Property access granted to ${memberProfile?.email ?? userId} as ${displayRole}`,
+      metadata: { userId, propertyId, displayRole },
+    });
+  },
+
+  /**
+   * Remove a team member's access to a single property without removing them from the team.
+   */
+  async removePropertyScope(userId: string, propertyId: string): Promise<void> {
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    if (!authUser) throw new Error('Not authenticated');
+
+    const { data: memberProfile } = await supabase
+      .from('profiles')
+      .select('id,email')
+      .eq('id', userId)
+      .maybeSingle<{ id: string; email: string | null }>();
+
+    const { error } = await supabase
+      .from('owner_user_property_scopes')
+      .delete()
+      .eq('user_id', userId)
+      .eq('property_id', propertyId);
+
+    if (error) throw error;
+
+    void logInviteActivity({
+      ownerId: authUser.id,
+      event: 'PROPERTY_SCOPE_REMOVED',
+      detail: `Property access removed for ${memberProfile?.email ?? userId}`,
+      metadata: { userId, propertyId },
+    });
+  },
+
+  /**
+   * Update a member's capabilities for one property and log the change.
+   */
+  async updateMemberScopeWithAudit(
+    userId: string,
+    propertyId: string,
+    displayRole: DisplayRole,
+    caps: Partial<{
+      canView: boolean;
+      canManageTenants: boolean;
+      canManagePayments: boolean;
+      canManageMaintenance: boolean;
+      canManageAnnouncements: boolean;
+    }>,
+  ): Promise<void> {
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    if (!authUser) throw new Error('Not authenticated');
+
+    const { data: memberProfile } = await supabase
+      .from('profiles')
+      .select('id,email')
+      .eq('id', userId)
+      .maybeSingle<{ id: string; email: string | null }>();
+
+    const { error } = await supabase
+      .from('owner_user_property_scopes')
+      .update({
+        can_view: caps.canView,
+        can_manage_tenants: caps.canManageTenants,
+        can_manage_payments: caps.canManagePayments,
+        can_manage_maintenance: caps.canManageMaintenance,
+        can_manage_announcements: caps.canManageAnnouncements,
+        display_role: displayRole,
+      })
+      .eq('user_id', userId)
+      .eq('property_id', propertyId);
+
+    if (error) throw error;
+
+    void logInviteActivity({
+      ownerId: authUser.id,
+      event: 'PROPERTY_SCOPE_UPDATED',
+      detail: `Access updated for ${memberProfile?.email ?? userId} — role: ${displayRole}`,
+      metadata: { userId, propertyId, displayRole, caps },
+    });
   },
 };

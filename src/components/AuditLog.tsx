@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Activity, ArrowLeft, Calendar, CheckCircle2, CreditCard,
+  Activity, AlertTriangle, ArrowLeft, Bell, Calendar, CheckCircle2, CreditCard,
   Download, Filter, Home, IndianRupee, Loader2, LogOut,
-  Megaphone, RefreshCw, Search, Shield, User, Users,
-  Wrench, X, FileText, Settings,
+  Megaphone, MessageCircle, RefreshCw, Search, Shield, User, Users,
+  Wrench, X, FileText, Settings, UserPlus,
 } from 'lucide-react';
 import { Button } from './ui/button';
 import { useProperty } from '../contexts/PropertyContext';
@@ -31,6 +31,24 @@ const EVENT_ICONS: Record<string, React.ComponentType<{ className?: string }>> =
   ANNOUNCEMENT_CREATED: Megaphone,
   PROPERTY_UPDATED: Settings,
   CSV_IMPORT_COMPLETED: FileText,
+  TEAM_INVITE_SENT: UserPlus,
+  TEAM_INVITE_REVOKED: UserPlus,
+  TEAM_INVITE_REFRESHED: UserPlus,
+  TEAM_INVITE_ACCEPTED: Users,
+  TEAM_MEMBER_REMOVED: Users,
+  PROPERTY_SCOPE_ADDED: Shield,
+  PROPERTY_SCOPE_UPDATED: Shield,
+  PROPERTY_SCOPE_REMOVED: Shield,
+  PROFILE_UPDATED: User,
+  PROFILE_PHOTO_UPDATED: User,
+  PAYMENT_SETTINGS_UPDATED: CreditCard,
+  NOTIFICATION_SETTINGS_UPDATED: Bell,
+  WHATSAPP_SETTINGS_UPDATED: MessageCircle,
+  SUBSCRIPTION_CHANGE_REQUESTED: Shield,
+  COUPON_APPLIED: Shield,
+  PASSWORD_RESET_REQUESTED: Shield,
+  ACCOUNT_DATA_EXPORTED: Download,
+  ACCOUNT_DATA_CLEARED: AlertTriangle,
   DEFAULT: Activity,
 };
 
@@ -49,6 +67,24 @@ const EVENT_COLORS: Record<string, string> = {
   MAINTENANCE_UPDATED: 'bg-orange-100 text-orange-600',
   ANNOUNCEMENT_CREATED: 'bg-violet-100 text-violet-700',
   CSV_IMPORT_COMPLETED: 'bg-blue-100 text-blue-600',
+  TEAM_INVITE_SENT: 'bg-indigo-100 text-indigo-700',
+  TEAM_INVITE_REVOKED: 'bg-red-100 text-red-700',
+  TEAM_INVITE_REFRESHED: 'bg-amber-100 text-amber-700',
+  TEAM_INVITE_ACCEPTED: 'bg-green-100 text-green-700',
+  TEAM_MEMBER_REMOVED: 'bg-red-100 text-red-700',
+  PROPERTY_SCOPE_ADDED: 'bg-blue-100 text-blue-700',
+  PROPERTY_SCOPE_UPDATED: 'bg-amber-100 text-amber-700',
+  PROPERTY_SCOPE_REMOVED: 'bg-red-100 text-red-700',
+  PROFILE_UPDATED: 'bg-slate-100 text-slate-700',
+  PROFILE_PHOTO_UPDATED: 'bg-slate-100 text-slate-700',
+  PAYMENT_SETTINGS_UPDATED: 'bg-emerald-100 text-emerald-700',
+  NOTIFICATION_SETTINGS_UPDATED: 'bg-blue-100 text-blue-700',
+  WHATSAPP_SETTINGS_UPDATED: 'bg-green-100 text-green-700',
+  SUBSCRIPTION_CHANGE_REQUESTED: 'bg-indigo-100 text-indigo-700',
+  COUPON_APPLIED: 'bg-green-100 text-green-700',
+  PASSWORD_RESET_REQUESTED: 'bg-amber-100 text-amber-700',
+  ACCOUNT_DATA_EXPORTED: 'bg-gray-100 text-gray-600',
+  ACCOUNT_DATA_CLEARED: 'bg-red-100 text-red-700',
   DEFAULT: 'bg-gray-100 text-gray-600',
 };
 
@@ -68,6 +104,24 @@ const EVENT_LABELS: Record<string, string> = {
   ANNOUNCEMENT_CREATED: 'Announcement Posted',
   CSV_IMPORT_COMPLETED: 'CSV Import Done',
   PROPERTY_UPDATED: 'Property Updated',
+  TEAM_INVITE_SENT: 'Team Invite Sent',
+  TEAM_INVITE_REVOKED: 'Team Invite Revoked',
+  TEAM_INVITE_REFRESHED: 'Team Invite Renewed',
+  TEAM_INVITE_ACCEPTED: 'Team Invite Accepted',
+  TEAM_MEMBER_REMOVED: 'Team Member Removed',
+  PROPERTY_SCOPE_ADDED: 'Property Access Granted',
+  PROPERTY_SCOPE_UPDATED: 'Property Access Updated',
+  PROPERTY_SCOPE_REMOVED: 'Property Access Removed',
+  PROFILE_UPDATED: 'Profile Updated',
+  PROFILE_PHOTO_UPDATED: 'Profile Photo Updated',
+  PAYMENT_SETTINGS_UPDATED: 'Payment Settings Updated',
+  NOTIFICATION_SETTINGS_UPDATED: 'Notification Preferences Updated',
+  WHATSAPP_SETTINGS_UPDATED: 'WhatsApp Settings Updated',
+  SUBSCRIPTION_CHANGE_REQUESTED: 'Plan Change Requested',
+  COUPON_APPLIED: 'Coupon Applied',
+  PASSWORD_RESET_REQUESTED: 'Password Reset Requested',
+  ACCOUNT_DATA_EXPORTED: 'Account Data Exported',
+  ACCOUNT_DATA_CLEARED: 'Account Data Cleared',
 };
 
 const CATEGORY_FILTERS = [
@@ -76,6 +130,8 @@ const CATEGORY_FILTERS = [
   { key: 'payment', label: 'Payments', events: ['PAYMENT_RECEIVED', 'PAYMENT_OVERDUE', 'DEPOSIT_SETTLED'] },
   { key: 'maintenance', label: 'Maintenance', events: ['MAINTENANCE_CREATED', 'MAINTENANCE_RESOLVED', 'MAINTENANCE_UPDATED'] },
   { key: 'rooms', label: 'Rooms', events: ['ROOM_VACATED', 'ROOM_OCCUPIED'] },
+  { key: 'team', label: 'Team', events: ['TEAM_INVITE_SENT', 'TEAM_INVITE_REVOKED', 'TEAM_INVITE_REFRESHED', 'TEAM_INVITE_ACCEPTED', 'TEAM_MEMBER_REMOVED', 'PROPERTY_SCOPE_ADDED', 'PROPERTY_SCOPE_UPDATED', 'PROPERTY_SCOPE_REMOVED'] },
+  { key: 'settings', label: 'Settings', events: ['PROFILE_UPDATED', 'PROFILE_PHOTO_UPDATED', 'PAYMENT_SETTINGS_UPDATED', 'NOTIFICATION_SETTINGS_UPDATED', 'WHATSAPP_SETTINGS_UPDATED', 'SUBSCRIPTION_CHANGE_REQUESTED', 'COUPON_APPLIED', 'PASSWORD_RESET_REQUESTED', 'ACCOUNT_DATA_EXPORTED', 'ACCOUNT_DATA_CLEARED'] },
   { key: 'other', label: 'Other', events: ['ANNOUNCEMENT_CREATED', 'CSV_IMPORT_COMPLETED', 'PROPERTY_UPDATED'] },
 ];
 

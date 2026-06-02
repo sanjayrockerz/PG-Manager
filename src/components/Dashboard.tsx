@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, lazy, Suspense } from 'react';
+
+const QuickStartGuide = lazy(() => import('./QuickStartGuide').then((m) => ({ default: m.QuickStartGuide })));
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Cell,
@@ -23,12 +25,19 @@ const empty: DashboardSnapshot = {
 const cacheKey = (sel: string) =>
   `rc:dash:${isDemoModeEnabled() ? 'd' : 'l'}:${sel}`;
 
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
 const readCache = (sel: string): DashboardSnapshot | null => {
-  try { return JSON.parse(localStorage.getItem(cacheKey(sel)) ?? 'null'); }
-  catch { return null; }
+  try {
+    const raw = localStorage.getItem(cacheKey(sel));
+    if (!raw) return null;
+    const entry = JSON.parse(raw) as { ts: number; data: DashboardSnapshot };
+    if (!entry?.ts || Date.now() - entry.ts > CACHE_TTL_MS) return null;
+    return entry.data;
+  } catch { return null; }
 };
 const writeCache = (sel: string, d: DashboardSnapshot) => {
-  try { localStorage.setItem(cacheKey(sel), JSON.stringify(d)); } catch {}
+  try { localStorage.setItem(cacheKey(sel), JSON.stringify({ ts: Date.now(), data: d })); } catch {}
 };
 
 const fmt = (n: number) => n.toLocaleString('en-IN');
@@ -251,6 +260,13 @@ export function Dashboard({ onNavigate }: DashboardProps) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
+      {/* ── Onboarding guide — shown while workspace is empty ─────────────── */}
+      {properties.length === 0 && onNavigate && (
+        <Suspense fallback={null}>
+          <QuickStartGuide onNavigate={onNavigate} onDismiss={() => {}} />
+        </Suspense>
+      )}
+
       {/* ── Page header ─────────────────────── */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
@@ -298,7 +314,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
       )}
 
       {/* ── KPI Cards ───────────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
         <StatCard
           label="Total Revenue"
           prefix="₹"
@@ -459,16 +475,18 @@ export function Dashboard({ onNavigate }: DashboardProps) {
 
         {/* Occupancy by Property */}
         <div className="ds-card" style={{ padding: '18px 20px' }}>
-          <SectionHeader title="Occupancy by Property" action="View all" onAction={() => onNavigate?.('properties')} />
+          <SectionHeader title="Occupancy by Property" action="Building View" onAction={() => onNavigate?.('building-view')} />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             {properties.length > 0 ? properties.slice(0, 4).map((prop, i) => {
-              const pct = occ;
+              const propOccupied = prop.rooms.filter(r => r.status === 'occupied').length;
+              const propTotal = prop.rooms.length;
+              const propPct = propTotal > 0 ? Math.round((propOccupied / propTotal) * 100) : 0;
               return (
                 <div key={i}>
                   <div className="flex items-center justify-between mb-1.5">
                     <p style={{ fontSize: 13, fontWeight: 500, color: '#0A0A0B' }}>{prop.name}</p>
                     <p style={{ fontSize: 12, color: '#A1A1AA' }}>
-                      {data.occupiedRooms}/{data.totalRooms}
+                      {propOccupied}/{propTotal}
                     </p>
                   </div>
                   <div className="ds-progress-track">
@@ -476,14 +494,14 @@ export function Dashboard({ onNavigate }: DashboardProps) {
                       className="ds-progress-fill-success"
                       style={{
                         height: 4,
-                        width: `${pct}%`,
+                        width: `${propPct}%`,
                         background: 'linear-gradient(90deg, #059669, #10B981)',
                         borderRadius: 99,
                         transition: 'width 0.5s ease',
                       }}
                     />
                   </div>
-                  <p style={{ fontSize: 11, color: '#A1A1AA', marginTop: 4 }}>{pct}% occupied</p>
+                  <p style={{ fontSize: 11, color: '#A1A1AA', marginTop: 4 }}>{propPct}% occupied</p>
                 </div>
               );
             }) : (

@@ -3,7 +3,6 @@ import { Check, ChevronDown, Command, HelpCircle, Menu, Search, Building2 } from
 import { useProperty } from '../contexts/PropertyContext';
 import { useAuth } from '../contexts/AuthContext';
 import { isPlatformAdminRole } from '../utils/roles';
-import { ModeToggle } from './ModeToggle';
 import { isDemoModeEnabled } from '../services/dataService';
 import { NotificationBell } from './NotificationBell';
 
@@ -19,9 +18,6 @@ export function Header({ setSidebarOpen, currentPage, onNotificationClick }: Hea
 
   const isPlatformAdmin = isPlatformAdminRole(user?.role);
   const isDemoMode = isDemoModeEnabled();
-  const configuredAdminEmail = String((import.meta as any).env?.VITE_MODE_TOGGLE_ADMIN_EMAIL ?? '').trim().toLowerCase();
-  const userEmail = String(user?.email ?? '').trim().toLowerCase();
-  const canToggleMode = isPlatformAdmin || (configuredAdminEmail ? userEmail === configuredAdminEmail : true);
 
   const showPropertySelector = currentPage !== 'properties' && user?.role !== 'tenant' && !isPlatformAdmin;
 
@@ -232,10 +228,11 @@ export function Header({ setSidebarOpen, currentPage, onNotificationClick }: Hea
 
       {/* ── Right: Actions + User ───────────── */}
       <div className="flex items-center gap-1 flex-shrink-0">
-        {/* Mode toggle (demo/live) */}
-        {canToggleMode && (
-          <div className="mr-1">
-            <ModeToggle canToggle={canToggleMode} />
+        {/* Demo mode badge */}
+        {isDemoMode && (
+          <div className="mr-1 px-2.5 py-1 rounded-full bg-amber-50 border border-amber-200 text-amber-700 text-[11px] font-semibold flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+            Demo
           </div>
         )}
 

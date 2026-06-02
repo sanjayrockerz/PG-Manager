@@ -31,6 +31,9 @@ export type DomainEventType =
   | 'ANNOUNCEMENT_CREATED'
   | 'WHATSAPP_QUEUED'
   | 'TEAM_ACCESS_CHANGED'
+  | 'PROPERTY_SCOPE_ADDED'
+  | 'PROPERTY_SCOPE_UPDATED'
+  | 'PROPERTY_SCOPE_REMOVED'
   | 'NOTIFICATION_GENERATED';
 
 export interface DomainEvent<T = Record<string, unknown>> {
@@ -62,13 +65,26 @@ function emit<T = Record<string, unknown>>(event: DomainEvent<T>): void {
 
   if (typeof window === 'undefined') return;
 
-  // Broadcast the generic refresh event (picked up by useRealtimeRefresh)
-  window.dispatchEvent(new CustomEvent(CUSTOM_EVENT_NAME));
+  // Schedule a debounced generic refresh event to coalesce rapid emissions
+  requestRefresh();
 
   // Also dispatch a typed event for fine-grained listeners
   window.dispatchEvent(
     new CustomEvent(`${DOMAIN_EVENT_PREFIX}${event.type}`, { detail: event }),
   );
+}
+
+let refreshTimeout: number | null = null;
+export function requestRefresh(delay = 60): void {
+  if (typeof window === 'undefined') return;
+  if (refreshTimeout !== null) return;
+  refreshTimeout = window.setTimeout(() => {
+    try {
+      window.dispatchEvent(new CustomEvent(CUSTOM_EVENT_NAME));
+    } finally {
+      refreshTimeout = null;
+    }
+  }, delay) as unknown as number;
 }
 
 export function subscribe<T = Record<string, unknown>>(
@@ -130,6 +146,18 @@ export const domainEvents = {
 
   teamAccessChanged(payload: { ownerId: string; targetEmail: string; action: 'invited' | 'revoked' | 'accepted' }): void {
     emit({ type: 'TEAM_ACCESS_CHANGED', propertyId: null, payload, timestamp: new Date().toISOString() });
+  },
+
+  propertyScopeAdded(payload: { ownerId: string; userId: string; userEmail: string; propertyId: string; displayRole: string }): void {
+    emit({ type: 'PROPERTY_SCOPE_ADDED', propertyId: payload.propertyId, payload, timestamp: new Date().toISOString() });
+  },
+
+  propertyScopeUpdated(payload: { ownerId: string; userId: string; userEmail: string; propertyId: string; displayRole: string }): void {
+    emit({ type: 'PROPERTY_SCOPE_UPDATED', propertyId: payload.propertyId, payload, timestamp: new Date().toISOString() });
+  },
+
+  propertyScopeRemoved(payload: { ownerId: string; userId: string; userEmail: string; propertyId: string }): void {
+    emit({ type: 'PROPERTY_SCOPE_REMOVED', propertyId: payload.propertyId, payload, timestamp: new Date().toISOString() });
   },
 
   tenantStatusChanged(payload: {

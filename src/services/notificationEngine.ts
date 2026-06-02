@@ -60,8 +60,10 @@ function writeToStorage(records: NotificationRecord[]): void {
 
 function broadcastChange(): void {
   if (typeof window !== 'undefined') {
+    // Notify local notification consumers; do NOT emit the generic owner-data-updated here
+    // — domain events (via `domainEvents.notificationGenerated`) will emit the
+    // centralized `owner-data-updated` so listeners only receive a single refresh.
     window.dispatchEvent(new CustomEvent('pg:notifications:updated'));
-    window.dispatchEvent(new CustomEvent('owner-data-updated'));
   }
 }
 

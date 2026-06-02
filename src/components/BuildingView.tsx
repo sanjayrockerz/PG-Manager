@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Bed, Home, Users, Wrench, ChevronRight, X,
   AlertTriangle, Clock, CheckCircle, User, IndianRupee,
@@ -19,6 +19,7 @@ import type { OccupancyMode } from '../services/supabaseData';
 
 interface BuildingViewProps {
   onTenantClick?: (tenantId: string) => void;
+  onNavigate?: (tab: string) => void;
 }
 
 // Priority: maintenance > overdue_risk > vacating > full > partial > vacant
@@ -260,6 +261,7 @@ function RoomDetailSheet({
   open,
   onClose,
   onTenantClick,
+  onNavigate,
 }: {
   occ: RoomOccupancy | null;
   room: Room | null;
@@ -268,6 +270,7 @@ function RoomDetailSheet({
   open: boolean;
   onClose: () => void;
   onTenantClick?: (tenantId: string) => void;
+  onNavigate?: (tab: string) => void;
 }) {
   if (!occ || !room) return null;
 
@@ -439,27 +442,62 @@ function RoomDetailSheet({
           <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Quick Actions</p>
           <div className="space-y-2">
             {occ.isVacant && !occ.isUnderMaintenance && (
-              <div className="flex items-center gap-2 px-3 py-2.5 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-700">
-                <ZapIcon className="w-3.5 h-3.5 flex-shrink-0" />
-                <span>Room is vacant — go to Tenants to assign a new occupant</span>
+              <div className="flex items-center justify-between gap-2 px-3 py-2.5 bg-blue-50 border border-blue-200 rounded-lg">
+                <div className="flex items-center gap-2 text-sm text-blue-700">
+                  <ZapIcon className="w-3.5 h-3.5 flex-shrink-0" />
+                  <span>Room is vacant — assign a new tenant</span>
+                </div>
+                {onNavigate && (
+                  <Button size="sm" variant="outline" className="h-7 text-xs border-blue-300 text-blue-700 hover:bg-blue-100 flex-shrink-0"
+                    onClick={() => { onClose(); onNavigate('tenants'); }}>
+                    Go to Tenants
+                  </Button>
+                )}
               </div>
             )}
             {occ.hasOverdueRisk && (
-              <div className="flex items-center gap-2 px-3 py-2.5 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
-                <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
-                <span>Open tenant profile above to record payment or send reminder</span>
+              <div className="flex items-center justify-between gap-2 px-3 py-2.5 bg-red-50 border border-red-200 rounded-lg">
+                <div className="flex items-center gap-2 text-sm text-red-700">
+                  <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
+                  <span>{occ.overdueCount} tenant{occ.overdueCount !== 1 ? 's' : ''} with overdue payment</span>
+                </div>
+                {onNavigate && (
+                  <Button size="sm" variant="outline" className="h-7 text-xs border-red-300 text-red-700 hover:bg-red-100 flex-shrink-0"
+                    onClick={() => { onClose(); onNavigate('payments'); }}>
+                    View Payments
+                  </Button>
+                )}
               </div>
             )}
             {occ.isUnderMaintenance && (
-              <div className="flex items-center gap-2 px-3 py-2.5 bg-orange-50 border border-orange-200 rounded-lg text-sm text-orange-700">
-                <Wrench className="w-3.5 h-3.5 flex-shrink-0" />
-                <span>Room locked for maintenance — update room status in Settings to reopen</span>
+              <div className="flex items-center justify-between gap-2 px-3 py-2.5 bg-orange-50 border border-orange-200 rounded-lg">
+                <div className="flex items-center gap-2 text-sm text-orange-700">
+                  <Wrench className="w-3.5 h-3.5 flex-shrink-0" />
+                  <span>Room locked for maintenance</span>
+                </div>
+                {onNavigate && (
+                  <Button size="sm" variant="outline" className="h-7 text-xs border-orange-300 text-orange-700 hover:bg-orange-100 flex-shrink-0"
+                    onClick={() => { onClose(); onNavigate('maintenance'); }}>
+                    View Tickets
+                  </Button>
+                )}
               </div>
             )}
             {occ.hasUpcomingVacate && (
-              <div className="flex items-center gap-2 px-3 py-2.5 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-700">
-                <Clock className="w-3.5 h-3.5 flex-shrink-0" />
-                <span>Process vacate from tenant profile to settle deposit and free the room</span>
+              <div className="flex items-center justify-between gap-2 px-3 py-2.5 bg-yellow-50 border border-yellow-200 rounded-lg">
+                <div className="flex items-center gap-2 text-sm text-yellow-700">
+                  <Clock className="w-3.5 h-3.5 flex-shrink-0" />
+                  <span>Upcoming vacate — settle deposit and free room</span>
+                </div>
+                {occ.tenantsInRoom.find((t) => t.status === 'notice_submitted' || t.status === 'vacating') && onTenantClick && (
+                  <Button size="sm" variant="outline" className="h-7 text-xs border-yellow-400 text-yellow-700 hover:bg-yellow-100 flex-shrink-0"
+                    onClick={() => {
+                      const t = occ.tenantsInRoom.find((t) => t.status === 'notice_submitted' || t.status === 'vacating');
+                      if (t) { onClose(); onTenantClick(t.id); }
+                    }}>
+                    Open Profile
+                  </Button>
+                )}
               </div>
             )}
             {occ.isFullyOccupied && !occ.hasOverdueRisk && !occ.hasUpcomingVacate && (
@@ -483,11 +521,12 @@ function RoomDetailSheet({
   );
 }
 
-export function BuildingView({ onTenantClick }: BuildingViewProps) {
+export function BuildingView({ onTenantClick, onNavigate }: BuildingViewProps) {
   const { selectedProperty, properties } = useProperty();
   const [tenants, setTenants] = useState<TenantRecord[]>([]);
   const [loadingTenants, setLoadingTenants] = useState(false);
   const [selectedRoom, setSelectedRoom] = useState<{ occ: RoomOccupancy; room: Room } | null>(null);
+  const fetchSeq = useRef(0);
 
   const currentProperty = selectedProperty === 'all'
     ? null
@@ -497,14 +536,21 @@ export function BuildingView({ onTenantClick }: BuildingViewProps) {
 
   const loadTenants = useCallback(async () => {
     if (!currentProperty) return;
+    // Protect against rapid property switches and overlapping fetches
+    const fetchId = ++fetchSeq.current;
     setLoadingTenants(true);
     try {
       const list = await getTenants(currentProperty.id);
-      setTenants(list);
+      // only apply results if this fetch is still the latest
+      if (fetchSeq.current === fetchId) {
+        setTenants(list);
+      }
     } catch {
       // keep last known
     } finally {
-      setLoadingTenants(false);
+      if (fetchSeq.current === fetchId) {
+        setLoadingTenants(false);
+      }
     }
   }, [currentProperty]);
 
@@ -714,6 +760,7 @@ export function BuildingView({ onTenantClick }: BuildingViewProps) {
         open={selectedRoom !== null}
         onClose={() => setSelectedRoom(null)}
         onTenantClick={onTenantClick}
+        onNavigate={onNavigate}
       />
     </div>
   );

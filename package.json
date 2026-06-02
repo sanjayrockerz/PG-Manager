@@ -59,11 +59,15 @@
     "@vitejs/plugin-react": "^4.7.0",
     "tailwindcss": "4.1.12",
     "typescript": "^6.0.2",
-    "vite": "6.3.5"
+    "vite": "6.3.5",
+    "tsx": "^4.19.2"
   },
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 4173 --strictPort",
     "build": "vite build",
+    "bootstrap": "tsx scripts/bootstrap.ts",
+    "report": "tsx scripts/readiness-report.ts",
+    "build:prod": "vite build && tsx scripts/readiness-report.ts",
     "dev:backend": "npm --prefix backend run dev",
     "build:backend": "npm --prefix backend run build"
   }

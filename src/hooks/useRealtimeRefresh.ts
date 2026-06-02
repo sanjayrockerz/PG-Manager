@@ -18,7 +18,11 @@ type TableName =
   | 'support_tickets'
   | 'support_ticket_comments'
   | 'activity_logs'
-  | 'vacate_requests';
+  | 'vacate_requests'
+  | 'admin_coupons'
+  | 'referrals'
+  | 'lead_sources'
+  | 'maintenance_threads';
 
 interface UseRealtimeRefreshOptions {
   key: string;

@@ -59,6 +59,32 @@ const SOURCE_COLORS: Record<MaintenanceSource, string> = {
 
 type FilterStatus = 'all' | MaintenanceStatus;
 
+// ─── Urgency Scoring ──────────────────────────────────────────────────────────
+// Score considers priority weight + age bonus + status multiplier
+function urgencyScore(ticket: MaintenanceTicketRecord): number {
+  const priorityWeight: Record<MaintenancePriority, number> = { high: 30, medium: 20, low: 10 };
+  const ageDays = Math.floor((Date.now() - new Date(ticket.date).getTime()) / 86400000);
+  const ageBonus = ageDays > 30 ? 30 : ageDays > 15 ? 20 : ageDays > 7 ? 10 : 5;
+  const statusMultiplier = ticket.status === 'open' ? 2 : ticket.status === 'in-progress' ? 1.5 : ticket.status === 'waiting' ? 1.2 : 0;
+  return (priorityWeight[ticket.priority] + ageBonus) * statusMultiplier;
+}
+
+function ageLabel(dateStr: string): string {
+  const days = Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000);
+  if (days === 0) return 'Today';
+  if (days === 1) return '1d ago';
+  if (days < 7)  return `${days}d ago`;
+  if (days < 30) return `${Math.floor(days / 7)}w ago`;
+  return `${Math.floor(days / 30)}mo ago`;
+}
+
+function urgencyBadge(score: number): { label: string; bg: string; color: string } {
+  if (score >= 90) return { label: 'Critical', bg: '#FEF2F2', color: '#991B1B' };
+  if (score >= 60) return { label: 'High',     bg: '#FFFBEB', color: '#92400E' };
+  if (score >= 30) return { label: 'Medium',   bg: '#F0F9FF', color: '#0369A1' };
+  return               { label: 'Low',      bg: '#F0FDF4', color: '#15803D' };
+}
+
 // ─── Thread Timeline ──────────────────────────────────────────────────────────
 
 function ThreadTimeline({ ticketId }: { ticketId: string }) {
@@ -291,21 +317,23 @@ interface TicketRowProps {
   onStatusUpdate: (id: string, status: MaintenanceStatus) => void;
 }
 
-function TicketRow({ ticket, propertyName, onStatusUpdate }: TicketRowProps) {
+function TicketRow({ ticket, propertyName, onStatusUpdate, highlight }: TicketRowProps & { highlight?: boolean }) {
   const [expanded, setExpanded] = useState(false);
   const pCfg = PRIORITY_CONFIG[ticket.priority];
   const sCfg = STATUS_CONFIG[ticket.status];
+  const score = urgencyScore(ticket);
+  const ub = urgencyBadge(score);
 
   return (
-    <div className={`border border-zinc-200 rounded-xl overflow-hidden transition-shadow hover:shadow-sm border-l-4 ${sCfg.border}`}>
+    <div className={`border rounded-xl overflow-hidden transition-shadow hover:shadow-sm border-l-4 ${sCfg.border} ${highlight ? 'border border-amber-200' : 'border border-zinc-200'}`}>
       {/* Summary row */}
       <button
         onClick={() => setExpanded((v) => !v)}
-        className="w-full text-left flex items-center gap-3 px-4 py-3 bg-white hover:bg-zinc-50 transition-colors"
+        className={`w-full text-left flex items-center gap-3 px-4 py-3 transition-colors ${highlight ? 'bg-amber-50/50 hover:bg-amber-50' : 'bg-white hover:bg-zinc-50'}`}
       >
-        {/* Priority dot */}
-        <span className={`flex-shrink-0 px-1.5 py-0.5 rounded text-[9px] font-bold ${pCfg.color}`}>
-          {pCfg.label}
+        {/* Urgency badge */}
+        <span style={{ flexShrink: 0, fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4, background: ub.bg, color: ub.color }}>
+          {ub.label.toUpperCase()}
         </span>
 
         {/* Title + meta */}
@@ -313,8 +341,8 @@ function TicketRow({ ticket, propertyName, onStatusUpdate }: TicketRowProps) {
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm font-semibold text-zinc-900 truncate">{ticket.issue}</span>
             <span className="text-[10px] text-zinc-400">{ticket.ticketId}</span>
-            <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${SOURCE_COLORS[ticket.source] ?? 'bg-gray-50 text-gray-500'}`}>
-              {SOURCE_LABELS[ticket.source] ?? ticket.source}
+            <span style={{ fontSize: 10, fontWeight: 600, padding: '1px 5px', borderRadius: 3, background: '#FFFBEB', color: '#92400E' }}>
+              {ageLabel(ticket.date)}
             </span>
           </div>
           <div className="flex items-center gap-3 mt-0.5 text-xs text-zinc-500 flex-wrap">
@@ -324,15 +352,7 @@ function TicketRow({ ticket, propertyName, onStatusUpdate }: TicketRowProps) {
             <span className="flex items-center gap-1">
               <MapPin className="w-3 h-3" />{propertyName} · Room {ticket.room}
             </span>
-            <span className="flex items-center gap-1">
-              <Calendar className="w-3 h-3" />
-              {new Date(ticket.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
-            </span>
-            {ticket.updatedAt && ticket.updatedAt !== ticket.date && (
-              <span className="text-zinc-400">
-                Updated {new Date(ticket.updatedAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
-              </span>
-            )}
+            <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${pCfg.color}`}>{pCfg.label}</span>
           </div>
         </div>
 
@@ -453,7 +473,7 @@ export function Maintenance() {
 
   useRealtimeRefresh({
     key: 'maintenance',
-    tables: ['maintenance_tickets', 'maintenance_notes'],
+    tables: ['maintenance_tickets', 'maintenance_threads'],
     onChange: () => void load(),
     enabled: !isDemoModeEnabled(),
   });
@@ -461,6 +481,12 @@ export function Maintenance() {
   const filteredTickets = tickets.filter(
     (t) => filterStatus === 'all' || t.status === filterStatus,
   );
+
+  // "Needs Attention First" — top 3 active tickets by urgency score
+  const attentionTickets = [...tickets]
+    .filter((t) => t.status !== 'resolved' && t.status !== 'closed')
+    .sort((a, b) => urgencyScore(b) - urgencyScore(a))
+    .slice(0, 3);
 
   const stats: Record<string, number> = {
     total: tickets.length,
@@ -558,6 +584,52 @@ export function Maintenance() {
         ))}
       </div>
 
+      {/* Needs Attention First */}
+      {attentionTickets.length > 0 && filterStatus === 'all' && (
+        <div className="px-6 pt-4 pb-2">
+          <div
+            className="rounded-xl overflow-hidden"
+            style={{ border: '1px solid #FDE68A', background: '#FFFBEB' }}
+          >
+            <div
+              className="flex items-center justify-between px-4 py-2.5"
+              style={{ borderBottom: '1px solid #FDE68A' }}
+            >
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
+                <p style={{ fontSize: 11, fontWeight: 700, color: '#92400E', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+                  Needs Attention First
+                </p>
+              </div>
+              <p style={{ fontSize: 11, color: '#B45309' }}>Sorted by urgency</p>
+            </div>
+            <div className="divide-y divide-amber-100">
+              {attentionTickets.map((ticket) => {
+                const ub = urgencyBadge(urgencyScore(ticket));
+                return (
+                  <div key={ticket.id} className="flex items-center gap-3 px-4 py-2.5">
+                    <span style={{ flexShrink: 0, fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4, background: ub.bg, color: ub.color }}>
+                      {ub.label.toUpperCase()}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p style={{ fontSize: 12, fontWeight: 500, color: '#0A0A0B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {ticket.issue}
+                      </p>
+                      <p style={{ fontSize: 11, color: '#92400E' }}>
+                        {ticket.tenant} · Room {ticket.room} · {ageLabel(ticket.date)}
+                      </p>
+                    </div>
+                    <span style={{ flexShrink: 0, fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: 99, background: STATUS_CONFIG[ticket.status]?.color?.split(' ')[0] ?? '#F4F4F6', color: '#52525B' }}>
+                      {STATUS_CONFIG[ticket.status]?.label ?? ticket.status}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Ticket list */}
       <div className="px-6 py-4 space-y-2">
         {filteredTickets.length === 0 ? (
@@ -566,14 +638,18 @@ export function Maintenance() {
             <p className="text-sm">No {filterStatus === 'all' ? '' : filterStatus + ' '}tickets</p>
           </div>
         ) : (
-          filteredTickets.map((ticket) => (
-            <TicketRow
-              key={ticket.id}
-              ticket={ticket}
-              propertyName={getPropertyName(ticket.propertyId)}
-              onStatusUpdate={handleStatusUpdate}
-            />
-          ))
+          filteredTickets.map((ticket) => {
+            const isHighAttention = attentionTickets.some((t) => t.id === ticket.id);
+            return (
+              <TicketRow
+                key={ticket.id}
+                ticket={ticket}
+                propertyName={getPropertyName(ticket.propertyId)}
+                onStatusUpdate={handleStatusUpdate}
+                highlight={isHighAttention && filterStatus === 'all'}
+              />
+            );
+          })
         )}
       </div>
 

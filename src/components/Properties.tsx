@@ -1,9 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Plus, Building2, MapPin, ChevronDown, ChevronRight,
   Edit, Trash, Bed, Home, Layers, Save, AlertTriangle, Loader2,
+  Crown, TrendingUp,
 } from 'lucide-react';
-import { Card } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
@@ -19,6 +19,7 @@ import {
 } from './ui/alert-dialog';
 import { toast } from 'sonner';
 import { useProperty } from '../contexts/PropertyContext';
+import { supabaseOwnerDataApi } from '../services/supabaseData';
 import type { Property, Room } from '../contexts/PropertyContext';
 
 interface PropertiesV2Props {
@@ -55,7 +56,10 @@ const statusColor: Record<RoomStatus, string> = {
   maintenance: 'bg-amber-100 text-amber-700',
 };
 
-export function Properties({ onNavigate: _onNavigate }: PropertiesV2Props) {
+// Starter plan allows 1 property; Pro/Business are unlimited
+const STARTER_PROPERTY_LIMIT = 1;
+
+export function Properties({ onNavigate }: PropertiesV2Props) {
   const {
     properties, isLoading,
     addProperty, updateProperty, deleteProperty,
@@ -63,6 +67,19 @@ export function Properties({ onNavigate: _onNavigate }: PropertiesV2Props) {
   } = useProperty();
 
   const [expandedProperty, setExpandedProperty] = useState<string | null>(null);
+
+  // Plan limit gate
+  const [planCode, setPlanCode] = useState<string>('starter');
+  const [limitModalOpen, setLimitModalOpen] = useState(false);
+
+  useEffect(() => {
+    supabaseOwnerDataApi.getOwnerSubscription()
+      .then((sub) => setPlanCode(sub.planCode))
+      .catch(() => { /* stay on starter defaults */ });
+  }, []);
+
+  const isUnlimited = planCode !== 'starter';
+  const atPropertyLimit = !isUnlimited && properties.length >= STARTER_PROPERTY_LIMIT;
 
   // Add Property
   const [addPropertyOpen, setAddPropertyOpen] = useState(false);
@@ -96,10 +113,10 @@ export function Properties({ onNavigate: _onNavigate }: PropertiesV2Props) {
   const totalRooms = properties.reduce((s, p) => s + p.rooms.length, 0);
 
   const stats = [
-    { label: 'Total Properties', value: properties.length, icon: Building2, color: 'from-purple-500 to-pink-500' },
-    { label: 'Total Floors', value: properties.reduce((s, p) => s + p.floors, 0), icon: Layers, color: 'from-blue-500 to-cyan-500' },
-    { label: 'Total Rooms', value: totalRooms, icon: Home, color: 'from-green-500 to-emerald-500' },
-    { label: 'Total Beds', value: totalBeds, icon: Bed, color: 'from-orange-500 to-amber-500' },
+    { label: 'Total Properties', value: properties.length, icon: Building2 },
+    { label: 'Total Floors', value: properties.reduce((s, p) => s + p.floors, 0), icon: Layers },
+    { label: 'Total Rooms', value: totalRooms, icon: Home },
+    { label: 'Total Beds', value: totalBeds, icon: Bed },
   ];
 
   const handleAddProperty = async () => {
@@ -147,6 +164,14 @@ export function Properties({ onNavigate: _onNavigate }: PropertiesV2Props) {
 
   const handleDeleteProperty = () => {
     if (!deletingProperty) return;
+    // Check for rooms with active occupancy before deleting
+    const occupiedRooms = deletingProperty.rooms.filter((r) => r.status === 'occupied');
+    if (occupiedRooms.length > 0) {
+      toast.error(`Cannot delete: ${occupiedRooms.length} room${occupiedRooms.length > 1 ? 's are' : ' is'} currently occupied. Vacate all tenants first.`);
+      setDeletePropertyOpen(false);
+      setDeletingProperty(null);
+      return;
+    }
     deleteProperty(deletingProperty.id);
     setDeletePropertyOpen(false);
     setDeletingProperty(null);
@@ -197,239 +222,269 @@ export function Properties({ onNavigate: _onNavigate }: PropertiesV2Props) {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center py-24">
-        <Loader2 className="w-8 h-8 text-purple-500 animate-spin" />
+      <div className="space-y-4 animate-pulse">
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="ds-card" style={{ height: 86, padding: 16 }}>
+              <div style={{ height: 10, background: '#F4F4F6', borderRadius: 4, width: '50%', marginBottom: 8 }} />
+              <div style={{ height: 22, background: '#F4F4F6', borderRadius: 4, width: '65%' }} />
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6 pb-20 md:pb-6">
-      {/* Header */}
-      <div className="sticky top-0 z-20 -mx-6 px-6 py-4 bg-gradient-to-r from-purple-50 via-white to-blue-50 backdrop-blur-sm border-b border-gray-200 shadow-sm">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-          <div>
-            <h1 className="text-2xl md:text-3xl font-bold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">
-              Properties & Rooms
-            </h1>
-            <p className="text-sm text-gray-600 mt-1">Manage all your PG properties and room configurations</p>
-          </div>
-          <Button
-            onClick={() => { setAddForm(emptyPropertyForm()); setAddPropertyOpen(true); }}
-            className="bg-gradient-to-r from-[#4F46E5] to-[#7C3AED] hover:from-[#4338CA] hover:to-[#6D28D9] w-full md:w-auto shadow-lg shadow-purple-500/30 transition-all duration-300 hover:shadow-xl hover:scale-105 h-12 md:h-10"
-          >
-            <Plus className="w-5 h-5 mr-2" />
-            <span className="font-semibold">Add Property</span>
-          </Button>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 80 }}>
+      {/* ── Header ─────────────────────────── */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="ds-page-title">Properties</h1>
+          <p style={{ fontSize: 13, color: '#A1A1AA', marginTop: 2 }}>
+            {properties.length} {properties.length === 1 ? 'property' : 'properties'} · {totalRooms} rooms · {totalBeds} beds
+          </p>
         </div>
+        <button
+          onClick={() => {
+            if (atPropertyLimit) { setLimitModalOpen(true); return; }
+            setAddForm(emptyPropertyForm()); setAddPropertyOpen(true);
+          }}
+          className="ds-btn ds-btn-primary"
+          style={{ fontSize: 12, padding: '6px 14px', gap: 6 }}
+        >
+          <Plus style={{ width: 13, height: 13 }} />
+          Add Property
+        </button>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+      {/* ── Portfolio KPIs ──────────────────── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
         {stats.map((stat) => {
           const Icon = stat.icon;
           return (
-            <Card key={stat.label} className="relative overflow-hidden border-0 shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105 cursor-pointer">
-              <div className={`absolute inset-0 bg-gradient-to-br ${stat.color} opacity-10`} />
-              <div className="relative p-4 md:p-6">
-                <div className="flex items-start justify-between mb-2">
-                  <div className={`p-2 md:p-3 rounded-xl bg-gradient-to-br ${stat.color} shadow-lg`}>
-                    <Icon className="w-4 h-4 md:w-6 md:h-6 text-white" />
-                  </div>
-                </div>
-                <p className="text-xs md:text-sm text-gray-600 mb-1 font-medium">{stat.label}</p>
-                <p className="text-2xl md:text-3xl font-bold bg-gradient-to-br from-gray-900 to-gray-700 bg-clip-text text-transparent">
-                  {stat.value}
-                </p>
+            <div key={stat.label} className="ds-card flex items-start justify-between" style={{ padding: '14px 16px', gap: 12 }}>
+              <div className="flex-1 min-w-0">
+                <p style={{ fontSize: 11, fontWeight: 600, color: '#71717A', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 6 }}>{stat.label}</p>
+                <p style={{ fontSize: 22, fontWeight: 700, color: '#0A0A0B', letterSpacing: '-0.03em', lineHeight: 1 }}>{stat.value}</p>
               </div>
-            </Card>
+              <div className="flex-shrink-0 flex items-center justify-center rounded-xl" style={{ width: 36, height: 36, background: '#EEF2FF' }}>
+                <Icon style={{ width: 16, height: 16, color: '#6366F1', strokeWidth: 1.75 }} />
+              </div>
+            </div>
           );
         })}
       </div>
 
-      {/* Properties list */}
+      {/* ── Properties list ─────────────────── */}
       {properties.length === 0 ? (
-        <div className="text-center py-16 text-gray-400">
-          <Building2 className="w-12 h-12 mx-auto mb-3 opacity-30" />
-          <p className="text-sm">No properties yet. Add your first property.</p>
+        <div className="ds-card" style={{ padding: '48px 24px', textAlign: 'center' }}>
+          <Building2 style={{ width: 36, height: 36, color: '#D4D4D8', margin: '0 auto 12px' }} />
+          <p style={{ fontSize: 14, color: '#A1A1AA' }}>No properties yet. Add your first property.</p>
         </div>
       ) : (
-        <div className="space-y-4 md:space-y-6">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {properties.map((property) => {
             const isExpanded = expandedProperty === property.id;
             const floors = Array.from(new Set(property.rooms.map((r) => r.floor))).sort((a, b) => b - a);
 
+            // Operational summary
+            const totalRoomsInProp = property.rooms.length;
+            const occupiedRooms = property.rooms.filter((r) => r.status === 'occupied').length;
+            const vacantRooms = property.rooms.filter((r) => r.status === 'vacant').length;
+            const totalBedsInProp = property.rooms.reduce((s, r) => s + r.beds, 0);
+            const occupiedBeds = property.rooms.reduce((s, r) => s + (r.occupiedBeds ?? 0), 0);
+            const occupancyPct = totalRoomsInProp > 0 ? Math.round((occupiedRooms / totalRoomsInProp) * 100) : 0;
+            const revenueTotal = property.rooms.reduce((s, r) => s + r.rent * (r.occupiedBeds ?? (r.status === 'occupied' ? 1 : 0)), 0);
+
             return (
-              <Card key={property.id} className="overflow-hidden border-0 shadow-xl hover:shadow-2xl transition-all duration-300">
+              <div key={property.id} className="ds-card" style={{ overflow: 'hidden' }}>
                 {/* Property header */}
-                <div className="bg-gradient-to-r from-purple-100 via-blue-50 to-purple-50 p-4 md:p-6 border-b border-purple-200">
-                  <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-                    <div className="flex items-start gap-3 md:gap-4 flex-1">
-                      <div className="w-14 h-14 md:w-16 md:h-16 bg-gradient-to-br from-[#4F46E5] via-[#7C3AED] to-[#9333EA] rounded-2xl flex items-center justify-center flex-shrink-0 shadow-lg shadow-purple-500/50">
-                        <Building2 className="w-7 h-7 md:w-8 md:h-8 text-white" />
+                <div style={{ padding: '16px 18px' }}>
+                  <div className="flex items-start justify-between gap-4 flex-wrap">
+                    <div className="flex items-start gap-3 flex-1 min-w-0">
+                      <div
+                        className="flex-shrink-0 flex items-center justify-center rounded-xl"
+                        style={{ width: 40, height: 40, background: '#EEF2FF' }}
+                      >
+                        <Building2 style={{ width: 18, height: 18, color: '#6366F1' }} />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <h3 className="text-lg md:text-xl font-bold bg-gradient-to-r from-purple-700 to-blue-700 bg-clip-text text-transparent">
-                          {property.name}
-                        </h3>
-                        <p className="text-sm md:text-base text-gray-700 flex items-center gap-1.5 mt-2">
-                          <MapPin className="w-4 h-4 flex-shrink-0 text-purple-600" />
-                          <span className="truncate font-medium">{property.address}{property.city ? `, ${property.city}` : ''}</span>
+                        <p style={{ fontSize: 15, fontWeight: 600, color: '#0A0A0B' }}>{property.name}</p>
+                        <p className="flex items-center gap-1.5" style={{ fontSize: 12, color: '#A1A1AA', marginTop: 2 }}>
+                          <MapPin style={{ width: 11, height: 11, flexShrink: 0 }} />
+                          <span className="truncate">{property.address}{property.city ? `, ${property.city}` : ''}</span>
                         </p>
-                        <div className="flex flex-wrap gap-3 md:gap-4 mt-3">
-                          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-white rounded-full shadow-sm">
-                            <Layers className="w-3.5 h-3.5 text-blue-600" />
-                            <span className="text-xs md:text-sm font-bold text-gray-900">{property.floors}</span>
-                            <span className="text-xs text-gray-600">Floors</span>
-                          </div>
-                          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-white rounded-full shadow-sm">
-                            <Home className="w-3.5 h-3.5 text-green-600" />
-                            <span className="text-xs md:text-sm font-bold text-gray-900">{property.rooms.length}</span>
-                            <span className="text-xs text-gray-600">Rooms</span>
-                          </div>
-                          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-white rounded-full shadow-sm">
-                            <Bed className="w-3.5 h-3.5 text-orange-600" />
-                            <span className="text-xs md:text-sm font-bold text-gray-900">{property.rooms.reduce((s, r) => s + r.beds, 0)}</span>
-                            <span className="text-xs text-gray-600">Beds</span>
-                          </div>
-                        </div>
                       </div>
                     </div>
-
-                    <div className="flex items-center gap-2 justify-end md:justify-start flex-shrink-0">
-                      <Button
-                        variant="ghost" size="sm"
+                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                      <button
+                        title="Building View"
+                        onClick={() => onNavigate('building-view')}
+                        className="ds-btn ds-btn-secondary"
+                        style={{ fontSize: 11, padding: '4px 8px', gap: 4 }}
+                      >
+                        <Building2 style={{ width: 12, height: 12, color: '#6366F1' }} />
+                        View
+                      </button>
+                      <button
                         onClick={() => setExpandedProperty(isExpanded ? null : property.id)}
-                        className="h-10 w-10 md:h-9 md:w-9 p-0 rounded-full hover:bg-white hover:shadow-md transition-all"
+                        className="ds-btn ds-btn-secondary"
+                        style={{ fontSize: 11, padding: '4px 8px', gap: 4 }}
                       >
-                        {isExpanded
-                          ? <ChevronDown className="w-5 h-5 text-purple-600" />
-                          : <ChevronRight className="w-5 h-5 text-purple-600" />}
-                      </Button>
-                      <Button
-                        variant="ghost" size="sm"
+                        {isExpanded ? <ChevronDown style={{ width: 13, height: 13 }} /> : <ChevronRight style={{ width: 13, height: 13 }} />}
+                        Rooms
+                      </button>
+                      <button
                         onClick={() => { setEditingProperty(property); setEditPropertyOpen(true); }}
-                        className="h-10 w-10 md:h-9 md:w-9 p-0 rounded-full hover:bg-blue-100 hover:shadow-md transition-all"
+                        className="ds-btn ds-btn-secondary"
+                        style={{ fontSize: 11, padding: '4px 6px', minWidth: 0 }}
                       >
-                        <Edit className="w-4 h-4 text-blue-600" />
-                      </Button>
-                      <Button
-                        variant="ghost" size="sm"
+                        <Edit style={{ width: 12, height: 12 }} />
+                      </button>
+                      <button
                         onClick={() => { setDeletingProperty(property); setDeletePropertyOpen(true); }}
-                        className="h-10 w-10 md:h-9 md:w-9 p-0 rounded-full hover:bg-red-100 hover:shadow-md transition-all"
+                        className="ds-btn ds-btn-secondary"
+                        style={{ fontSize: 11, padding: '4px 6px', minWidth: 0, color: '#DC2626' }}
                       >
-                        <Trash className="w-4 h-4 text-red-600" />
-                      </Button>
+                        <Trash style={{ width: 12, height: 12 }} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Operational summary */}
+                  <div
+                    style={{
+                      marginTop: 14,
+                      paddingTop: 14,
+                      borderTop: '1px solid #F4F4F6',
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))',
+                      gap: 8,
+                    }}
+                  >
+                    {[
+                      { label: 'Occupancy', value: `${occupancyPct}%`, sub: `${occupiedRooms}/${totalRoomsInProp} rooms`, color: occupancyPct >= 80 ? '#059669' : occupancyPct >= 50 ? '#D97706' : '#A1A1AA' },
+                      { label: 'Vacant', value: vacantRooms.toString(), sub: `${totalBedsInProp - occupiedBeds} beds free`, color: vacantRooms > 0 ? '#6366F1' : '#A1A1AA' },
+                      { label: 'Floors', value: property.floors.toString(), sub: `${totalRoomsInProp} rooms`, color: '#52525B' },
+                      { label: 'Revenue', value: `₹${revenueTotal > 0 ? (revenueTotal / 1000).toFixed(0) + 'k' : '0'}`, sub: 'Active tenants', color: '#059669' },
+                    ].map(({ label, value, sub, color }) => (
+                      <div key={label} style={{ padding: '8px 10px', background: '#F8FAFC', borderRadius: 8 }}>
+                        <p style={{ fontSize: 10, fontWeight: 600, color: '#A1A1AA', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>{label}</p>
+                        <p style={{ fontSize: 16, fontWeight: 700, color, fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>{value}</p>
+                        <p style={{ fontSize: 10, color: '#A1A1AA', marginTop: 2 }}>{sub}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Occupancy progress bar */}
+                  <div style={{ marginTop: 10 }}>
+                    <div style={{ width: '100%', background: '#F1F1F3', borderRadius: 99, height: 4, overflow: 'hidden' }}>
+                      <div style={{
+                        height: 4,
+                        width: `${occupancyPct}%`,
+                        borderRadius: 99,
+                        background: occupancyPct >= 80 ? '#059669' : occupancyPct >= 50 ? '#D97706' : '#6366F1',
+                        transition: 'width 0.4s ease',
+                      }} />
                     </div>
                   </div>
 
                   {/* Contact person */}
-                  {(property.contactName || property.contactPhone || property.contactEmail) && (
-                    <div className="mt-4 pt-4 border-t border-purple-200">
-                      <p className="text-xs font-semibold text-purple-700 mb-2 uppercase tracking-wide">Contact Person</p>
-                      <div className="flex flex-wrap gap-3 md:gap-6 text-sm">
-                        {property.contactName && (
-                          <div className="flex items-center gap-2">
-                            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center shadow-md">
-                              <span className="text-white text-xs font-bold">
-                                {property.contactName.split(' ').map((n) => n[0]).join('').slice(0, 2)}
-                              </span>
-                            </div>
-                            <span className="text-gray-900 font-semibold">{property.contactName}</span>
-                          </div>
-                        )}
-                        {property.contactPhone && <span className="text-gray-700 font-medium">{property.contactPhone}</span>}
-                        {property.contactEmail && <span className="text-gray-700">{property.contactEmail}</span>}
+                  {(property.contactName || property.contactPhone) && (
+                    <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid #F4F4F6', display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div
+                        className="flex-shrink-0 flex items-center justify-center rounded-lg"
+                        style={{ width: 24, height: 24, background: '#EEF2FF' }}
+                      >
+                        <span style={{ fontSize: 9, fontWeight: 700, color: '#6366F1' }}>
+                          {(property.contactName || '?').slice(0, 2).toUpperCase()}
+                        </span>
                       </div>
+                      <span style={{ fontSize: 12, fontWeight: 500, color: '#52525B' }}>{property.contactName}</span>
+                      {property.contactPhone && <span style={{ fontSize: 12, color: '#A1A1AA' }}>· {property.contactPhone}</span>}
                     </div>
                   )}
                 </div>
 
-                {/* Expanded room management (building view) */}
+                {/* Expanded room management */}
                 {isExpanded && (
-                  <div className="p-4 md:p-6 bg-gradient-to-br from-gray-50 to-blue-50/30">
-                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-6">
-                      <h4 className="text-lg font-bold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">
-                        Room Management
-                      </h4>
-                      <Button
-                        size="sm"
+                  <div style={{ borderTop: '1px solid #F4F4F6', padding: '16px 18px', background: '#FAFAFA' }}>
+                    <div className="flex items-center justify-between mb-4">
+                      <p style={{ fontSize: 13, fontWeight: 600, color: '#0A0A0B' }}>Rooms</p>
+                      <button
                         onClick={() => { setAddRoomPropertyId(property.id); setNewRoom({ number: '', floor: 1, type: 'single', rent: 0 }); setAddRoomOpen(true); }}
-                        className="bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600 w-full md:w-auto shadow-lg shadow-green-500/30 h-11 md:h-9"
+                        className="ds-btn ds-btn-primary"
+                        style={{ fontSize: 11, padding: '4px 10px', gap: 4 }}
                       >
-                        <Plus className="w-4 h-4 mr-2" />
-                        <span className="font-semibold">Add Room</span>
-                      </Button>
+                        <Plus style={{ width: 12, height: 12 }} /> Add Room
+                      </button>
                     </div>
 
                     {property.rooms.length === 0 ? (
-                      <p className="text-sm text-gray-400 text-center py-8">No rooms yet. Add the first room.</p>
+                      <p style={{ fontSize: 13, color: '#A1A1AA', textAlign: 'center', padding: '24px 0' }}>No rooms yet. Add the first room.</p>
                     ) : (
-                      <div className="space-y-6">
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                         {floors.map((floor) => {
                           const floorRooms = property.rooms.filter((r) => r.floor === floor);
                           return (
-                            <div key={floor} className="space-y-3">
-                              <div className="bg-gradient-to-r from-purple-500 to-blue-500 px-4 py-3 rounded-xl shadow-md">
-                                <h5 className="font-bold text-white text-base md:text-lg flex items-center gap-2">
-                                  <Layers className="w-5 h-5" />
+                            <div key={floor}>
+                              <div
+                                className="flex items-center justify-between"
+                                style={{ marginBottom: 8 }}
+                              >
+                                <p style={{ fontSize: 11, fontWeight: 600, color: '#6366F1', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
                                   Floor {floor}
-                                  <span className="ml-auto text-sm bg-white/20 px-3 py-1 rounded-full">
-                                    {floorRooms.length} room{floorRooms.length !== 1 ? 's' : ''}
-                                  </span>
-                                </h5>
+                                </p>
+                                <span style={{ fontSize: 11, color: '#A1A1AA' }}>{floorRooms.length} room{floorRooms.length !== 1 ? 's' : ''}</span>
                               </div>
 
-                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4">
+                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 8 }}>
                                 {floorRooms.map((room) => (
-                                  <Card key={room.id} className="p-4 border-0 shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105 bg-white">
-                                    <div className="flex items-start justify-between mb-3">
-                                      <div className="flex items-center gap-2">
-                                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center shadow-md">
-                                          <span className="text-white font-bold text-sm">{room.number}</span>
-                                        </div>
-                                        <div>
-                                          <h6 className="font-bold text-gray-900 text-base">{room.number}</h6>
-                                          <p className="text-xs text-gray-600 font-medium capitalize">{room.type}</p>
-                                        </div>
-                                      </div>
-                                      <div className="flex gap-1 flex-shrink-0">
+                                  <div
+                                    key={room.id}
+                                    style={{
+                                      padding: '10px 12px',
+                                      border: `1px solid ${room.status === 'occupied' ? '#A7F3D0' : room.status === 'maintenance' ? '#FDE68A' : '#E4E4E7'}`,
+                                      borderRadius: 8,
+                                      background: room.status === 'occupied' ? '#F0FDF4' : room.status === 'maintenance' ? '#FFFBEB' : '#fff',
+                                    }}
+                                  >
+                                    <div className="flex items-center justify-between mb-1.5">
+                                      <p style={{ fontSize: 13, fontWeight: 600, color: '#0A0A0B' }}>Room {room.number}</p>
+                                      <div className="flex items-center gap-1">
                                         <button
-                                          className="p-2 hover:bg-blue-100 rounded-lg transition-all"
                                           onClick={() => { setEditingRoom(room); setEditRoomPropertyId(property.id); setEditRoomOpen(true); }}
+                                          className="ds-btn ds-btn-secondary"
+                                          style={{ fontSize: 10, padding: '2px 5px', minWidth: 0 }}
                                         >
-                                          <Edit className="w-4 h-4 text-blue-600" />
+                                          <Edit style={{ width: 11, height: 11 }} />
                                         </button>
                                         <button
-                                          className="p-2 hover:bg-red-100 rounded-lg transition-all"
                                           onClick={() => { setDeletingRoom({ room, propertyId: property.id }); setDeleteRoomOpen(true); }}
+                                          className="ds-btn ds-btn-secondary"
+                                          style={{ fontSize: 10, padding: '2px 5px', minWidth: 0, color: '#DC2626' }}
                                         >
-                                          <Trash className="w-4 h-4 text-red-600" />
+                                          <Trash style={{ width: 11, height: 11 }} />
                                         </button>
                                       </div>
                                     </div>
-
-                                    <div className="space-y-3">
-                                      <div className="flex items-center gap-2 p-2 bg-gradient-to-r from-orange-50 to-amber-50 rounded-lg">
-                                        <Bed className="w-5 h-5 text-orange-600 flex-shrink-0" />
-                                        <span className="text-sm font-bold text-gray-900">
-                                          {room.beds} bed{room.beds > 1 ? 's' : ''}
-                                        </span>
+                                    <div className="flex items-center justify-between">
+                                      <div className="flex items-center gap-3">
+                                        <span style={{ fontSize: 11, color: '#71717A', textTransform: 'capitalize' }}>{room.type}</span>
+                                        <span style={{ fontSize: 11, color: '#71717A' }}>{room.beds}b</span>
                                       </div>
-                                      <div className="flex items-center justify-between p-2 bg-gradient-to-r from-green-50 to-emerald-50 rounded-lg">
-                                        <span className="text-xs font-medium text-gray-600">Monthly Rent</span>
-                                        <span className="text-base font-bold text-green-700">₹{room.rent.toLocaleString()}</span>
-                                      </div>
-                                      <div className="flex items-center justify-between flex-wrap gap-2">
-                                        <span className={`px-3 py-1.5 rounded-full text-xs font-bold shadow-sm ${statusColor[room.status as RoomStatus] ?? 'bg-gray-100 text-gray-700'}`}>
-                                          {statusLabel[room.status as RoomStatus] ?? room.status}
-                                        </span>
-                                        <span className="text-xs font-semibold text-gray-700 bg-gray-100 px-3 py-1.5 rounded-full">
-                                          {room.occupiedBeds ?? 0}/{room.beds} occupied
-                                        </span>
-                                      </div>
+                                      <span style={{ fontSize: 12, fontWeight: 600, color: '#059669', fontVariantNumeric: 'tabular-nums' }}>
+                                        ₹{room.rent.toLocaleString('en-IN')}
+                                      </span>
                                     </div>
-                                  </Card>
+                                    <div className="flex items-center justify-between mt-1.5">
+                                      <span style={{ fontSize: 10, fontWeight: 600, padding: '2px 6px', borderRadius: 4, background: room.status === 'occupied' ? '#ECFDF5' : room.status === 'maintenance' ? '#FFFBEB' : '#EEF2FF', color: room.status === 'occupied' ? '#065F46' : room.status === 'maintenance' ? '#92400E' : '#4338CA' }}>
+                                        {statusLabel[room.status as RoomStatus] ?? room.status}
+                                      </span>
+                                      <span style={{ fontSize: 10, color: '#A1A1AA' }}>{room.occupiedBeds ?? 0}/{room.beds} occ</span>
+                                    </div>
+                                  </div>
                                 ))}
                               </div>
                             </div>
@@ -439,7 +494,7 @@ export function Properties({ onNavigate: _onNavigate }: PropertiesV2Props) {
                     )}
                   </div>
                 )}
-              </Card>
+              </div>
             );
           })}
         </div>
@@ -594,6 +649,30 @@ export function Properties({ onNavigate: _onNavigate }: PropertiesV2Props) {
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={handleDeleteProperty} className="bg-red-600 hover:bg-red-700 text-white">
               Delete Property
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Property Limit Modal */}
+      <AlertDialog open={limitModalOpen} onOpenChange={setLimitModalOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-indigo-700">
+              <Crown className="w-5 h-5" /> Property Limit Reached
+            </AlertDialogTitle>
+            <AlertDialogDescription className="space-y-2">
+              <p>Your <strong>Starter</strong> plan includes 1 property. You currently have {properties.length}.</p>
+              <p>Upgrade to <strong>Pro</strong> for unlimited properties, team collaboration, and WhatsApp messaging.</p>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => { setLimitModalOpen(false); onNavigate('settings'); }}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white"
+            >
+              View Plans
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

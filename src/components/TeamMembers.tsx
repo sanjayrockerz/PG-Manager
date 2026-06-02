@@ -5,6 +5,7 @@ import {
   ChevronUp,
   Clock,
   Mail,
+  Pencil,
   Plus,
   RefreshCw,
   Shield,
@@ -18,6 +19,7 @@ import { useProperty } from '../contexts/PropertyContext';
 import {
   type CreateInviteInput,
   type DisplayRole,
+  type InviteCapabilities,
   type InviteRecord,
   type TeamMemberRecord,
   inviteService,
@@ -43,6 +45,12 @@ const DISPLAY_ROLE_OPTIONS: { value: DisplayRole; label: string; description: st
   },
 ];
 
+const DEFAULT_CAPS_FOR_ROLE: Record<DisplayRole, InviteCapabilities> = {
+  viewer: { canManageTenants: false, canManagePayments: false, canManageMaintenance: false, canManageAnnouncements: false },
+  editor: { canManageTenants: true, canManagePayments: false, canManageMaintenance: true, canManageAnnouncements: false },
+  manager: { canManageTenants: true, canManagePayments: true, canManageMaintenance: true, canManageAnnouncements: true },
+};
+
 function roleColor(role: DisplayRole) {
   switch (role) {
     case 'viewer': return 'bg-gray-100 text-gray-700';
@@ -58,6 +66,371 @@ function statusColor(status: InviteRecord['status']) {
     case 'revoked': return 'bg-red-100 text-red-700';
     case 'expired': return 'bg-gray-100 text-gray-500';
   }
+}
+
+const buildInviteLink = (token: string): string => {
+  if (typeof window === 'undefined') return '';
+  return `${window.location.origin}/accept-invite?token=${token}`;
+};
+
+// ─── Capability Toggle Row ─────────────────────────────────────────────────────
+
+function CapabilityRow({
+  label,
+  enabled,
+  onChange,
+  disabled,
+}: {
+  label: string;
+  enabled: boolean;
+  onChange: (v: boolean) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <label className="flex items-center justify-between py-1 cursor-pointer group">
+      <span className={`text-sm ${disabled ? 'text-gray-400' : 'text-gray-700'}`}>{label}</span>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onChange(!enabled)}
+        className={`w-9 h-5 rounded-full transition-colors relative flex-shrink-0 ${
+          enabled ? 'bg-blue-600' : 'bg-gray-200'
+        } ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+      >
+        <span
+          className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
+            enabled ? 'translate-x-4' : 'translate-x-0.5'
+          }`}
+        />
+      </button>
+    </label>
+  );
+}
+
+// ─── Edit Scope Dialog ─────────────────────────────────────────────────────────
+
+interface EditScopeDialogProps {
+  memberId: string;
+  memberEmail: string;
+  propertyId: string;
+  propertyName: string;
+  currentRole: DisplayRole;
+  currentCaps: {
+    canManageTenants: boolean;
+    canManagePayments: boolean;
+    canManageMaintenance: boolean;
+    canManageAnnouncements: boolean;
+  };
+  onClose: () => void;
+  onSuccess: () => void;
+}
+
+function EditScopeDialog({
+  memberId,
+  memberEmail,
+  propertyId,
+  propertyName,
+  currentRole,
+  currentCaps,
+  onClose,
+  onSuccess,
+}: EditScopeDialogProps) {
+  const [displayRole, setDisplayRole] = useState<DisplayRole>(currentRole);
+  const [caps, setCaps] = useState(currentCaps);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleRoleChange = (role: DisplayRole) => {
+    setDisplayRole(role);
+    setCaps(DEFAULT_CAPS_FOR_ROLE[role]);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSubmitting(true);
+    try {
+      await teamService.updateMemberScopeWithAudit(memberId, propertyId, displayRole, {
+        canView: true,
+        canManageTenants: caps.canManageTenants,
+        canManagePayments: caps.canManagePayments,
+        canManageMaintenance: caps.canManageMaintenance,
+        canManageAnnouncements: caps.canManageAnnouncements,
+      });
+      toast.success('Access updated.');
+      onSuccess();
+      onClose();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update access.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900">Edit Property Access</h3>
+            <p className="text-xs text-gray-500 mt-0.5 truncate max-w-[220px]">{propertyName} · {memberEmail}</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-lg">
+            <X className="w-4 h-4 text-gray-500" />
+          </button>
+        </div>
+
+        <form onSubmit={(e) => void handleSubmit(e)} className="p-5 space-y-4">
+          {/* Role */}
+          <div>
+            <p className="text-xs font-medium text-gray-600 mb-2 uppercase tracking-wide">Access Role</p>
+            <div className="flex gap-2">
+              {DISPLAY_ROLE_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => handleRoleChange(opt.value)}
+                  className={`flex-1 py-2 px-2 text-xs rounded-lg border transition-colors ${
+                    displayRole === opt.value
+                      ? 'border-blue-500 bg-blue-50 text-blue-700 font-semibold'
+                      : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Capabilities */}
+          <div>
+            <p className="text-xs font-medium text-gray-600 mb-2 uppercase tracking-wide">Capabilities</p>
+            <div className="bg-gray-50 rounded-lg px-3 py-1 divide-y divide-gray-100">
+              <CapabilityRow
+                label="Manage Tenants"
+                enabled={caps.canManageTenants}
+                onChange={(v) => setCaps((c) => ({ ...c, canManageTenants: v }))}
+                disabled={displayRole === 'viewer'}
+              />
+              <CapabilityRow
+                label="Manage Payments"
+                enabled={caps.canManagePayments}
+                onChange={(v) => setCaps((c) => ({ ...c, canManagePayments: v }))}
+                disabled={displayRole === 'viewer'}
+              />
+              <CapabilityRow
+                label="Manage Maintenance"
+                enabled={caps.canManageMaintenance}
+                onChange={(v) => setCaps((c) => ({ ...c, canManageMaintenance: v }))}
+                disabled={displayRole === 'viewer'}
+              />
+              <CapabilityRow
+                label="Post Announcements"
+                enabled={caps.canManageAnnouncements}
+                onChange={(v) => setCaps((c) => ({ ...c, canManageAnnouncements: v }))}
+                disabled={displayRole === 'viewer'}
+              />
+            </div>
+          </div>
+
+          <div className="flex gap-3 pt-1">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 py-2 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="flex-1 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-60"
+            >
+              {isSubmitting ? 'Saving...' : 'Save Changes'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ─── Add Property Scope Dialog ─────────────────────────────────────────────────
+
+interface AddPropertyScopeDialogProps {
+  memberId: string;
+  memberEmail: string;
+  alreadyAssignedIds: string[];
+  onClose: () => void;
+  onSuccess: () => void;
+}
+
+function AddPropertyScopeDialog({
+  memberId,
+  memberEmail,
+  alreadyAssignedIds,
+  onClose,
+  onSuccess,
+}: AddPropertyScopeDialogProps) {
+  const { properties } = useProperty();
+  const [selectedPropertyId, setSelectedPropertyId] = useState('');
+  const [displayRole, setDisplayRole] = useState<DisplayRole>('viewer');
+  const [caps, setCaps] = useState<InviteCapabilities>(DEFAULT_CAPS_FOR_ROLE.viewer);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const availableProperties = properties.filter((p) => !alreadyAssignedIds.includes(p.id));
+
+  const handleRoleChange = (role: DisplayRole) => {
+    setDisplayRole(role);
+    setCaps(DEFAULT_CAPS_FOR_ROLE[role]);
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedPropertyId) return;
+    setIsSubmitting(true);
+    try {
+      await teamService.addPropertyScope(memberId, selectedPropertyId, displayRole, caps);
+      toast.success('Property access granted.');
+      onSuccess();
+      onClose();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to grant access.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+          <div>
+            <h3 className="text-sm font-semibold text-gray-900">Add Property Access</h3>
+            <p className="text-xs text-gray-500 mt-0.5 truncate max-w-[220px]">{memberEmail}</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-lg">
+            <X className="w-4 h-4 text-gray-500" />
+          </button>
+        </div>
+
+        <form onSubmit={(e) => void handleSubmit(e)} className="p-5 space-y-4">
+          {availableProperties.length === 0 ? (
+            <p className="text-sm text-gray-500 text-center py-4">
+              This member already has access to all your properties.
+            </p>
+          ) : (
+            <>
+              {/* Property picker */}
+              <div>
+                <p className="text-xs font-medium text-gray-600 mb-2 uppercase tracking-wide">Property</p>
+                <div className="space-y-1.5 max-h-40 overflow-y-auto border border-gray-200 rounded-lg p-2">
+                  {availableProperties.map((prop) => (
+                    <label
+                      key={prop.id}
+                      className={`flex items-center gap-2.5 p-2 rounded-lg cursor-pointer transition-colors ${
+                        selectedPropertyId === prop.id
+                          ? 'bg-blue-50 border border-blue-200'
+                          : 'hover:bg-gray-50 border border-transparent'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="property"
+                        value={prop.id}
+                        checked={selectedPropertyId === prop.id}
+                        onChange={() => setSelectedPropertyId(prop.id)}
+                        className="text-blue-600"
+                      />
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">{prop.name}</p>
+                        <p className="text-xs text-gray-500">{prop.city}</p>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Role */}
+              <div>
+                <p className="text-xs font-medium text-gray-600 mb-2 uppercase tracking-wide">Access Role</p>
+                <div className="flex gap-2">
+                  {DISPLAY_ROLE_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      onClick={() => handleRoleChange(opt.value)}
+                      className={`flex-1 py-2 px-2 text-xs rounded-lg border transition-colors ${
+                        displayRole === opt.value
+                          ? 'border-blue-500 bg-blue-50 text-blue-700 font-semibold'
+                          : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Capabilities */}
+              {displayRole !== 'viewer' && (
+                <div>
+                  <p className="text-xs font-medium text-gray-600 mb-2 uppercase tracking-wide">Capabilities</p>
+                  <div className="bg-gray-50 rounded-lg px-3 py-1 divide-y divide-gray-100">
+                    <CapabilityRow
+                      label="Manage Tenants"
+                      enabled={caps.canManageTenants}
+                      onChange={(v) => setCaps((c) => ({ ...c, canManageTenants: v }))}
+                    />
+                    <CapabilityRow
+                      label="Manage Payments"
+                      enabled={caps.canManagePayments}
+                      onChange={(v) => setCaps((c) => ({ ...c, canManagePayments: v }))}
+                    />
+                    <CapabilityRow
+                      label="Manage Maintenance"
+                      enabled={caps.canManageMaintenance}
+                      onChange={(v) => setCaps((c) => ({ ...c, canManageMaintenance: v }))}
+                    />
+                    <CapabilityRow
+                      label="Post Announcements"
+                      enabled={caps.canManageAnnouncements}
+                      onChange={(v) => setCaps((c) => ({ ...c, canManageAnnouncements: v }))}
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="flex-1 py-2 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmitting || !selectedPropertyId}
+                  className="flex-1 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-60"
+                >
+                  {isSubmitting ? 'Granting...' : 'Grant Access'}
+                </button>
+              </div>
+            </>
+          )}
+
+          {availableProperties.length === 0 && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="w-full py-2 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50"
+            >
+              Close
+            </button>
+          )}
+        </form>
+      </div>
+    </div>
+  );
 }
 
 // ─── Invite Dialog ────────────────────────────────────────────────────────────
@@ -77,6 +450,18 @@ function InviteDialog({ onClose, onSuccess }: InviteDialogProps) {
   });
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [createdInvite, setCreatedInvite] = useState<InviteRecord | null>(null);
+
+  const handleCopyLink = async (token: string) => {
+    const link = buildInviteLink(token);
+    if (!link) return;
+    try {
+      await navigator.clipboard.writeText(link);
+      toast.success('Invite link copied.');
+    } catch {
+      toast.error('Unable to copy invite link.');
+    }
+  };
 
   const toggleProperty = (propId: string) => {
     setFormData((prev) => ({
@@ -104,10 +489,10 @@ function InviteDialog({ onClose, onSuccess }: InviteDialogProps) {
 
     setIsSubmitting(true);
     try {
-      await inviteService.createInvite(formData);
-      toast.success(`Invite sent to ${formData.invitedEmail}`);
+      const invite = await inviteService.createInvite(formData);
+      setCreatedInvite(invite);
+      toast.success(`Invite created for ${formData.invitedEmail}`);
       onSuccess();
-      onClose();
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to create invite.';
       if (msg.includes('unique') || msg.includes('duplicate')) {
@@ -121,6 +506,7 @@ function InviteDialog({ onClose, onSuccess }: InviteDialogProps) {
   };
 
   const selectedRole = DISPLAY_ROLE_OPTIONS.find((r) => r.value === formData.displayRole);
+  const inviteLink = createdInvite ? buildInviteLink(createdInvite.token) : '';
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -243,21 +629,43 @@ function InviteDialog({ onClose, onSuccess }: InviteDialogProps) {
             </div>
           )}
 
+          {createdInvite && (
+            <div className="rounded-lg border border-indigo-100 bg-indigo-50 px-4 py-3 text-xs text-indigo-700">
+              <p className="font-semibold mb-1">Invite link</p>
+              <div className="flex items-center gap-2">
+                <input
+                  value={inviteLink}
+                  readOnly
+                  className="flex-1 px-2 py-1 border border-indigo-200 rounded bg-white text-[11px]"
+                />
+                <button
+                  type="button"
+                  onClick={() => void handleCopyLink(createdInvite.token)}
+                  className="px-2 py-1 bg-indigo-600 text-white rounded text-xs"
+                >
+                  Copy
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="flex items-center justify-end gap-3 pt-2 border-t border-gray-100">
             <button
               type="button"
               onClick={onClose}
               className="px-5 py-2 border border-gray-300 rounded-lg text-sm hover:bg-gray-50 transition-colors"
             >
-              Cancel
+              {createdInvite ? 'Done' : 'Cancel'}
             </button>
-            <button
-              type="submit"
-              disabled={isSubmitting || !formData.propertyIds.length}
-              className="px-5 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60"
-            >
-              {isSubmitting ? 'Sending...' : 'Send Invite'}
-            </button>
+            {!createdInvite && (
+              <button
+                type="submit"
+                disabled={isSubmitting || !formData.propertyIds.length}
+                className="px-5 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60"
+              >
+                {isSubmitting ? 'Sending...' : 'Send Invite'}
+              </button>
+            )}
           </div>
         </form>
       </div>
@@ -267,6 +675,20 @@ function InviteDialog({ onClose, onSuccess }: InviteDialogProps) {
 
 // ─── Main TeamMembers Component ───────────────────────────────────────────────
 
+interface EditScopeState {
+  memberId: string;
+  memberEmail: string;
+  propertyId: string;
+  propertyName: string;
+  currentRole: DisplayRole;
+  currentCaps: {
+    canManageTenants: boolean;
+    canManagePayments: boolean;
+    canManageMaintenance: boolean;
+    canManageAnnouncements: boolean;
+  };
+}
+
 export function TeamMembers() {
   const { properties } = useProperty();
   const [invites, setInvites] = useState<InviteRecord[]>([]);
@@ -274,6 +696,8 @@ export function TeamMembers() {
   const [isLoading, setIsLoading] = useState(true);
   const [showInviteDialog, setShowInviteDialog] = useState(false);
   const [expandedMemberId, setExpandedMemberId] = useState<string | null>(null);
+  const [editScopeState, setEditScopeState] = useState<EditScopeState | null>(null);
+  const [addPropertyState, setAddPropertyState] = useState<{ memberId: string; memberEmail: string; assignedIds: string[] } | null>(null);
 
   const load = useCallback(async () => {
     setIsLoading(true);
@@ -316,6 +740,17 @@ export function TeamMembers() {
     }
   };
 
+  const handleCopyInvite = async (token: string) => {
+    const link = buildInviteLink(token);
+    if (!link) return;
+    try {
+      await navigator.clipboard.writeText(link);
+      toast.success('Invite link copied.');
+    } catch {
+      toast.error('Unable to copy invite link.');
+    }
+  };
+
   const handleRemoveMember = async (memberId: string, memberEmail: string) => {
     if (!confirm(`Remove ${memberEmail} from your team? They will lose all property access.`)) return;
     try {
@@ -324,6 +759,17 @@ export function TeamMembers() {
       await load();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to remove member.');
+    }
+  };
+
+  const handleRemovePropertyScope = async (memberId: string, propertyId: string, memberEmail: string, propertyName: string) => {
+    if (!confirm(`Remove ${memberEmail}'s access to ${propertyName}?`)) return;
+    try {
+      await teamService.removePropertyScope(memberId, propertyId);
+      toast.success('Property access removed.');
+      await load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to remove property access.');
     }
   };
 
@@ -406,41 +852,91 @@ export function TeamMembers() {
                     <button
                       onClick={() => void handleRemoveMember(member.id, member.email)}
                       className="p-1.5 hover:bg-red-50 rounded-lg transition-colors"
-                      title="Remove member"
+                      title="Remove member from team"
                     >
                       <UserX className="w-4 h-4 text-red-500" />
                     </button>
                   </div>
                 </div>
 
-                {/* Expanded: property assignments */}
+                {/* Expanded: property assignments with edit controls */}
                 {expandedMemberId === member.id && (
                   <div className="mt-3 pt-3 border-t border-gray-100 space-y-2">
-                    <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Property Access</p>
-                    {member.propertyAssignments.map((scope) => (
-                      <div key={scope.propertyId} className="bg-gray-50 rounded-lg px-3 py-2">
-                        <div className="flex items-center justify-between">
-                          <p className="text-sm text-gray-800 font-medium">
-                            {getPropertyName(scope.propertyId)}
-                          </p>
-                          <span className={`px-2 py-0.5 rounded text-xs ${roleColor(scope.displayRole)}`}>
-                            {scope.displayRole}
-                          </span>
+                    <div className="flex items-center justify-between mb-1">
+                      <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Property Access</p>
+                      <button
+                        onClick={() => setAddPropertyState({
+                          memberId: member.id,
+                          memberEmail: member.email,
+                          assignedIds: member.propertyAssignments.map((s) => s.propertyId),
+                        })}
+                        className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 px-2 py-1 rounded hover:bg-blue-50 transition-colors"
+                      >
+                        <Plus className="w-3 h-3" />
+                        Add Property
+                      </button>
+                    </div>
+                    {member.propertyAssignments.length === 0 ? (
+                      <p className="text-xs text-gray-400 italic py-2">No properties assigned yet.</p>
+                    ) : (
+                      member.propertyAssignments.map((scope) => (
+                        <div key={scope.propertyId} className="bg-gray-50 rounded-lg px-3 py-2.5">
+                          <div className="flex items-center justify-between">
+                            <p className="text-sm text-gray-800 font-medium">
+                              {getPropertyName(scope.propertyId)}
+                            </p>
+                            <div className="flex items-center gap-1.5">
+                              <span className={`px-2 py-0.5 rounded text-xs ${roleColor(scope.displayRole)}`}>
+                                {scope.displayRole}
+                              </span>
+                              <button
+                                onClick={() => setEditScopeState({
+                                  memberId: member.id,
+                                  memberEmail: member.email,
+                                  propertyId: scope.propertyId,
+                                  propertyName: getPropertyName(scope.propertyId),
+                                  currentRole: scope.displayRole,
+                                  currentCaps: {
+                                    canManageTenants: scope.canManageTenants,
+                                    canManagePayments: scope.canManagePayments,
+                                    canManageMaintenance: scope.canManageMaintenance,
+                                    canManageAnnouncements: scope.canManageAnnouncements,
+                                  },
+                                })}
+                                className="p-1 hover:bg-blue-100 rounded transition-colors"
+                                title="Edit access"
+                              >
+                                <Pencil className="w-3 h-3 text-blue-500" />
+                              </button>
+                              <button
+                                onClick={() => void handleRemovePropertyScope(
+                                  member.id,
+                                  scope.propertyId,
+                                  member.email,
+                                  getPropertyName(scope.propertyId),
+                                )}
+                                className="p-1 hover:bg-red-100 rounded transition-colors"
+                                title="Remove property access"
+                              >
+                                <Trash2 className="w-3 h-3 text-red-500" />
+                              </button>
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1.5">
+                            {[
+                              ['Tenants', scope.canManageTenants],
+                              ['Payments', scope.canManagePayments],
+                              ['Maintenance', scope.canManageMaintenance],
+                              ['Announcements', scope.canManageAnnouncements],
+                            ].map(([label, enabled]) => (
+                              <span key={String(label)} className={`text-xs ${enabled ? 'text-green-700' : 'text-gray-400'}`}>
+                                {enabled ? '✓' : '✗'} {label}
+                              </span>
+                            ))}
+                          </div>
                         </div>
-                        <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1.5">
-                          {[
-                            ['Tenants', scope.canManageTenants],
-                            ['Payments', scope.canManagePayments],
-                            ['Maintenance', scope.canManageMaintenance],
-                            ['Announcements', scope.canManageAnnouncements],
-                          ].map(([label, enabled]) => (
-                            <span key={String(label)} className={`text-xs ${enabled ? 'text-green-700' : 'text-gray-400'}`}>
-                              {enabled ? '✓' : '✗'} {label}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
+                      ))
+                    )}
                   </div>
                 )}
               </div>
@@ -489,6 +985,13 @@ export function TeamMembers() {
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => void handleCopyInvite(invite.token)}
+                        className="p-1.5 hover:bg-slate-50 rounded-lg transition-colors"
+                        title="Copy invite link"
+                      >
+                        <Mail className="w-4 h-4 text-slate-500" />
+                      </button>
                       <button
                         onClick={() => void handleRefreshInvite(invite.id)}
                         className="p-1.5 hover:bg-blue-50 rounded-lg transition-colors"
@@ -544,11 +1047,29 @@ export function TeamMembers() {
           <li>When they sign up or log in with that exact email, they will automatically get access.</li>
           <li>Invites expire after 7 days. You can refresh them at any time.</li>
           <li>Members can only see data for their assigned properties — never other owners' data.</li>
+          <li>You can edit or remove individual property access at any time from the member row.</li>
         </ul>
       </div>
 
+      {/* Dialogs */}
       {showInviteDialog && (
         <InviteDialog onClose={() => setShowInviteDialog(false)} onSuccess={() => void load()} />
+      )}
+      {editScopeState && (
+        <EditScopeDialog
+          {...editScopeState}
+          onClose={() => setEditScopeState(null)}
+          onSuccess={() => void load()}
+        />
+      )}
+      {addPropertyState && (
+        <AddPropertyScopeDialog
+          memberId={addPropertyState.memberId}
+          memberEmail={addPropertyState.memberEmail}
+          alreadyAssignedIds={addPropertyState.assignedIds}
+          onClose={() => setAddPropertyState(null)}
+          onSuccess={() => void load()}
+        />
       )}
     </div>
   );

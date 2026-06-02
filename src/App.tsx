@@ -9,6 +9,7 @@ import { Maintenance } from './components/Maintenance';
 import { Announcements } from './components/Announcements';
 import { Settings } from './components/Settings';
 import { Properties } from './components/Properties';
+import { BuildingView } from './components/BuildingView';
 import { Notifications } from './components/Notifications';
 import { Support } from './components/Support';
 import { AuditLog } from './components/AuditLog';
@@ -23,12 +24,25 @@ import { OTPSignup } from './components/OTPSignup';
 import { PortalSelector, type PortalType } from './components/PortalSelector';
 import { Pricing } from './components/Pricing';
 import { PageFrame } from './components/ui/PageFrame';
+import { AcceptInvite } from './components/AcceptInvite';
 import { LocalizationProvider } from './contexts/LocalizationContext';
 import { isPlatformAdminRole } from './utils/roles';
 import { hasPermission, TAB_PERMISSION_MAP, getDefaultTab } from './utils/permissions';
 import { PageGuard } from './guards/PageGuard';
 
 const PORTAL_STORAGE_KEY = 'rentcare:selected-portal';
+
+const readInviteToken = (): string | null => {
+  if (typeof window === 'undefined') return null;
+  const params = new URLSearchParams(window.location.search);
+  const token = params.get('token')?.trim();
+  return token ? token : null;
+};
+
+const isAcceptInviteRoute = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  return window.location.pathname.startsWith('/accept-invite');
+};
 
 const readStoredPortal = (): PortalType | null => {
   try {
@@ -57,7 +71,9 @@ const writeStoredPortal = (portal: PortalType | null): void => {
 function AppContent() {
   const { user, isLoading } = useAuth();
   const [showSignUp, setShowSignUp] = useState(false);
-  const [selectedPortal, setSelectedPortal] = useState<PortalType | null>(readStoredPortal);
+  const [selectedPortal, setSelectedPortal] = useState<PortalType | null>(() => (
+    readStoredPortal() ?? (readInviteToken() ? 'owner' : null)
+  ));
   const [activeTab, setActiveTab] = useState('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
@@ -72,6 +88,9 @@ function AppContent() {
 
   useEffect(() => {
     if (!user) {
+      if (!selectedPortal && readInviteToken()) {
+        setSelectedPortal('owner');
+      }
       return;
     }
 
@@ -123,6 +142,10 @@ function AppContent() {
     setActiveTab(getDefaultTab(user.role));
     setSelectedTenantId(null);
   };
+
+  if (isAcceptInviteRoute()) {
+    return <AcceptInvite />;
+  }
 
   if (isLoading) {
     return (
@@ -193,6 +216,18 @@ function AppContent() {
             <Properties onNavigate={setActiveTab} />
           </PageGuard>
         );
+      case 'building-view':
+        return (
+          <PageGuard action="page:properties">
+            <BuildingView
+              onTenantClick={(tenantId) => {
+                setActiveTabWithRoleGuard('tenants');
+                setSelectedTenantId(tenantId);
+              }}
+              onNavigate={setActiveTab}
+            />
+          </PageGuard>
+        );
       case 'tenants':
         return (
           <PageGuard action="page:tenants">
@@ -202,7 +237,7 @@ function AppContent() {
       case 'payments':
         return (
           <PageGuard action="page:payments">
-            <Payments />
+            <Payments onNavigate={setActiveTab} />
           </PageGuard>
         );
       case 'maintenance':
@@ -227,7 +262,12 @@ function AppContent() {
         return (
           <Notifications
             onBack={() => setActiveTab('dashboard')}
-            onNavigate={(tab) => setActiveTabWithRoleGuard(tab)}
+            onNavigate={(tab, entityId) => {
+              setActiveTabWithRoleGuard(tab);
+              if (tab === 'tenants' && entityId) {
+                setSelectedTenantId(entityId);
+              }
+            }}
           />
         );
       case 'support':
@@ -237,9 +277,17 @@ function AppContent() {
           </PageGuard>
         );
       case 'audit-log':
-        return <AuditLog onBack={() => setActiveTab('dashboard')} />;
+        return (
+          <PageGuard action="page:dashboard">
+            <AuditLog onBack={() => setActiveTab('dashboard')} />
+          </PageGuard>
+        );
       case 'team':
-        return <TeamMembers />;
+        return (
+          <PageGuard action="team:manage">
+            <TeamMembers />
+          </PageGuard>
+        );
       case 'pricing':
         return <Pricing />;
       case 'admin-section':

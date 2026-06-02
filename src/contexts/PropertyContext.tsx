@@ -103,7 +103,7 @@ export function PropertyProvider({ children }: { children: ReactNode }) {
 
   useRealtimeRefresh({
     key: 'property-context',
-    tables: ['properties', 'rooms'],
+    tables: ['properties', 'rooms', 'owner_user_property_scopes'],
     onChange: () => refreshProperties(false),
     enabled: !isDemoMode,
   });

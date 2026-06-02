@@ -4,6 +4,7 @@ import { isPlatformAdminRole, isScopedOwnerRole } from '../utils/roles';
 import { isValidStoredPhoneNumber as isValidStoredPhoneFromUtils, parseStoredPhone } from '../utils/phone';
 
 export type UserRole = 'owner' | 'owner_manager' | 'staff' | 'tenant' | 'platform_admin' | 'admin' | 'super_admin';
+export type DisplayRole = 'viewer' | 'editor' | 'manager';
 export type TenantStatus =
   | 'pending_onboarding'
   | 'active'
@@ -73,6 +74,11 @@ interface ProfileRow {
   owner_scope_id: string | null;
   pg_name: string | null;
   city: string | null;
+  photo_url: string | null;
+  is_suspended?: boolean;
+  suspended_at?: string | null;
+  suspended_reason?: string | null;
+  verified_at?: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -179,6 +185,18 @@ interface MaintenanceNoteRow {
   created_at: string;
 }
 
+interface MaintenanceThreadRow {
+  id: string;
+  ticket_id: string;
+  actor_id: string | null;
+  actor_role: 'owner' | 'owner_manager' | 'staff' | 'tenant' | 'system';
+  body: string;
+  is_internal: boolean;
+  status_from: string | null;
+  status_to: string | null;
+  created_at: string;
+}
+
 interface AnnouncementRow {
   id: string;
   owner_id: string;
@@ -199,6 +217,7 @@ interface NotificationRow {
   type: 'payment' | 'maintenance' | 'tenant' | 'announcement';
   title: string;
   message: string;
+  property_id?: string | null;
   read: boolean;
   created_at: string;
 }
@@ -208,11 +227,13 @@ interface OwnerUserPropertyScopeRow {
   owner_id: string;
   user_id: string;
   property_id: string;
+  can_view?: boolean;
   can_manage_properties: boolean;
   can_manage_tenants: boolean;
   can_manage_payments: boolean;
   can_manage_maintenance: boolean;
   can_manage_announcements: boolean;
+  display_role?: DisplayRole | null;
   created_at: string;
 }
 
@@ -274,6 +295,7 @@ export interface AppUser {
   ownerScopeId: string | null;
   pgName: string;
   city: string;
+  photoUrl: string | null;
 }
 
 export interface TenantRecord {
@@ -482,11 +504,13 @@ export interface TeamScopeRecord {
   ownerId: string;
   userId: string;
   propertyId: string;
+  canView: boolean;
   canManageProperties: boolean;
   canManageTenants: boolean;
   canManagePayments: boolean;
   canManageMaintenance: boolean;
   canManageAnnouncements: boolean;
+  displayRole: DisplayRole;
   createdAt: string;
 }
 
@@ -543,6 +567,14 @@ export interface SupportTicketCommentRecord {
   createdAt: string;
 }
 
+export interface TenantOwnerPaymentInfo {
+  upiId: string;
+  qrCodeUrl: string;
+  pgRules: string[];
+  ownerPhone: string;
+  pgName: string;
+}
+
 export interface TenantPortalSnapshot {
   profile: AppUser;
   tenant: TenantRecord;
@@ -551,6 +583,9 @@ export interface TenantPortalSnapshot {
   payments: PaymentRecord[];
   maintenance: MaintenanceTicketRecord[];
   announcements: AnnouncementRecord[];
+  notifications: NotificationRecord[];
+  ownerPaymentInfo: TenantOwnerPaymentInfo;
+  vacateRequest: VacateRequest | null;
 }
 
 export interface OwnerSettingsRecord {
@@ -576,6 +611,7 @@ export interface OwnerSettingsRecord {
       notifyOnProgress: boolean;
       notifyOnResolve: boolean;
     };
+    customFooter: string;
   };
   notifications: {
     paymentNotifications: boolean;
@@ -589,7 +625,12 @@ export interface OwnerSettingsRecord {
   paymentSettings: {
     upiId: string;
     bankAccount: string;
+    bankAccountName: string;
+    ifscCode: string;
+    qrCodeUrl: string;
     latePaymentFee: number;
+    rentReminderEnabled: boolean;
+    rentReminderDaysBefore: number;
   };
   additionalSettings: {
     language: string;
@@ -598,11 +639,28 @@ export interface OwnerSettingsRecord {
   };
 }
 
+export type InviteStatus = 'pending' | 'accepted' | 'revoked' | 'expired';
+
+export interface InviteRecord {
+  id: string;
+  email: string;
+  ownerId: string;
+  propertyId: string | null;
+  role: string; // e.g., 'viewer' | 'editor' | 'manager'
+  token: string;
+  expiresAt: string;
+  status: InviteStatus;
+  createdAt: string;
+  sentAt?: string | null;
+  resendCount?: number;
+}
+
 export interface ProfileUpdateInput {
   name?: string;
   phone?: string;
   pgName?: string;
   city?: string;
+  photoUrl?: string | null;
 }
 
 export interface DashboardSnapshot {
@@ -719,8 +777,17 @@ function isMissingColumnError(error: unknown, candidateColumns: string[]): boole
 }
 
 function isMissingRelationError(error: unknown, relation: string): boolean {
-  const message = String((error as { message?: string } | null)?.message ?? '').toLowerCase();
-  return message.includes('relation') && message.includes(relation.toLowerCase()) && message.includes('does not exist');
+  const candidate = error as { message?: string; code?: string } | null;
+  const message = String(candidate?.message ?? '').toLowerCase();
+  const code = String(candidate?.code ?? '');
+
+  // New PostgREST: "Could not find the table 'public.X' in the schema cache" (PGRST205)
+  if (code === 'PGRST205' && message.includes(relation.toLowerCase())) return true;
+
+  // Old PostgreSQL: "relation 'X' does not exist" (42P01)
+  return (message.includes('relation') || message.includes('table')) &&
+    message.includes(relation.toLowerCase()) &&
+    (message.includes('does not exist') || message.includes('schema cache') || message.includes('not found'));
 }
 
 function isValidEmailAddress(value: string): boolean {
@@ -1115,18 +1182,101 @@ async function listScopedPropertyIds(context: CurrentUserContext): Promise<strin
     return null;
   }
 
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('owner_user_property_scopes')
-    .select('property_id')
+    .select('property_id,can_view')
     .eq('owner_id', context.ownerId)
     .eq('user_id', context.userId)
-    .returns<Array<{ property_id: string }>>();
+    .returns<Array<{ property_id: string; can_view?: boolean }>>();
+
+  if (error && isMissingColumnError(error, ['can_view'])) {
+    const fallback = await supabase
+      .from('owner_user_property_scopes')
+      .select('property_id')
+      .eq('owner_id', context.ownerId)
+      .eq('user_id', context.userId)
+      .returns<Array<{ property_id: string }>>();
+    error = fallback.error;
+    data = (fallback.data ?? []).map((row) => ({ property_id: row.property_id, can_view: true }));
+  }
 
   if (error) {
     throw error;
   }
 
-  return (data ?? []).map((row) => row.property_id);
+  return (data ?? []).filter((row) => row.can_view !== false).map((row) => row.property_id);
+}
+
+async function listCurrentUserScopeMap(context: CurrentUserContext): Promise<Map<string, TeamScopeRecord> | null> {
+  if (context.isPlatformAdmin || context.role === 'owner') {
+    return null;
+  }
+
+  if (!isScopedOwnerRole(context.role)) {
+    return null;
+  }
+
+  const { data, error } = await supabase
+    .from('owner_user_property_scopes')
+    .select('*')
+    .eq('owner_id', context.ownerId)
+    .eq('user_id', context.userId)
+    .returns<OwnerUserPropertyScopeRow[]>();
+
+  if (error) {
+    if (isMissingRelationError(error, 'owner_user_property_scopes')) {
+      return new Map();
+    }
+    throw error;
+  }
+
+  const map = new Map<string, TeamScopeRecord>();
+  (data ?? []).forEach((row) => {
+    map.set(row.property_id, mapTeamScope(row));
+  });
+
+  return map;
+}
+
+type ScopeCapability = 'view' | 'tenants' | 'payments' | 'maintenance' | 'announcements' | 'properties';
+
+async function assertScopeCapability(
+  context: CurrentUserContext,
+  propertyId: string | null | undefined,
+  capability: ScopeCapability,
+): Promise<void> {
+  const scopeMap = await listCurrentUserScopeMap(context);
+  if (!scopeMap) {
+    return;
+  }
+
+  if (!propertyId) {
+    throw new Error('This action requires a property assignment.');
+  }
+
+  const scope = scopeMap.get(propertyId);
+  if (!scope || !scope.canView) {
+    throw new Error('Access to this property has been revoked.');
+  }
+
+  if (capability === 'view') {
+    return;
+  }
+
+  const allowed = (() => {
+    switch (capability) {
+      case 'tenants': return scope.canManageTenants;
+      case 'payments': return scope.canManagePayments;
+      case 'maintenance': return scope.canManageMaintenance;
+      case 'announcements': return scope.canManageAnnouncements;
+      case 'properties': return scope.canManageProperties;
+      default: return false;
+    }
+  })();
+
+  if (!allowed) {
+    throw new Error('You do not have permission to perform this action for the selected property.');
+  }
 }
 
 async function createOwnerNotification(
@@ -1135,12 +1285,14 @@ async function createOwnerNotification(
     type: 'payment' | 'maintenance' | 'tenant' | 'announcement';
     title: string;
     message: string;
+    propertyId?: string | null;
   },
 ): Promise<void> {
   const { error } = await supabase
     .from('notifications')
     .insert({
       owner_id: ownerId,
+      property_id: input.propertyId ?? null,
       type: input.type,
       title: input.title,
       message: input.message,
@@ -1149,6 +1301,26 @@ async function createOwnerNotification(
 
   if (error) {
     throw error;
+  }
+}
+
+async function logActivity(
+  ownerId: string,
+  propertyId: string | null | undefined,
+  event: string,
+  detail: string,
+  metadata: Record<string, unknown> = {},
+): Promise<void> {
+  const { error } = await supabase.from('activity_logs').insert({
+    owner_id: ownerId,
+    property_id: propertyId ?? null,
+    event,
+    detail,
+    metadata,
+  });
+  // Silently ignore if activity_logs table doesn't exist yet (migration pending)
+  if (error && !isMissingRelationError(error, 'activity_logs')) {
+    console.warn('[logActivity] insert failed:', error.message);
   }
 }
 
@@ -1447,6 +1619,41 @@ function mapMaintenanceTicket(row: MaintenanceTicketRow, notes: MaintenanceNoteR
   };
 }
 
+function mapMaintenanceThread(row: MaintenanceThreadRow): MaintenanceThreadEntry {
+  const actorRoleNorm = (row.actor_role === 'owner' || row.actor_role === 'owner_manager')
+    ? 'owner'
+    : row.actor_role === 'system'
+      ? 'system'
+      : 'staff';
+
+  const actorName = row.actor_role === 'system'
+    ? 'System'
+    : row.actor_role === 'tenant'
+      ? 'Tenant'
+      : row.actor_role === 'owner' || row.actor_role === 'owner_manager'
+        ? 'Owner'
+        : 'Staff';
+
+  const entry: MaintenanceThreadEntry = {
+    id: row.id,
+    ticketId: row.ticket_id,
+    actorName,
+    actorRole: actorRoleNorm,
+    message: row.body,
+    isInternal: row.is_internal,
+    createdAt: row.created_at,
+  };
+
+  if (row.status_from && row.status_to) {
+    entry.statusTransition = {
+      from: row.status_from as MaintenanceStatus,
+      to: row.status_to as MaintenanceStatus,
+    };
+  }
+
+  return entry;
+}
+
 function mapAnnouncement(row: AnnouncementRow): AnnouncementRecord {
   return {
     id: row.id,
@@ -1468,9 +1675,17 @@ function mapNotification(row: NotificationRow): NotificationRecord {
     type: row.type,
     title: row.title,
     message: row.message,
+    propertyId: row.property_id ?? null,
     read: row.read,
     createdAt: row.created_at,
   };
+}
+
+function deriveDisplayRoleFromScope(row: OwnerUserPropertyScopeRow): DisplayRole {
+  if (row.display_role) return row.display_role;
+  if (row.can_manage_payments || row.can_manage_announcements) return 'manager';
+  if (row.can_manage_tenants || row.can_manage_maintenance) return 'editor';
+  return 'viewer';
 }
 
 function mapTeamScope(row: OwnerUserPropertyScopeRow): TeamScopeRecord {
@@ -1479,11 +1694,13 @@ function mapTeamScope(row: OwnerUserPropertyScopeRow): TeamScopeRecord {
     ownerId: row.owner_id,
     userId: row.user_id,
     propertyId: row.property_id,
+    canView: row.can_view ?? true,
     canManageProperties: row.can_manage_properties,
     canManageTenants: row.can_manage_tenants,
     canManagePayments: row.can_manage_payments,
     canManageMaintenance: row.can_manage_maintenance,
     canManageAnnouncements: row.can_manage_announcements,
+    displayRole: deriveDisplayRoleFromScope(row),
     createdAt: row.created_at,
   };
 }
@@ -1562,6 +1779,7 @@ const defaultSettings: OwnerSettingsRecord = {
       notifyOnProgress: true,
       notifyOnResolve: true,
     },
+    customFooter: '',
   },
   notifications: {
     paymentNotifications: true,
@@ -1573,9 +1791,14 @@ const defaultSettings: OwnerSettingsRecord = {
     twoFactorAuthentication: false,
   },
   paymentSettings: {
-    upiId: 'yourname@upi',
-    bankAccount: 'Account number',
-    latePaymentFee: 100,
+    upiId: '',
+    bankAccount: '',
+    bankAccountName: '',
+    ifscCode: '',
+    qrCodeUrl: '',
+    latePaymentFee: 0,
+    rentReminderEnabled: true,
+    rentReminderDaysBefore: 3,
   },
   additionalSettings: {
     language: 'English',
@@ -1620,6 +1843,7 @@ function parseOwnerSettings(row: OwnerSettingsRow | null): OwnerSettingsRecord {
         notifyOnProgress: Boolean((ws.complaintUpdate as Record<string, unknown> | undefined)?.notifyOnProgress ?? true),
         notifyOnResolve: Boolean((ws.complaintUpdate as Record<string, unknown> | undefined)?.notifyOnResolve ?? true),
       },
+      customFooter: String(ws.customFooter ?? ''),
     },
     notifications: {
       paymentNotifications: Boolean(wsNotifications.paymentNotifications ?? defaultSettings.notifications.paymentNotifications),
@@ -1633,7 +1857,12 @@ function parseOwnerSettings(row: OwnerSettingsRow | null): OwnerSettingsRecord {
     paymentSettings: {
       upiId: String(wsPayment.upiId ?? defaultSettings.paymentSettings.upiId),
       bankAccount: String(wsPayment.bankAccount ?? defaultSettings.paymentSettings.bankAccount),
+      bankAccountName: String(wsPayment.bankAccountName ?? ''),
+      ifscCode: String(wsPayment.ifscCode ?? ''),
+      qrCodeUrl: String(wsPayment.qrCodeUrl ?? ''),
       latePaymentFee: Number(wsPayment.latePaymentFee ?? defaultSettings.paymentSettings.latePaymentFee),
+      rentReminderEnabled: Boolean(wsPayment.rentReminderEnabled ?? true),
+      rentReminderDaysBefore: Number(wsPayment.rentReminderDaysBefore ?? 3),
     },
     additionalSettings: {
       language: String(wsAdditional.language ?? defaultSettings.additionalSettings.language),
@@ -2234,14 +2463,14 @@ export const supabaseAuthDataApi = {
   async getProfileById(userId: string, options?: { bootstrapStarterData?: boolean }): Promise<AppUser | null> {
     let { data, error } = await supabase
       .from('profiles')
-      .select('id,email,full_name,phone,role,owner_scope_id,pg_name,city')
+      .select('id,email,full_name,phone,role,owner_scope_id,pg_name,city,photo_url')
       .eq('id', userId)
       .maybeSingle<ProfileRow>();
 
     if (error && isMissingColumnError(error, ['owner_scope_id'])) {
       const legacy = await supabase
         .from('profiles')
-        .select('id,email,full_name,phone,role,pg_name,city')
+        .select('id,email,full_name,phone,role,pg_name,city,photo_url')
         .eq('id', userId)
         .maybeSingle<Omit<ProfileRow, 'owner_scope_id'>>();
 
@@ -2271,6 +2500,7 @@ export const supabaseAuthDataApi = {
       ownerScopeId: data.owner_scope_id,
       pgName: data.pg_name ?? '',
       city: data.city ?? '',
+      photoUrl: data.photo_url ?? null,
     };
 
     return mappedUser;
@@ -2367,6 +2597,7 @@ export const supabaseAuthDataApi = {
     if (input.phone !== undefined) payload.phone = input.phone;
     if (input.pgName !== undefined) payload.pg_name = input.pgName;
     if (input.city !== undefined) payload.city = input.city;
+    if (input.photoUrl !== undefined) payload.photo_url = input.photoUrl;
 
     const { error } = await supabase
       .from('profiles')
@@ -2384,6 +2615,39 @@ export const supabaseAuthDataApi = {
 
     emitOwnerDataUpdated();
     return refreshed;
+  },
+
+  async uploadProfilePhoto(file: File): Promise<string> {
+    const context = await getCurrentUserContext();
+    const ext = file.name.split('.').pop() ?? 'jpg';
+    const path = `${context.userId}/avatar.${ext}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('profile-photos')
+      .upload(path, file, { upsert: true, contentType: file.type });
+
+    if (uploadError) throw uploadError;
+
+    const { data } = supabase.storage.from('profile-photos').getPublicUrl(path);
+    const publicUrl = `${data.publicUrl}?t=${Date.now()}`;
+
+    await this.updateCurrentProfile({ photoUrl: publicUrl });
+    return publicUrl;
+  },
+
+  async uploadQrCode(file: File): Promise<string> {
+    const context = await getCurrentUserContext();
+    const ext = file.name.split('.').pop() ?? 'png';
+    const path = `${context.userId}/payment-qr.${ext}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('profile-photos')
+      .upload(path, file, { upsert: true, contentType: file.type });
+
+    if (uploadError) throw uploadError;
+
+    const { data } = supabase.storage.from('profile-photos').getPublicUrl(path);
+    return `${data.publicUrl}?t=${Date.now()}`;
   },
 };
 
@@ -2730,8 +2994,10 @@ export const supabaseOwnerDataApi = {
 
   async createTenant(input: TenantCreateInput): Promise<TenantRecord> {
     validateTenantInput(input, true);
+    const context = await getCurrentUserContext();
+    const ownerId = context.ownerId;
 
-    const ownerId = await getOwnerId();
+    await assertScopeCapability(context, input.propertyId, 'tenants');
 
     let photoUrl: string | null = null;
     let idDocumentUrl: string | null = null;
@@ -2787,6 +3053,7 @@ export const supabaseOwnerDataApi = {
       type: 'tenant',
       title: 'New Tenant Added',
       message: `${created.name} added to room ${created.room}.`,
+      propertyId: created.propertyId,
     }).catch(() => {
       // Notification should not block tenant creation.
     });
@@ -2797,6 +3064,12 @@ export const supabaseOwnerDataApi = {
       // Do not fail tenant creation when post-write occupancy sync has schema/policy issues.
       console.warn('Room occupancy sync skipped after tenant creation:', syncError);
     }
+
+    void logActivity(ownerId, created.propertyId, 'TENANT_ASSIGNED',
+      `${created.name} assigned to Room ${created.room}${created.bed ? `, Bed ${created.bed}` : ''}`,
+      { tenantId: created.id, room: created.room, bed: created.bed },
+    ).catch(() => {});
+
     emitOwnerDataUpdated();
 
     return created;
@@ -2804,8 +3077,8 @@ export const supabaseOwnerDataApi = {
 
   async updateTenant(tenantId: string, input: Partial<TenantCreateInput>): Promise<TenantRecord> {
     validateTenantInput(input, false);
-
-    const ownerId = await getOwnerId();
+    const context = await getCurrentUserContext();
+    const ownerId = context.ownerId;
 
     const { data: existingTenant, error: existingTenantError } = await supabase
       .from('tenants')
@@ -2817,6 +3090,14 @@ export const supabaseOwnerDataApi = {
     if (existingTenantError) {
       throw existingTenantError;
     }
+
+    const existingPropertyId = existingTenant?.property_id ?? null;
+    const nextPropertyId = input.propertyId ?? existingPropertyId;
+
+    if (existingPropertyId && existingPropertyId !== nextPropertyId) {
+      await assertScopeCapability(context, existingPropertyId, 'tenants');
+    }
+    await assertScopeCapability(context, nextPropertyId ?? null, 'tenants');
 
     const payload: Record<string, unknown> = {};
 
@@ -2920,19 +3201,17 @@ export const supabaseOwnerDataApi = {
         throw tenantPaymentsError;
       }
 
+      // Batch update: compute new total per payment and update in parallel (avoids N+1 sequential)
       const paymentsToSync = tenantPayments ?? [];
-      for (const payment of paymentsToSync) {
+      await Promise.all(paymentsToSync.map(async (payment) => {
         const nextTotal = Number(updatedTenant.rent) + Number(payment.extra_charges ?? 0);
         const { error: totalSyncError } = await supabase
           .from('payments')
           .update({ total_amount: nextTotal })
           .eq('id', payment.id)
           .eq('owner_id', ownerId);
-
-        if (totalSyncError) {
-          throw totalSyncError;
-        }
-      }
+        if (totalSyncError) throw totalSyncError;
+      }));
     }
 
     const propertyIdsToSync = new Set<string>();
@@ -2954,7 +3233,21 @@ export const supabaseOwnerDataApi = {
   },
 
   async deleteTenant(tenantId: string): Promise<void> {
-    const ownerId = await getOwnerId();
+    const context = await getCurrentUserContext();
+    const ownerId = context.ownerId;
+
+    const { data: tenantRow, error: tenantError } = await supabase
+      .from('tenants')
+      .select('property_id')
+      .eq('id', tenantId)
+      .eq('owner_id', ownerId)
+      .maybeSingle<{ property_id: string | null }>();
+
+    if (tenantError) {
+      throw tenantError;
+    }
+
+    await assertScopeCapability(context, tenantRow?.property_id ?? null, 'tenants');
 
     const { data: existingTenant, error: existingTenantError } = await supabase
       .from('tenants')
@@ -3054,7 +3347,21 @@ export const supabaseOwnerDataApi = {
   },
 
   async updatePaymentStatus(paymentId: string, status: PaymentStatus): Promise<PaymentRecord> {
-    const ownerId = await getOwnerId();
+    const context = await getCurrentUserContext();
+    const ownerId = context.ownerId;
+
+    const { data: paymentRow, error: paymentFetchError } = await supabase
+      .from('payments')
+      .select('property_id')
+      .eq('id', paymentId)
+      .eq('owner_id', ownerId)
+      .maybeSingle<{ property_id: string | null }>();
+
+    if (paymentFetchError) {
+      throw paymentFetchError;
+    }
+
+    await assertScopeCapability(context, paymentRow?.property_id ?? null, 'payments');
 
     const payload: Record<string, unknown> = {
       status,
@@ -3084,9 +3391,15 @@ export const supabaseOwnerDataApi = {
       type: 'payment',
       title: status === 'paid' ? 'Payment Marked Paid' : 'Payment Status Updated',
       message: `${updated.tenant} - ${updated.room} is now ${status}.`,
-    }).catch(() => {
-      // Notification should not block payment updates.
-    });
+      propertyId: updated.propertyId,
+    }).catch(() => {});
+
+    if (status === 'paid') {
+      void logActivity(ownerId, updated.propertyId, 'PAYMENT_RECEIVED',
+        `Payment of ₹${updated.totalAmount.toLocaleString('en-IN')} received from ${updated.tenant} (Room ${updated.room})`,
+        { paymentId: updated.id, tenantId: updated.tenantId, amount: updated.totalAmount },
+      ).catch(() => {});
+    }
 
     emitOwnerDataUpdated();
 
@@ -3099,6 +3412,22 @@ export const supabaseOwnerDataApi = {
     description?: string;
     amount: number;
   }): Promise<PaymentRecord> {
+    const context = await getCurrentUserContext();
+    const ownerId = context.ownerId;
+
+    const { data: paymentRow, error: paymentFetchError } = await supabase
+      .from('payments')
+      .select('property_id')
+      .eq('id', paymentId)
+      .eq('owner_id', ownerId)
+      .maybeSingle<{ property_id: string | null }>();
+
+    if (paymentFetchError) {
+      throw paymentFetchError;
+    }
+
+    await assertScopeCapability(context, paymentRow?.property_id ?? null, 'payments');
+
     const { error } = await supabase
       .from('payment_charges')
       .insert({
@@ -3113,7 +3442,6 @@ export const supabaseOwnerDataApi = {
       throw error;
     }
 
-    const ownerId = await getOwnerId();
     const { data, error: paymentError } = await supabase
       .from('payments')
       .select('*')
@@ -3272,7 +3600,10 @@ export const supabaseOwnerDataApi = {
     source?: MaintenanceSource;
     phone?: string;
   }): Promise<MaintenanceTicketRecord> {
-    const ownerId = await getOwnerId();
+    const context = await getCurrentUserContext();
+    const ownerId = context.ownerId;
+
+    await assertScopeCapability(context, input.propertyId, 'maintenance');
 
     const { data, error } = await supabase
       .from('maintenance_tickets')
@@ -3301,15 +3632,35 @@ export const supabaseOwnerDataApi = {
       type: 'maintenance',
       title: 'Maintenance Ticket Created',
       message: `${created.issue} (${created.room}) for ${created.tenant}.`,
-    }).catch(() => {
-      // Notification should not block ticket creation.
-    });
+      propertyId: created.propertyId,
+    }).catch(() => {});
+
+    void logActivity(ownerId, created.propertyId, 'MAINTENANCE_CREATED',
+      `Maintenance ticket created: ${created.issue} (Room ${created.room})`,
+      { ticketId: created.id, priority: created.priority, tenant: created.tenant },
+    ).catch(() => {});
 
     return created;
   },
 
   async updateMaintenanceStatus(ticketId: string, status: MaintenanceStatus): Promise<MaintenanceTicketRecord> {
-    const ownerId = await getOwnerId();
+    const context = await getCurrentUserContext();
+    const ownerId = context.ownerId;
+
+    const { data: ticketRow, error: ticketFetchError } = await supabase
+      .from('maintenance_tickets')
+      .select('property_id, status, issue, tenant, room')
+      .eq('id', ticketId)
+      .eq('owner_id', ownerId)
+      .maybeSingle<{ property_id: string | null; status: MaintenanceStatus; issue: string; tenant: string; room: string }>();
+
+    if (ticketFetchError) {
+      throw ticketFetchError;
+    }
+
+    await assertScopeCapability(context, ticketRow?.property_id ?? null, 'maintenance');
+
+    const previousStatus = ticketRow?.status;
 
     const { data, error } = await supabase
       .from('maintenance_tickets')
@@ -3334,10 +3685,51 @@ export const supabaseOwnerDataApi = {
       throw noteError;
     }
 
+    const STATUS_LABELS: Record<MaintenanceStatus, string> = {
+      open: 'Open', 'in-progress': 'In Progress', waiting: 'Waiting', resolved: 'Resolved', closed: 'Closed',
+    };
+
+    const actorRole = context.role === 'owner' || context.role === 'owner_manager'
+      ? context.role
+      : 'staff';
+
+    void supabase.from('maintenance_threads').insert({
+      ticket_id: ticketId,
+      actor_id: context.userId,
+      actor_role: actorRole,
+      body: `Status changed to ${STATUS_LABELS[status]}`,
+      is_internal: false,
+      status_from: previousStatus ?? null,
+      status_to: status,
+    }).then(({ error: threadErr }) => {
+      if (threadErr) console.warn('Thread insert failed:', threadErr.message);
+    });
+
+    void logActivity(ownerId, ticketRow?.property_id ?? null, 'MAINTENANCE_UPDATED',
+      `Ticket status: ${previousStatus ?? '?'} → ${status} (${ticketRow?.issue ?? ''}, Room ${ticketRow?.room ?? ''})`,
+      { ticketId, previousStatus, newStatus: status, tenant: ticketRow?.tenant },
+    ).catch(() => {});
+
     return mapMaintenanceTicket(data, notes ?? []);
   },
 
   async addMaintenanceNote(ticketId: string, note: string): Promise<void> {
+    const context = await getCurrentUserContext();
+    const ownerId = context.ownerId;
+
+    const { data: ticketRow, error: ticketFetchError } = await supabase
+      .from('maintenance_tickets')
+      .select('property_id')
+      .eq('id', ticketId)
+      .eq('owner_id', ownerId)
+      .maybeSingle<{ property_id: string | null }>();
+
+    if (ticketFetchError) {
+      throw ticketFetchError;
+    }
+
+    await assertScopeCapability(context, ticketRow?.property_id ?? null, 'maintenance');
+
     const { error } = await supabase
       .from('maintenance_notes')
       .insert({
@@ -3348,6 +3740,70 @@ export const supabaseOwnerDataApi = {
     if (error) {
       throw error;
     }
+  },
+
+  async getMaintenanceThreads(ticketId: string): Promise<MaintenanceThreadEntry[]> {
+    const context = await getCurrentUserContext();
+
+    const { data: ticketData, error: ticketError } = await supabase
+      .from('maintenance_tickets')
+      .select('id')
+      .eq('id', ticketId)
+      .eq('owner_id', context.ownerId)
+      .maybeSingle<{ id: string }>();
+
+    if (ticketError) throw ticketError;
+    if (!ticketData) return [];
+
+    const { data, error } = await supabase
+      .from('maintenance_threads')
+      .select('*')
+      .eq('ticket_id', ticketId)
+      .order('created_at', { ascending: true })
+      .returns<MaintenanceThreadRow[]>();
+
+    if (error) throw error;
+
+    return (data ?? []).map(mapMaintenanceThread);
+  },
+
+  async addMaintenanceThread(
+    ticketId: string,
+    message: string,
+    isInternal: boolean,
+  ): Promise<MaintenanceThreadEntry> {
+    const context = await getCurrentUserContext();
+
+    const { data: ticketRow, error: ticketFetchError } = await supabase
+      .from('maintenance_tickets')
+      .select('property_id')
+      .eq('id', ticketId)
+      .eq('owner_id', context.ownerId)
+      .maybeSingle<{ property_id: string | null }>();
+
+    if (ticketFetchError) throw ticketFetchError;
+
+    await assertScopeCapability(context, ticketRow?.property_id ?? null, 'maintenance');
+
+    const actorRole = context.role === 'owner' || context.role === 'owner_manager'
+      ? context.role
+      : 'staff';
+
+    const { data, error } = await supabase
+      .from('maintenance_threads')
+      .insert({
+        ticket_id: ticketId,
+        actor_id: context.userId,
+        actor_role: actorRole,
+        body: message.trim(),
+        is_internal: isInternal,
+      })
+      .select('*')
+      .single<MaintenanceThreadRow>();
+
+    if (error) throw error;
+
+    return mapMaintenanceThread(data);
   },
 
   async listAnnouncements(propertyId: string | 'all' = 'all'): Promise<AnnouncementRecord[]> {
@@ -3389,7 +3845,10 @@ export const supabaseOwnerDataApi = {
     sendViaWhatsApp: boolean;
     propertyId?: string | null;
   }): Promise<AnnouncementRecord> {
-    const ownerId = await getOwnerId();
+    const context = await getCurrentUserContext();
+    const ownerId = context.ownerId;
+
+    await assertScopeCapability(context, input.propertyId ?? null, 'announcements');
 
     const { data, error } = await supabase
       .from('announcements')
@@ -3415,9 +3874,13 @@ export const supabaseOwnerDataApi = {
       type: 'announcement',
       title: 'Announcement Posted',
       message: created.title,
-    }).catch(() => {
-      // Notification should not block announcement creation.
-    });
+      propertyId: created.propertyId,
+    }).catch(() => {});
+
+    void logActivity(ownerId, created.propertyId, 'ANNOUNCEMENT_CREATED',
+      `Announcement "${created.title}" published${input.sendViaWhatsApp ? ' · WhatsApp broadcast enabled' : ''}`,
+      { announcementId: created.id, category: created.category, whatsapp: input.sendViaWhatsApp },
+    ).catch(() => {});
 
     return created;
   },
@@ -3428,7 +3891,21 @@ export const supabaseOwnerDataApi = {
     category: AnnouncementCategory;
     isPinned: boolean;
   }): Promise<AnnouncementRecord> {
-    const ownerId = await getOwnerId();
+    const context = await getCurrentUserContext();
+    const ownerId = context.ownerId;
+
+    const { data: annRow, error: annFetchError } = await supabase
+      .from('announcements')
+      .select('property_id')
+      .eq('id', announcementId)
+      .eq('owner_id', ownerId)
+      .maybeSingle<{ property_id: string | null }>();
+
+    if (annFetchError) {
+      throw annFetchError;
+    }
+
+    await assertScopeCapability(context, annRow?.property_id ?? null, 'announcements');
 
     const { data, error } = await supabase
       .from('announcements')
@@ -3451,7 +3928,21 @@ export const supabaseOwnerDataApi = {
   },
 
   async toggleAnnouncementPin(announcementId: string, isPinned: boolean): Promise<void> {
-    const ownerId = await getOwnerId();
+    const context = await getCurrentUserContext();
+    const ownerId = context.ownerId;
+
+    const { data: annRow, error: annFetchError } = await supabase
+      .from('announcements')
+      .select('property_id')
+      .eq('id', announcementId)
+      .eq('owner_id', ownerId)
+      .maybeSingle<{ property_id: string | null }>();
+
+    if (annFetchError) {
+      throw annFetchError;
+    }
+
+    await assertScopeCapability(context, annRow?.property_id ?? null, 'announcements');
 
     const { error } = await supabase
       .from('announcements')
@@ -3465,7 +3956,21 @@ export const supabaseOwnerDataApi = {
   },
 
   async deleteAnnouncement(announcementId: string): Promise<void> {
-    const ownerId = await getOwnerId();
+    const context = await getCurrentUserContext();
+    const ownerId = context.ownerId;
+
+    const { data: annRow, error: annFetchError } = await supabase
+      .from('announcements')
+      .select('property_id')
+      .eq('id', announcementId)
+      .eq('owner_id', ownerId)
+      .maybeSingle<{ property_id: string | null }>();
+
+    if (annFetchError) {
+      throw annFetchError;
+    }
+
+    await assertScopeCapability(context, annRow?.property_id ?? null, 'announcements');
 
     const { error } = await supabase
       .from('announcements')
@@ -3733,6 +4238,15 @@ export const supabaseOwnerDataApi = {
     if (error) {
       throw error;
     }
+  },
+
+  async listCurrentUserScopes(): Promise<TeamScopeRecord[]> {
+    const context = await getCurrentUserContext();
+    const scopeMap = await listCurrentUserScopeMap(context);
+    if (!scopeMap) {
+      return [];
+    }
+    return Array.from(scopeMap.values());
   },
 
   async listTeamMembers(): Promise<TeamMemberRecord[]> {
@@ -4323,6 +4837,7 @@ export const supabaseOwnerDataApi = {
       message: isImmediateVacate
         ? `Room ${tenantRow.room} is now available · Refund ₹${depositRefund.toLocaleString('en-IN')}`
         : `Scheduled move-out: ${input.vacateDate}`,
+      propertyId: tenantRow.property_id,
     }).catch(() => {});
 
     emitOwnerDataUpdated();
@@ -4367,7 +4882,12 @@ export const supabaseOwnerDataApi = {
       query = query.eq('owner_id', context.ownerId);
     }
 
+    const scopedPropertyIds = await listScopedPropertyIds(context);
+
     if (propertyId !== 'all') {
+      if (scopedPropertyIds && !scopedPropertyIds.includes(propertyId)) {
+        return [];
+      }
       query = query.eq('property_id', propertyId);
     }
 
@@ -4378,7 +4898,15 @@ export const supabaseOwnerDataApi = {
       throw error;
     }
 
-    return (data ?? []).map((row: Record<string, unknown>) => ({
+    let rows = data ?? [];
+    if (scopedPropertyIds) {
+      rows = rows.filter((row: Record<string, unknown>) => {
+        const pid = row.property_id ? String(row.property_id) : null;
+        return pid ? scopedPropertyIds.includes(pid) : false;
+      });
+    }
+
+    return rows.map((row: Record<string, unknown>) => ({
       id: String(row.id),
       ownerId: String(row.owner_id),
       propertyId: row.property_id ? String(row.property_id) : null,
@@ -4392,7 +4920,8 @@ export const supabaseOwnerDataApi = {
 
 export const supabaseNotificationApi = {
   async listForCurrentUser(): Promise<NotificationRecord[]> {
-    const ownerId = await getOwnerId();
+    const context = await getCurrentUserContext();
+    const ownerId = context.ownerId;
 
     const { data, error } = await supabase
       .from('notifications')
@@ -4405,7 +4934,14 @@ export const supabaseNotificationApi = {
       throw error;
     }
 
-    return (data ?? []).map(mapNotification);
+    let rows = data ?? [];
+
+    const scopedPropertyIds = await listScopedPropertyIds(context);
+    if (scopedPropertyIds) {
+      rows = rows.filter((row) => row.property_id && scopedPropertyIds.includes(row.property_id));
+    }
+
+    return rows.map(mapNotification);
   },
 
   async markAsRead(notificationId: string): Promise<void> {
@@ -4441,7 +4977,16 @@ export const supabaseTenantDataApi = {
   async getPortalSnapshot(): Promise<TenantPortalSnapshot> {
     const { profile, tenant } = await resolveTenantContextForCurrentUser();
 
-    const [{ data: propertyRow, error: propertyError }, ownerProfile, paymentRows, maintenanceRows, announcementRows] = await Promise.all([
+    const [
+      { data: propertyRow, error: propertyError },
+      ownerProfile,
+      paymentRows,
+      maintenanceRows,
+      announcementRows,
+      notificationRows,
+      ownerPaymentRpc,
+      vacateRows,
+    ] = await Promise.all([
       supabase
         .from('properties')
         .select('*')
@@ -4468,6 +5013,25 @@ export const supabaseTenantDataApi = {
         .order('is_pinned', { ascending: false })
         .order('created_at', { ascending: false })
         .returns<AnnouncementRow[]>(),
+      supabase
+        .from('notifications')
+        .select('*')
+        .eq('owner_id', tenant.ownerId)
+        .order('created_at', { ascending: false })
+        .limit(20)
+        .returns<NotificationRow[]>(),
+      (supabase.rpc('get_owner_payment_info', { p_owner_id: tenant.ownerId }) as unknown as Promise<{ data: unknown; error: unknown }>),
+      supabase
+        .from('vacate_requests')
+        .select('*')
+        .eq('tenant_id', tenant.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .returns<Array<{
+          id: string; owner_id: string; tenant_id: string; tenant_name: string;
+          property_id: string; room: string; notice_date: string;
+          planned_vacate_date: string; reason: string; status: string; created_at: string;
+        }>>(),
     ]);
 
     if (propertyError) {
@@ -4485,7 +5049,7 @@ export const supabaseTenantDataApi = {
 
     const property = propertyRow ? mapProperty(propertyRow, []) : null;
 
-    const maintenanceTicketRows = maintenanceRows.data ?? [];
+    const maintenanceTicketRows: MaintenanceTicketRow[] = maintenanceRows.data ?? [];
     const maintenanceIds = maintenanceTicketRows.map((ticket) => ticket.id);
     let notesByTicket = new Map<string, MaintenanceNoteRow[]>();
 
@@ -4509,6 +5073,36 @@ export const supabaseTenantDataApi = {
       });
     }
 
+    const rawPaymentInfo = (ownerPaymentRpc as { data: unknown; error: unknown } | null)?.data;
+    const paymentInfoObj = (rawPaymentInfo && typeof rawPaymentInfo === 'object' ? rawPaymentInfo : {}) as Record<string, unknown>;
+    const ownerPaymentInfo: TenantOwnerPaymentInfo = {
+      upiId: String(paymentInfoObj.upiId ?? ''),
+      qrCodeUrl: String(paymentInfoObj.qrCodeUrl ?? ''),
+      pgRules: Array.isArray(paymentInfoObj.pgRules) ? (paymentInfoObj.pgRules as string[]) : [],
+      ownerPhone: String(paymentInfoObj.ownerPhone ?? ownerProfile?.phone ?? ''),
+      pgName: String(paymentInfoObj.pgName ?? ownerProfile?.pgName ?? ''),
+    };
+
+    const vacateRow = (vacateRows.data ?? [])[0] ?? null;
+    const vacateRequest: VacateRequest | null = vacateRow
+      ? {
+          id: vacateRow.id,
+          tenantId: vacateRow.tenant_id,
+          tenantName: vacateRow.tenant_name,
+          propertyId: vacateRow.property_id,
+          room: vacateRow.room,
+          noticeDate: vacateRow.notice_date,
+          plannedVacateDate: vacateRow.planned_vacate_date,
+          reason: vacateRow.reason,
+          finalSettlementAmount: 0,
+          depositRefund: 0,
+          depositDeduction: 0,
+          deductionReason: '',
+          status: vacateRow.status as VacateRequest['status'],
+          createdAt: vacateRow.created_at,
+        }
+      : null;
+
     return {
       profile,
       tenant,
@@ -4517,6 +5111,9 @@ export const supabaseTenantDataApi = {
       payments: (paymentRows.data ?? []).map(mapPayment),
       maintenance: maintenanceTicketRows.map((ticket) => mapMaintenanceTicket(ticket, notesByTicket.get(ticket.id) ?? [])),
       announcements: (announcementRows.data ?? []).map(mapAnnouncement),
+      notifications: (notificationRows.data ?? []).map(mapNotification),
+      ownerPaymentInfo,
+      vacateRequest,
     };
   },
 
@@ -4524,8 +5121,13 @@ export const supabaseTenantDataApi = {
     issue: string;
     description: string;
     priority: MaintenancePriority;
+    imageUrl?: string;
   }): Promise<MaintenanceTicketRecord> {
     const { tenant } = await resolveTenantContextForCurrentUser();
+
+    const fullDescription = input.imageUrl
+      ? `${input.description}\n\n📷 Photo: ${input.imageUrl}`
+      : input.description;
 
     const { data, error } = await supabase
       .from('maintenance_tickets')
@@ -4536,7 +5138,7 @@ export const supabaseTenantDataApi = {
         property_id: tenant.propertyId,
         room: tenant.room,
         issue: input.issue,
-        description: input.description,
+        description: fullDescription,
         source: 'manual',
         status: 'open',
         priority: input.priority,
@@ -4553,11 +5155,49 @@ export const supabaseTenantDataApi = {
       type: 'maintenance',
       title: 'New Tenant Complaint',
       message: `${tenant.name} reported: ${input.issue}`,
+      propertyId: tenant.propertyId,
     }).catch(() => {
       // Notification should not block tenant ticket creation.
     });
 
     return mapMaintenanceTicket(data, []);
+  },
+
+  async uploadMaintenanceImage(file: File): Promise<string> {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) throw new Error('Not authenticated');
+    const ext = file.name.split('.').pop() ?? 'jpg';
+    const path = `${user.id}/${Date.now()}.${ext}`;
+    const { error } = await supabase.storage
+      .from('maintenance-images')
+      .upload(path, file, { upsert: false, contentType: file.type });
+    if (error) throw error;
+    const { data } = supabase.storage.from('maintenance-images').getPublicUrl(path);
+    return data.publicUrl;
+  },
+
+  async submitVacateRequest(input: { vacateDate: string; reason: string }): Promise<void> {
+    const { tenant } = await resolveTenantContextForCurrentUser();
+
+    const { error } = await supabase.from('vacate_requests').insert({
+      owner_id: tenant.ownerId,
+      tenant_id: tenant.id,
+      tenant_name: tenant.name,
+      property_id: tenant.propertyId,
+      room: tenant.room,
+      notice_date: new Date().toISOString().split('T')[0],
+      planned_vacate_date: input.vacateDate,
+      reason: input.reason,
+      status: 'pending',
+    });
+    if (error) throw error;
+
+    void createOwnerNotification(tenant.ownerId, {
+      type: 'tenant',
+      title: 'Vacate Notice Submitted',
+      message: `${tenant.name} (Room ${tenant.room}) submitted a vacate notice for ${input.vacateDate}`,
+      propertyId: tenant.propertyId,
+    }).catch(() => {});
   },
 };
 
@@ -4583,6 +5223,9 @@ export const supabaseAdminDataApi = {
       tenantCount: number;
       subscriptionStatus: OwnerSubscriptionRecord['status'] | 'not_configured';
       planCode: string;
+      isSuspended: boolean;
+      verifiedAt: string | null;
+      joinedAt: string;
     }>;
     subscriptions: OwnerSubscriptionRecord[];
     support: SupportTicketRecord[];
@@ -4599,12 +5242,23 @@ export const supabaseAdminDataApi = {
     }
 
     const profile = await getCurrentProfile();
-    const [ownersResult, propertiesResult, tenantsResult, paymentsResult, subscriptionsResult, supportTicketsResult] = await Promise.all([
-      supabase
+
+    // Try fetching owners with new lifecycle columns; fall back if migration not applied yet
+    let ownersResult = await supabase
+      .from('profiles')
+      .select('id,email,full_name,phone,role,owner_scope_id,pg_name,city,is_suspended,suspended_at,suspended_reason,verified_at,created_at')
+      .eq('role', 'owner')
+      .returns<ProfileRow[]>();
+
+    if (ownersResult.error && isMissingColumnError(ownersResult.error, ['is_suspended', 'suspended_at', 'suspended_reason', 'verified_at'])) {
+      ownersResult = await supabase
         .from('profiles')
         .select('id,email,full_name,phone,role,owner_scope_id,pg_name,city,created_at')
         .eq('role', 'owner')
-        .returns<ProfileRow[]>(),
+        .returns<ProfileRow[]>();
+    }
+
+    const [propertiesResult, tenantsResult, paymentsResult, subscriptionsResult, supportTicketsResult] = await Promise.all([
       supabase.from('properties').select('*').returns<PropertyRow[]>(),
       supabase.from('tenants').select('*').returns<TenantRow[]>(),
       supabase.from('payments').select('*').returns<PaymentRow[]>(),
@@ -4720,6 +5374,9 @@ export const supabaseAdminDataApi = {
         tenantCount: tenantCountByOwner.get(owner.id) ?? 0,
         subscriptionStatus,
         planCode: subscription?.planCode ?? 'starter',
+        isSuspended: owner.is_suspended ?? false,
+        verifiedAt: owner.verified_at ?? null,
+        joinedAt: owner.created_at ?? '',
       };
     });
 
@@ -4888,4 +5545,425 @@ export const supabaseAdminDataApi = {
       throw error;
     }
   },
+
+  async suspendOwner(ownerId: string, reason: string): Promise<void> {
+    const context = await getCurrentUserContext();
+    if (!context.isPlatformAdmin) throw new Error('Platform admin access is required.');
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({ is_suspended: true, suspended_at: new Date().toISOString(), suspended_reason: reason })
+      .eq('id', ownerId);
+
+    if (error) {
+      if (isMissingColumnError(error, ['is_suspended', 'suspended_at', 'suspended_reason'])) {
+        throw new Error('Suspend requires database migration 20260530_admin_portal_v2.sql to be applied first.');
+      }
+      throw error;
+    }
+
+    await logActivity(context.userId, null, 'ADMIN_OWNER_SUSPENDED', `Owner ${ownerId} suspended. Reason: ${reason}`, { ownerId, reason });
+  },
+
+  async unsuspendOwner(ownerId: string): Promise<void> {
+    const context = await getCurrentUserContext();
+    if (!context.isPlatformAdmin) throw new Error('Platform admin access is required.');
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({ is_suspended: false, suspended_at: null, suspended_reason: null })
+      .eq('id', ownerId);
+
+    if (error) {
+      if (isMissingColumnError(error, ['is_suspended', 'suspended_at', 'suspended_reason'])) {
+        throw new Error('Unsuspend requires database migration 20260530_admin_portal_v2.sql to be applied first.');
+      }
+      throw error;
+    }
+
+    await logActivity(context.userId, null, 'ADMIN_OWNER_UNSUSPENDED', `Owner ${ownerId} unsuspended`, { ownerId });
+  },
+
+  async verifyOwner(ownerId: string): Promise<void> {
+    const context = await getCurrentUserContext();
+    if (!context.isPlatformAdmin) throw new Error('Platform admin access is required.');
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({ verified_at: new Date().toISOString() })
+      .eq('id', ownerId);
+
+    if (error) {
+      if (isMissingColumnError(error, ['verified_at'])) {
+        throw new Error('Verify requires database migration 20260530_admin_portal_v2.sql to be applied first.');
+      }
+      throw error;
+    }
+
+    await logActivity(context.userId, null, 'ADMIN_OWNER_VERIFIED', `Owner ${ownerId} manually verified`, { ownerId });
+  },
+
+  async getMRRHistory(): Promise<Array<{ month: string; mrr: number; paymentCount: number; ownerCount: number }>> {
+    const context = await getCurrentUserContext();
+    if (!context.isPlatformAdmin) throw new Error('Platform admin access is required.');
+
+    const twelveMonthsAgo = new Date();
+    twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 11);
+    twelveMonthsAgo.setDate(1);
+
+    const { data, error } = await supabase
+      .from('payments')
+      .select('total_amount, paid_date, owner_id, status')
+      .eq('status', 'paid')
+      .gte('paid_date', twelveMonthsAgo.toISOString().split('T')[0])
+      .returns<Array<{ total_amount: string | number; paid_date: string; owner_id: string; status: string }>>();
+
+    if (error) throw error;
+
+    const monthMap = new Map<string, { mrr: number; paymentCount: number; ownerSet: Set<string> }>();
+
+    (data ?? []).forEach((row) => {
+      if (!row.paid_date) return;
+      const d = new Date(row.paid_date);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const existing = monthMap.get(key) ?? { mrr: 0, paymentCount: 0, ownerSet: new Set<string>() };
+      existing.mrr += toNumber(row.total_amount);
+      existing.paymentCount += 1;
+      existing.ownerSet.add(row.owner_id);
+      monthMap.set(key, existing);
+    });
+
+    const months: Array<{ month: string; mrr: number; paymentCount: number; ownerCount: number }> = [];
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date();
+      d.setMonth(d.getMonth() - i);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const label = d.toLocaleDateString('en-IN', { month: 'short', year: '2-digit' });
+      const entry = monthMap.get(key);
+      months.push({ month: label, mrr: entry?.mrr ?? 0, paymentCount: entry?.paymentCount ?? 0, ownerCount: entry?.ownerSet.size ?? 0 });
+    }
+
+    return months;
+  },
+
+  async getPlatformAnalytics(): Promise<{
+    ownersByMonth: Array<{ month: string; count: number }>;
+    tenantsByStatus: Record<string, number>;
+    maintenanceByStatus: Record<string, number>;
+    paymentsByStatus: Record<string, number>;
+    topCitiesByOwners: Array<{ city: string; count: number }>;
+    avgTenantsPerProperty: number;
+    occupancyRate: number;
+  }> {
+    const context = await getCurrentUserContext();
+    if (!context.isPlatformAdmin) throw new Error('Platform admin access is required.');
+
+    const [ownersRes, tenantsRes, maintenanceRes, paymentsRes, roomsRes] = await Promise.all([
+      supabase.from('profiles').select('id,city,created_at').eq('role', 'owner').returns<Array<{ id: string; city: string | null; created_at: string }>>(),
+      supabase.from('tenants').select('id,status').returns<Array<{ id: string; status: string }>>(),
+      supabase.from('maintenance_tickets').select('id,status').returns<Array<{ id: string; status: string }>>(),
+      supabase.from('payments').select('id,status').returns<Array<{ id: string; status: string }>>(),
+      supabase.from('rooms').select('id,status').returns<Array<{ id: string; status: string }>>(),
+    ]);
+
+    const owners = ownersRes.data ?? [];
+    const tenants = tenantsRes.data ?? [];
+    const maintenance = maintenanceRes.data ?? [];
+    const payments = paymentsRes.data ?? [];
+    const rooms = roomsRes.data ?? [];
+
+    const ownersByMonth = new Map<string, number>();
+    const twelveAgo = new Date();
+    twelveAgo.setMonth(twelveAgo.getMonth() - 11);
+    owners.forEach((o) => {
+      const d = new Date(o.created_at);
+      if (d >= twelveAgo) {
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        ownersByMonth.set(key, (ownersByMonth.get(key) ?? 0) + 1);
+      }
+    });
+
+    const ownersByMonthArr: Array<{ month: string; count: number }> = [];
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date();
+      d.setMonth(d.getMonth() - i);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const label = d.toLocaleDateString('en-IN', { month: 'short', year: '2-digit' });
+      ownersByMonthArr.push({ month: label, count: ownersByMonth.get(key) ?? 0 });
+    }
+
+    const tenantsByStatus: Record<string, number> = {};
+    tenants.forEach((t) => { tenantsByStatus[t.status] = (tenantsByStatus[t.status] ?? 0) + 1; });
+
+    const maintenanceByStatus: Record<string, number> = {};
+    maintenance.forEach((m) => { maintenanceByStatus[m.status] = (maintenanceByStatus[m.status] ?? 0) + 1; });
+
+    const paymentsByStatus: Record<string, number> = {};
+    payments.forEach((p) => { paymentsByStatus[p.status] = (paymentsByStatus[p.status] ?? 0) + 1; });
+
+    const cityCount = new Map<string, number>();
+    owners.forEach((o) => {
+      const city = (o.city ?? 'Unknown').trim() || 'Unknown';
+      cityCount.set(city, (cityCount.get(city) ?? 0) + 1);
+    });
+    const topCitiesByOwners = Array.from(cityCount.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8)
+      .map(([city, count]) => ({ city, count }));
+
+    const activeTenants = tenants.filter((t) => ['active', 'payment_overdue', 'notice_submitted', 'vacating'].includes(t.status)).length;
+    const occupiedRooms = rooms.filter((r) => r.status === 'occupied').length;
+    const totalRooms = rooms.length;
+
+    return {
+      ownersByMonth: ownersByMonthArr,
+      tenantsByStatus,
+      maintenanceByStatus,
+      paymentsByStatus,
+      topCitiesByOwners,
+      avgTenantsPerProperty: totalRooms > 0 ? Math.round((activeTenants / Math.max(totalRooms, 1)) * 100) / 100 : 0,
+      occupancyRate: totalRooms > 0 ? Math.round((occupiedRooms / totalRooms) * 100) : 0,
+    };
+  },
+
+  async addSupportTicketComment(ticketId: string, message: string, internalNote = false): Promise<SupportTicketCommentRecord> {
+    const context = await getCurrentUserContext();
+    if (!context.isPlatformAdmin) throw new Error('Platform admin access is required.');
+
+    const { data, error } = await supabase
+      .from('support_ticket_comments')
+      .insert({ ticket_id: ticketId, author_id: context.userId, message, internal_note: internalNote })
+      .select('*')
+      .single<SupportTicketCommentRow>();
+
+    if (error) throw error;
+    return mapSupportComment(data);
+  },
+
+  async listCoupons(): Promise<AdminCouponRecord[]> {
+    const context = await getCurrentUserContext();
+    if (!context.isPlatformAdmin) throw new Error('Platform admin access is required.');
+
+    const { data, error } = await supabase
+      .from('admin_coupons')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .returns<AdminCouponRow[]>();
+
+    if (error) {
+      if (isMissingRelationError(error, 'admin_coupons')) return [];
+      throw error;
+    }
+    return (data ?? []).map(mapAdminCoupon);
+  },
+
+  async createCoupon(input: {
+    code: string;
+    description: string;
+    discountType: 'percent' | 'flat';
+    discountValue: number;
+    maxUses?: number;
+    validUntil?: string;
+    planRestriction?: string;
+  }): Promise<AdminCouponRecord> {
+    const context = await getCurrentUserContext();
+    if (!context.isPlatformAdmin) throw new Error('Platform admin access is required.');
+
+    const { data, error } = await supabase
+      .from('admin_coupons')
+      .insert({
+        code: input.code.toUpperCase().trim(),
+        description: input.description,
+        discount_type: input.discountType,
+        discount_value: input.discountValue,
+        max_uses: input.maxUses ?? null,
+        valid_until: input.validUntil ?? null,
+        plan_restriction: input.planRestriction ?? null,
+        created_by: context.userId,
+        is_active: true,
+      })
+      .select('*')
+      .single<AdminCouponRow>();
+
+    if (error) throw error;
+
+    await logActivity(context.userId, null, 'ADMIN_COUPON_CREATED', `Coupon ${input.code} created`, { code: input.code });
+    return mapAdminCoupon(data);
+  },
+
+  async updateCoupon(couponId: string, input: { isActive?: boolean; maxUses?: number; validUntil?: string }): Promise<AdminCouponRecord> {
+    const context = await getCurrentUserContext();
+    if (!context.isPlatformAdmin) throw new Error('Platform admin access is required.');
+
+    const payload: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    if (input.isActive !== undefined) payload.is_active = input.isActive;
+    if (input.maxUses !== undefined) payload.max_uses = input.maxUses;
+    if (input.validUntil !== undefined) payload.valid_until = input.validUntil;
+
+    const { data, error } = await supabase
+      .from('admin_coupons')
+      .update(payload)
+      .eq('id', couponId)
+      .select('*')
+      .single<AdminCouponRow>();
+
+    if (error) throw error;
+    return mapAdminCoupon(data);
+  },
+
+  async getReferralStats(): Promise<{
+    referrals: Array<{ id: string; referrerId: string; referrerName: string; refereeEmail: string; status: string; rewardAmount: number; createdAt: string; convertedAt: string | null }>;
+    summary: { total: number; converted: number; rewarded: number; totalRewardAmount: number };
+  }> {
+    const context = await getCurrentUserContext();
+    if (!context.isPlatformAdmin) throw new Error('Platform admin access is required.');
+
+    const { data, error } = await supabase
+      .from('referrals')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .returns<Array<{ id: string; referrer_id: string | null; referee_email: string; referee_id: string | null; referral_code: string; status: string; reward_amount: number | string; notes: string | null; created_at: string; converted_at: string | null }>>();
+
+    if (error) {
+      if (isMissingRelationError(error, 'referrals')) return { referrals: [], summary: { total: 0, converted: 0, rewarded: 0, totalRewardAmount: 0 } };
+      throw error;
+    }
+
+    const rows = data ?? [];
+    const referrerIds = Array.from(new Set(rows.map((r) => r.referrer_id).filter(Boolean) as string[]));
+    let nameMap = new Map<string, string>();
+
+    if (referrerIds.length > 0) {
+      const { data: profiles } = await supabase
+        .from('profiles')
+        .select('id,full_name,email')
+        .in('id', referrerIds)
+        .returns<Array<{ id: string; full_name: string | null; email: string | null }>>();
+      (profiles ?? []).forEach((p) => nameMap.set(p.id, p.full_name ?? p.email ?? 'Unknown'));
+    }
+
+    const referrals = rows.map((r) => ({
+      id: r.id,
+      referrerId: r.referrer_id ?? '',
+      referrerName: r.referrer_id ? (nameMap.get(r.referrer_id) ?? 'Unknown') : 'Platform',
+      refereeEmail: r.referee_email,
+      status: r.status,
+      rewardAmount: toNumber(r.reward_amount),
+      createdAt: r.created_at,
+      convertedAt: r.converted_at,
+    }));
+
+    const converted = referrals.filter((r) => r.status === 'converted' || r.status === 'rewarded').length;
+    const rewarded = referrals.filter((r) => r.status === 'rewarded').length;
+    const totalRewardAmount = referrals.reduce((sum, r) => sum + r.rewardAmount, 0);
+
+    return { referrals, summary: { total: rows.length, converted, rewarded, totalRewardAmount } };
+  },
+
+  async getLeadSourceStats(): Promise<{
+    rows: Array<{ id: string; ownerEmail: string; utmSource: string; utmMedium: string; utmCampaign: string; landingPage: string; createdAt: string }>;
+    bySource: Array<{ source: string; count: number }>;
+    byCampaign: Array<{ campaign: string; count: number }>;
+  }> {
+    const context = await getCurrentUserContext();
+    if (!context.isPlatformAdmin) throw new Error('Platform admin access is required.');
+
+    const { data, error } = await supabase
+      .from('lead_sources')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(200)
+      .returns<Array<{ id: string; owner_id: string | null; utm_source: string | null; utm_medium: string | null; utm_campaign: string | null; utm_term: string | null; utm_content: string | null; referrer_url: string | null; landing_page: string | null; created_at: string }>>();
+
+    if (error) {
+      if (isMissingRelationError(error, 'lead_sources')) return { rows: [], bySource: [], byCampaign: [] };
+      throw error;
+    }
+
+    const rows = data ?? [];
+    const ownerIds = Array.from(new Set(rows.map((r) => r.owner_id).filter(Boolean) as string[]));
+    const emailMap = new Map<string, string>();
+
+    if (ownerIds.length > 0) {
+      const { data: profiles } = await supabase
+        .from('profiles')
+        .select('id,email')
+        .in('id', ownerIds)
+        .returns<Array<{ id: string; email: string | null }>>();
+      (profiles ?? []).forEach((p) => emailMap.set(p.id, p.email ?? 'Unknown'));
+    }
+
+    const sourceCount = new Map<string, number>();
+    const campaignCount = new Map<string, number>();
+
+    rows.forEach((r) => {
+      const src = r.utm_source || 'direct';
+      sourceCount.set(src, (sourceCount.get(src) ?? 0) + 1);
+      const camp = r.utm_campaign || 'none';
+      campaignCount.set(camp, (campaignCount.get(camp) ?? 0) + 1);
+    });
+
+    return {
+      rows: rows.map((r) => ({
+        id: r.id,
+        ownerEmail: r.owner_id ? (emailMap.get(r.owner_id) ?? 'Unknown') : 'Unknown',
+        utmSource: r.utm_source ?? '',
+        utmMedium: r.utm_medium ?? '',
+        utmCampaign: r.utm_campaign ?? '',
+        landingPage: r.landing_page ?? '',
+        createdAt: r.created_at,
+      })),
+      bySource: Array.from(sourceCount.entries()).sort((a, b) => b[1] - a[1]).map(([source, count]) => ({ source, count })),
+      byCampaign: Array.from(campaignCount.entries()).sort((a, b) => b[1] - a[1]).map(([campaign, count]) => ({ campaign, count })),
+    };
+  },
 };
+
+export interface AdminCouponRecord {
+  id: string;
+  code: string;
+  description: string;
+  discountType: 'percent' | 'flat';
+  discountValue: number;
+  maxUses: number | null;
+  usedCount: number;
+  validFrom: string;
+  validUntil: string | null;
+  isActive: boolean;
+  planRestriction: string | null;
+  createdAt: string;
+}
+
+interface AdminCouponRow {
+  id: string;
+  code: string;
+  description: string | null;
+  discount_type: 'percent' | 'flat';
+  discount_value: number | string;
+  max_uses: number | null;
+  used_count: number;
+  valid_from: string;
+  valid_until: string | null;
+  is_active: boolean;
+  plan_restriction: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+function mapAdminCoupon(row: AdminCouponRow): AdminCouponRecord {
+  return {
+    id: row.id,
+    code: row.code,
+    description: row.description ?? '',
+    discountType: row.discount_type,
+    discountValue: toNumber(row.discount_value),
+    maxUses: row.max_uses,
+    usedCount: row.used_count,
+    validFrom: row.valid_from,
+    validUntil: row.valid_until,
+    isActive: row.is_active,
+    planRestriction: row.plan_restriction,
+    createdAt: row.created_at,
+  };
+}

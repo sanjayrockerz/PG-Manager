@@ -41,7 +41,11 @@ export type PermissionAction =
   // Platform admin privileges
   | 'demo-mode:toggle'
   | 'admin:view-all-owners'
-  | 'admin:impersonate';
+  | 'admin:impersonate'
+  | 'admin:suspend-owner'
+  | 'admin:manage-coupons'
+  | 'admin:view-analytics'
+  | 'admin:manage-referrals';
 
 type PermissionMatrix = Record<PermissionAction, boolean>;
 
@@ -78,6 +82,10 @@ const OWNER_PERMISSIONS: PermissionMatrix = {
   'demo-mode:toggle': false,
   'admin:view-all-owners': false,
   'admin:impersonate': false,
+  'admin:suspend-owner': false,
+  'admin:manage-coupons': false,
+  'admin:view-analytics': false,
+  'admin:manage-referrals': false,
 };
 
 const OWNER_MANAGER_PERMISSIONS: PermissionMatrix = {
@@ -113,6 +121,10 @@ const OWNER_MANAGER_PERMISSIONS: PermissionMatrix = {
   'demo-mode:toggle': false,
   'admin:view-all-owners': false,
   'admin:impersonate': false,
+  'admin:suspend-owner': false,
+  'admin:manage-coupons': false,
+  'admin:view-analytics': false,
+  'admin:manage-referrals': false,
 };
 
 const STAFF_PERMISSIONS: PermissionMatrix = {
@@ -148,6 +160,10 @@ const STAFF_PERMISSIONS: PermissionMatrix = {
   'demo-mode:toggle': false,
   'admin:view-all-owners': false,
   'admin:impersonate': false,
+  'admin:suspend-owner': false,
+  'admin:manage-coupons': false,
+  'admin:view-analytics': false,
+  'admin:manage-referrals': false,
 };
 
 const TENANT_PERMISSIONS: PermissionMatrix = {
@@ -183,6 +199,10 @@ const TENANT_PERMISSIONS: PermissionMatrix = {
   'demo-mode:toggle': false,
   'admin:view-all-owners': false,
   'admin:impersonate': false,
+  'admin:suspend-owner': false,
+  'admin:manage-coupons': false,
+  'admin:view-analytics': false,
+  'admin:manage-referrals': false,
 };
 
 const PLATFORM_ADMIN_PERMISSIONS: PermissionMatrix = {
@@ -218,6 +238,10 @@ const PLATFORM_ADMIN_PERMISSIONS: PermissionMatrix = {
   'demo-mode:toggle': true,
   'admin:view-all-owners': true,
   'admin:impersonate': true,
+  'admin:suspend-owner': true,
+  'admin:manage-coupons': true,
+  'admin:view-analytics': true,
+  'admin:manage-referrals': true,
 };
 
 const ROLE_PERMISSION_MAP: Record<UserRole, PermissionMatrix> = {
@@ -241,6 +265,7 @@ export function hasPermission(role: string | null | undefined, action: Permissio
 export const TAB_PERMISSION_MAP: Record<string, PermissionAction> = {
   dashboard: 'page:dashboard',
   properties: 'page:properties',
+  'building-view': 'page:properties',
   tenants: 'page:tenants',
   payments: 'page:payments',
   maintenance: 'page:maintenance',

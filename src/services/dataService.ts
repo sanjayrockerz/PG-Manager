@@ -157,7 +157,16 @@ const writeDemoStore = (store: DemoDataStore): void => {
 
 const emitDataUpdated = (): void => {
   if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('owner-data-updated'));
+    // Centralized, debounced refresh via the eventBus
+    // Import lazily to avoid module cycles
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-require-imports
+      const { requestRefresh } = require('./eventBus');
+      requestRefresh();
+    } catch {
+      // Fallback to direct dispatch if eventBus is unavailable
+      window.dispatchEvent(new CustomEvent('owner-data-updated'));
+    }
   }
 };
 
@@ -1000,7 +1009,7 @@ export async function addMaintenanceThreadEntry(
       return entry;
     }));
   }
-  throw new Error('Live mode thread not yet implemented');
+  return runSupabase(mode, () => supabaseOwnerDataApi.addMaintenanceThread(ticketId, message, isInternal));
 }
 
 export async function getMaintenanceThreads(ticketId: string): Promise<MaintenanceThreadEntry[]> {
@@ -1009,7 +1018,7 @@ export async function getMaintenanceThreads(ticketId: string): Promise<Maintenan
     const store = readDemoStore();
     return clone(store.maintenanceThreads.filter((t) => t.ticketId === ticketId));
   }
-  return [];
+  return runSupabase(mode, () => supabaseOwnerDataApi.getMaintenanceThreads(ticketId));
 }
 
 // ─── Announcements ────────────────────────────────────────────────────────────
