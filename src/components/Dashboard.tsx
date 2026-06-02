@@ -282,27 +282,23 @@ export function Dashboard({ onNavigate }: DashboardProps) {
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Date range hint */}
+          {/* Building View — primary shortcut */}
           <button
-            className="ds-btn ds-btn-secondary hidden sm:flex"
-            style={{ fontSize: 12, padding: '6px 10px', gap: 6 }}
+            onClick={() => onNavigate?.('building-view')}
+            className="ds-btn ds-btn-secondary"
+            style={{ fontSize: 12, padding: '6px 12px', gap: 6 }}
           >
-            <Calendar style={{ width: 13, height: 13, color: '#A1A1AA' }} />
-            <span style={{ color: '#52525B' }}>
-              {new Date().toLocaleDateString('en-IN', { month: 'short', day: 'numeric' })}
-              {' – '}
-              {new Date().toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' })}
-            </span>
+            <Building2 style={{ width: 13, height: 13, color: '#6366F1' }} />
+            Building View
           </button>
 
-          {/* Quick action */}
           <button
             onClick={() => onNavigate?.('tenants')}
             className="ds-btn ds-btn-primary"
             style={{ fontSize: 12, padding: '6px 12px', gap: 6 }}
           >
             <Plus style={{ width: 13, height: 13 }} />
-            Quick Action
+            Add Tenant
           </button>
         </div>
       </div>

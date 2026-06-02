@@ -118,6 +118,7 @@ export function Sidebar({
   const NavBtn = ({ item }: { item: NavItem }) => {
     const Icon = item.icon;
     const isActive = activeTab === item.id;
+    const isBuildingView = item.id === 'building-view';
     return (
       <div className="relative group/nav">
         <button
@@ -126,15 +127,24 @@ export function Sidebar({
           style={{ width: '100%' }}
           title={sidebarCollapsed ? item.label : undefined}
         >
-          <Icon
-            className="flex-shrink-0"
-            style={{
-              width: 15,
-              height: 15,
-              strokeWidth: isActive ? 2 : 1.75,
-              color: isActive ? 'var(--ds-accent)' : 'var(--ds-text-3)',
-            }}
-          />
+          {isBuildingView && !isActive ? (
+            <div
+              className="flex-shrink-0 flex items-center justify-center rounded-md"
+              style={{ width: 20, height: 20, background: '#EEF2FF' }}
+            >
+              <Icon style={{ width: 12, height: 12, strokeWidth: 2, color: '#6366F1' }} />
+            </div>
+          ) : (
+            <Icon
+              className="flex-shrink-0"
+              style={{
+                width: 15,
+                height: 15,
+                strokeWidth: isActive ? 2 : 1.75,
+                color: isActive ? 'var(--ds-accent)' : 'var(--ds-text-3)',
+              }}
+            />
+          )}
           {!sidebarCollapsed && (
             <span style={{ fontSize: 13, letterSpacing: '-0.01em' }}>{item.label}</span>
           )}

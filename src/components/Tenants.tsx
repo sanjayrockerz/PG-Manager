@@ -43,11 +43,17 @@ const makeEmptyForm = (defaultPropertyId = ''): TenantCreateInput => ({
 
 const fmt = (n: number) => `₹${n.toLocaleString('en-IN')}`;
 
-function StatusChip({ status }: { status: TenantStatus }) {
+function StatusChip({ status, joinDate }: { status: TenantStatus; joinDate?: string }) {
+  const daysSinceJoin = joinDate ? Math.floor((Date.now() - new Date(joinDate).getTime()) / 86400000) : null;
   return (
-    <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${TENANT_STATUS_COLORS[status] ?? 'bg-gray-100 text-gray-600'}`}>
-      {TENANT_STATUS_LABELS[status] ?? status}
-    </span>
+    <div className="flex items-center gap-1.5">
+      <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${TENANT_STATUS_COLORS[status] ?? 'bg-gray-100 text-gray-600'}`}>
+        {TENANT_STATUS_LABELS[status] ?? status}
+      </span>
+      {status === 'payment_overdue' && daysSinceJoin !== null && (
+        <span style={{ fontSize: 10, color: '#991B1B', fontWeight: 600 }}>!</span>
+      )}
+    </div>
   );
 }
 
@@ -519,8 +525,8 @@ export function Tenants({ onViewTenant }: TenantsProps) {
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ background: '#FAFAFA', borderBottom: '1px solid #F1F1F3' }}>
-                {['Tenant', 'Property', 'Room', 'Rent', 'Joined', 'Status', 'Actions'].map((h) => (
-                  <th key={h} style={{ padding: '10px 14px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: '#71717A', letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+                {['Tenant', 'Property', 'Room', 'Rent / Deposit', 'Since', 'Status', 'Actions'].map((h) => (
+                  <th key={h} style={{ padding: '8px 12px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: '#71717A', letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
                     {h}
                   </th>
                 ))}
@@ -541,13 +547,13 @@ export function Tenants({ onViewTenant }: TenantsProps) {
                     background: tenant.status === 'payment_overdue' ? '#FFFAFA' : '#fff',
                   }}
                 >
-                  <td style={{ padding: '10px 14px' }}>
-                    <div className="flex items-center gap-2.5">
+                  <td style={{ padding: '7px 12px' }}>
+                    <div className="flex items-center gap-2">
                       <div
-                        className="flex-shrink-0 flex items-center justify-center rounded-lg"
-                        style={{ width: 30, height: 30, background: tenant.status === 'payment_overdue' ? '#FEF2F2' : '#EEF2FF' }}
+                        className="flex-shrink-0 flex items-center justify-center rounded-md"
+                        style={{ width: 26, height: 26, background: tenant.status === 'payment_overdue' ? '#FEF2F2' : '#EEF2FF' }}
                       >
-                        <span style={{ fontSize: 11, fontWeight: 700, color: tenant.status === 'payment_overdue' ? '#991B1B' : '#6366F1' }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: tenant.status === 'payment_overdue' ? '#991B1B' : '#6366F1' }}>
                           {tenant.name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)}
                         </span>
                       </div>
@@ -557,22 +563,24 @@ export function Tenants({ onViewTenant }: TenantsProps) {
                       </div>
                     </div>
                   </td>
-                  <td style={{ padding: '10px 14px', fontSize: 12, color: '#71717A', maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <td style={{ padding: '7px 12px', fontSize: 12, color: '#71717A', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {getPropertyName(tenant.propertyId)}
                   </td>
-                  <td style={{ padding: '10px 14px', fontSize: 13, color: '#52525B' }}>
+                  <td style={{ padding: '7px 12px', fontSize: 13, color: '#52525B', whiteSpace: 'nowrap' }}>
                     {tenant.room}{tenant.bed ? ` · ${tenant.bed}` : ''}
+                    {tenant.floor ? <span style={{ fontSize: 11, color: '#A1A1AA' }}> · F{tenant.floor}</span> : null}
                   </td>
-                  <td style={{ padding: '10px 14px', fontSize: 13, fontWeight: 600, color: '#059669', fontVariantNumeric: 'tabular-nums' }}>
-                    {fmt(tenant.rent)}
+                  <td style={{ padding: '7px 12px' }}>
+                    <p style={{ fontSize: 13, fontWeight: 600, color: '#059669', fontVariantNumeric: 'tabular-nums' }}>{fmt(tenant.rent)}</p>
+                    {tenant.securityDeposit > 0 && <p style={{ fontSize: 10, color: '#A1A1AA' }}>Dep: {fmt(tenant.securityDeposit)}</p>}
                   </td>
-                  <td style={{ padding: '10px 14px', fontSize: 12, color: '#71717A', whiteSpace: 'nowrap' }}>
-                    {new Date(tenant.joinDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                  <td style={{ padding: '7px 12px', fontSize: 12, color: '#71717A', whiteSpace: 'nowrap' }}>
+                    {new Date(tenant.joinDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' })}
                   </td>
-                  <td style={{ padding: '10px 14px' }}>
-                    <StatusChip status={tenant.status} />
+                  <td style={{ padding: '7px 12px' }}>
+                    <StatusChip status={tenant.status} joinDate={tenant.joinDate} />
                   </td>
-                  <td style={{ padding: '10px 14px' }}>
+                  <td style={{ padding: '7px 12px' }}>
                     <div className="flex items-center gap-1">
                       <button
                         title="View full profile"
@@ -580,7 +588,7 @@ export function Tenants({ onViewTenant }: TenantsProps) {
                         className="ds-btn ds-btn-primary"
                         style={{ fontSize: 11, padding: '4px 8px', gap: 4 }}
                       >
-                        <Eye style={{ width: 13, height: 13 }} />
+                        <Eye style={{ width: 12, height: 12 }} />
                         View
                       </button>
                       <button
@@ -589,7 +597,7 @@ export function Tenants({ onViewTenant }: TenantsProps) {
                         className="ds-btn ds-btn-secondary"
                         style={{ fontSize: 11, padding: '4px 6px', minWidth: 0 }}
                       >
-                        <Edit style={{ width: 13, height: 13 }} />
+                        <Edit style={{ width: 12, height: 12 }} />
                       </button>
                       <button
                         title="Delete"
@@ -597,7 +605,7 @@ export function Tenants({ onViewTenant }: TenantsProps) {
                         className="ds-btn ds-btn-secondary"
                         style={{ fontSize: 11, padding: '4px 6px', minWidth: 0, color: '#DC2626' }}
                       >
-                        <Trash style={{ width: 13, height: 13 }} />
+                        <Trash style={{ width: 12, height: 12 }} />
                       </button>
                     </div>
                   </td>

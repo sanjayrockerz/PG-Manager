@@ -90,109 +90,55 @@ interface AnnouncementCardProps {
 function AnnouncementCard({ ann, waEntry, isPinnedSection, onPin, onEdit, onDelete }: AnnouncementCardProps) {
   const [expanded, setExpanded] = useState(false);
   const catStyle = CATEGORY_COLOR[ann.category] ?? { bg: '#F4F4F6', text: '#52525B', border: '#E4E4E7' };
-  const isLong = ann.content.length > 180;
+  const isLong = ann.content.length > 120;
 
   return (
     <div
-      className="rounded-xl transition-all"
       style={{
         background: '#FFFFFF',
         border: '1px solid #E4E4E7',
         borderLeft: isPinnedSection ? '3px solid #6366F1' : '1px solid #E4E4E7',
+        borderRadius: 8,
+        padding: '10px 14px',
       }}
     >
-      <div className="p-5">
-        <div className="flex items-start gap-4">
-          {/* Icon */}
-          <div
-            className="flex-shrink-0 flex items-center justify-center rounded-xl mt-0.5"
-            style={{ width: 36, height: 36, background: '#F4F4F6' }}
+      <div className="flex items-start gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap mb-1.5">
+            <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 6px', borderRadius: 99, background: catStyle.bg, color: catStyle.text, border: `1px solid ${catStyle.border}`, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              {CATEGORY_LABEL[ann.category] ?? ann.category}
+            </span>
+            {ann.isPinned && <Pin style={{ width: 11, height: 11, color: '#6366F1' }} />}
+            {(waEntry || ann.sentViaWhatsApp) && <MessageCircle style={{ width: 11, height: 11, color: '#16A34A' }} />}
+            {ann.propertyId && <Users style={{ width: 11, height: 11, color: '#A1A1AA' }} />}
+            <span style={{ fontSize: 11, color: '#A1A1AA', marginLeft: 'auto' }}>{formatDate(ann.date)}</span>
+          </div>
+          <p style={{ fontSize: 13, fontWeight: 600, color: '#0A0A0B', lineHeight: 1.4 }}>{ann.title}</p>
+          <p
+            style={{
+              fontSize: 12, color: '#71717A', marginTop: 2, lineHeight: 1.5,
+              display: '-webkit-box', WebkitLineClamp: expanded || !isLong ? undefined : 2,
+              WebkitBoxOrient: 'vertical', overflow: expanded || !isLong ? 'visible' : 'hidden',
+            } as React.CSSProperties}
           >
-            {isPinnedSection
-              ? <Pin className="w-4 h-4" style={{ color: '#6366F1' }} />
-              : <Megaphone className="w-4 h-4" style={{ color: '#A1A1AA' }} />
-            }
-          </div>
-
-          {/* Content */}
-          <div className="flex-1 min-w-0">
-            {/* Tags row */}
-            <div className="flex flex-wrap items-center gap-1.5 mb-2">
-              <span
-                className="px-2 py-0.5 rounded-full text-xs font-semibold"
-                style={{ background: catStyle.bg, color: catStyle.text, border: `1px solid ${catStyle.border}` }}
-              >
-                {CATEGORY_LABEL[ann.category] ?? ann.category}
-              </span>
-
-              {ann.propertyId && (
-                <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-zinc-100 text-zinc-500">
-                  <Users className="w-2.5 h-2.5 inline mr-1" />
-                  Property
-                </span>
-              )}
-
-              {waEntry ? (
-                <WhatsAppStatusBadge entry={waEntry} />
-              ) : ann.sentViaWhatsApp ? (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-green-50 text-green-700 border border-green-200">
-                  <MessageCircle className="w-3 h-3" /> WhatsApp
-                </span>
-              ) : null}
-            </div>
-
-            <h3 className="text-sm font-semibold text-zinc-900 mb-1 leading-snug">{ann.title}</h3>
-
-            <p
-              className="text-sm text-zinc-500 leading-relaxed"
-              style={{ display: '-webkit-box', WebkitLineClamp: expanded || !isLong ? undefined : 2, WebkitBoxOrient: 'vertical', overflow: expanded || !isLong ? 'visible' : 'hidden' }}
-            >
-              {ann.content}
-            </p>
-
-            {isLong && (
-              <button
-                onClick={() => setExpanded((v) => !v)}
-                className="flex items-center gap-0.5 mt-1 text-xs font-medium"
-                style={{ color: '#6366F1' }}
-              >
-                {expanded ? <><ChevronUp className="w-3 h-3" /> Show less</> : <><ChevronDown className="w-3 h-3" /> Read more</>}
-              </button>
-            )}
-
-            <div className="flex items-center gap-3 mt-3" style={{ fontSize: 11, color: '#A1A1AA' }}>
-              <span>{formatDate(ann.date)}</span>
-              <span className="flex items-center gap-1"><Eye className="w-3 h-3" /> {ann.views}</span>
-            </div>
-          </div>
-
-          {/* Actions */}
-          <div className="flex flex-col gap-1 flex-shrink-0">
-            <button
-              onClick={() => onPin(ann)}
-              className="flex items-center justify-center rounded-lg hover:bg-zinc-100 transition-colors"
-              style={{ width: 30, height: 30, color: ann.isPinned ? '#7C3AED' : '#A1A1AA' }}
-              title={ann.isPinned ? 'Unpin' : 'Pin'}
-            >
-              <Pin className="w-3.5 h-3.5" />
+            {ann.content}
+          </p>
+          {isLong && (
+            <button onClick={() => setExpanded(v => !v)} style={{ fontSize: 11, color: '#6366F1', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 0 0' }}>
+              {expanded ? 'Show less' : 'Read more'}
             </button>
-            <button
-              onClick={() => onEdit(ann)}
-              className="flex items-center justify-center rounded-lg hover:bg-blue-50 transition-colors"
-              style={{ width: 30, height: 30, color: '#6366F1' }}
-              title="Edit"
-            >
-              <Edit className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={() => onDelete(ann)}
-              className="flex items-center justify-center rounded-lg hover:bg-red-50 transition-colors"
-              style={{ width: 30, height: 30, color: '#EF4444' }}
-              title="Delete"
-            >
-              <Trash className="w-3.5 h-3.5" />
-            </button>
-          </div>
+          )}
+        </div>
+        <div className="flex items-center gap-0.5 flex-shrink-0">
+          <button onClick={() => onPin(ann)} style={{ padding: '5px', borderRadius: 6, background: 'none', border: 'none', cursor: 'pointer', color: ann.isPinned ? '#6366F1' : '#A1A1AA' }} title={ann.isPinned ? 'Unpin' : 'Pin'}>
+            <Pin style={{ width: 13, height: 13 }} />
+          </button>
+          <button onClick={() => onEdit(ann)} style={{ padding: '5px', borderRadius: 6, background: 'none', border: 'none', cursor: 'pointer', color: '#6366F1' }} title="Edit">
+            <Edit style={{ width: 13, height: 13 }} />
+          </button>
+          <button onClick={() => onDelete(ann)} style={{ padding: '5px', borderRadius: 6, background: 'none', border: 'none', cursor: 'pointer', color: '#DC2626' }} title="Delete">
+            <Trash style={{ width: 13, height: 13 }} />
+          </button>
         </div>
       </div>
     </div>
@@ -456,25 +402,12 @@ export function Announcements() {
         </div>
       )}
 
-      {/* Stats row */}
-      <div className="grid grid-cols-3 gap-3">
-        {[
-          { label: 'Total', value: announcements.length, color: '#6366F1' },
-          { label: 'Pinned', value: announcements.filter((a) => a.isPinned).length, color: '#7C3AED' },
-          { label: 'Via WhatsApp', value: announcements.filter((a) => a.sentViaWhatsApp).length, color: '#10B981' },
-        ].map((s) => (
-          <div
-            key={s.label}
-            className="rounded-xl text-center"
-            style={{ background: '#FFFFFF', border: '1px solid #E4E4E7', padding: '12px 8px' }}
-          >
-            <p style={{ fontSize: 22, fontWeight: 700, color: s.color, lineHeight: 1 }}>{s.value}</p>
-            <p style={{ fontSize: 11, color: '#A1A1AA', marginTop: 4 }}>{s.label}</p>
-          </div>
-        ))}
+      {/* Filter chips + stats inline */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <span style={{ fontSize: 12, color: '#A1A1AA' }}>
+          {announcements.length} total · {announcements.filter(a => a.isPinned).length} pinned · {announcements.filter(a => a.sentViaWhatsApp).length} via WhatsApp
+        </span>
       </div>
-
-      {/* Filter chips */}
       <div className="flex gap-2 overflow-x-auto pb-1">
         {(['all', 'maintenance', 'payment', 'rules', 'general'] as FilterCat[]).map((c) => {
           const count = c === 'all' ? announcements.length : announcements.filter((a) => a.category === c).length;

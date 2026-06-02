@@ -263,13 +263,13 @@ export function Properties({ onNavigate }: PropertiesV2Props) {
         {stats.map((stat) => {
           const Icon = stat.icon;
           return (
-            <div key={stat.label} className="ds-card flex items-start justify-between" style={{ padding: '14px 16px', gap: 12 }}>
+            <div key={stat.label} className="ds-card flex items-center justify-between" style={{ padding: '12px 14px', gap: 10 }}>
               <div className="flex-1 min-w-0">
-                <p style={{ fontSize: 11, fontWeight: 600, color: '#71717A', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 6 }}>{stat.label}</p>
-                <p style={{ fontSize: 22, fontWeight: 700, color: '#0A0A0B', letterSpacing: '-0.03em', lineHeight: 1 }}>{stat.value}</p>
+                <p style={{ fontSize: 11, fontWeight: 600, color: '#71717A', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 4 }}>{stat.label}</p>
+                <p style={{ fontSize: 20, fontWeight: 700, color: '#0A0A0B', letterSpacing: '-0.03em', lineHeight: 1 }}>{stat.value}</p>
               </div>
-              <div className="flex-shrink-0 flex items-center justify-center rounded-xl" style={{ width: 36, height: 36, background: '#EEF2FF' }}>
-                <Icon style={{ width: 16, height: 16, color: '#6366F1', strokeWidth: 1.75 }} />
+              <div className="flex-shrink-0 flex items-center justify-center rounded-lg" style={{ width: 32, height: 32, background: '#EEF2FF' }}>
+                <Icon style={{ width: 14, height: 14, color: '#6366F1', strokeWidth: 1.75 }} />
               </div>
             </div>
           );
@@ -321,11 +321,11 @@ export function Properties({ onNavigate }: PropertiesV2Props) {
                       <button
                         title="Building View"
                         onClick={() => onNavigate('building-view')}
-                        className="ds-btn ds-btn-secondary"
-                        style={{ fontSize: 11, padding: '4px 8px', gap: 4 }}
+                        className="ds-btn ds-btn-primary"
+                        style={{ fontSize: 11, padding: '4px 10px', gap: 4 }}
                       >
-                        <Building2 style={{ width: 12, height: 12, color: '#6366F1' }} />
-                        View
+                        <Building2 style={{ width: 12, height: 12 }} />
+                        Building View
                       </button>
                       <button
                         onClick={() => setExpandedProperty(isExpanded ? null : property.id)}
