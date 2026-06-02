@@ -522,14 +522,21 @@ function RoomDetailSheet({
 }
 
 export function BuildingView({ onTenantClick, onNavigate }: BuildingViewProps) {
-  const { selectedProperty, properties } = useProperty();
+  const { selectedProperty, setSelectedProperty, properties } = useProperty();
   const [tenants, setTenants] = useState<TenantRecord[]>([]);
   const [loadingTenants, setLoadingTenants] = useState(false);
   const [selectedRoom, setSelectedRoom] = useState<{ occ: RoomOccupancy; room: Room } | null>(null);
   const fetchSeq = useRef(0);
 
+  // Auto-select first property if "All Properties" is selected
+  useEffect(() => {
+    if (selectedProperty === 'all' && properties.length > 0) {
+      setSelectedProperty(properties[0].id);
+    }
+  }, [selectedProperty, properties, setSelectedProperty]);
+
   const currentProperty = selectedProperty === 'all'
-    ? null
+    ? properties[0] ?? null
     : properties.find((p) => p.id === selectedProperty) ?? null;
 
   const occupancyMode = (currentProperty?.occupancyMode ?? 'BED_BASED') as OccupancyMode;
@@ -598,13 +605,19 @@ export function BuildingView({ onTenantClick, onNavigate }: BuildingViewProps) {
   }, [snapshot, currentProperty]);
 
   if (!currentProperty) {
+    if (properties.length === 0) {
+      return (
+        <div className="ds-card p-12 text-center">
+          <Home className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+          <p style={{ fontSize: 15, fontWeight: 600, color: '#0A0A0B' }}>No properties yet</p>
+          <p style={{ fontSize: 13, color: '#A1A1AA', marginTop: 6 }}>Add a property first to view building occupancy.</p>
+        </div>
+      );
+    }
     return (
-      <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
-        <Home className="w-12 h-12 text-gray-400 mx-auto mb-3" />
-        <h3 className="text-gray-900 text-lg">Select a property</h3>
-        <p className="text-sm text-gray-600 mt-2">
-          Pick a specific property from the top selector to view the live building occupancy.
-        </p>
+      <div className="ds-card p-12 text-center">
+        <Home className="w-10 h-10 text-gray-300 mx-auto mb-3" />
+        <p style={{ fontSize: 13, color: '#A1A1AA' }}>Loading…</p>
       </div>
     );
   }
@@ -616,6 +629,34 @@ export function BuildingView({ onTenantClick, onNavigate }: BuildingViewProps) {
 
   return (
     <div className="space-y-6">
+      {/* Page header */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="ds-page-title">Building View</h1>
+          <p style={{ fontSize: 13, color: '#A1A1AA', marginTop: 2 }}>Live room occupancy · click any room for details</p>
+        </div>
+        {/* Property switcher (only shown when multiple properties exist) */}
+        {properties.length > 1 && (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {properties.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => setSelectedProperty(p.id)}
+                style={{
+                  fontSize: 12, fontWeight: 500, padding: '5px 12px', borderRadius: 8, cursor: 'pointer',
+                  border: `1px solid ${currentProperty?.id === p.id ? '#6366F1' : '#E4E4E7'}`,
+                  background: currentProperty?.id === p.id ? '#6366F1' : '#fff',
+                  color: currentProperty?.id === p.id ? '#fff' : '#52525B',
+                  transition: 'all 0.15s',
+                }}
+              >
+                {p.name}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* Header card */}
       <div className="bg-white rounded-xl border border-gray-200 p-5">
         <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
@@ -626,10 +667,10 @@ export function BuildingView({ onTenantClick, onNavigate }: BuildingViewProps) {
                 {occupancyMode === 'BED_BASED' ? 'Bed-Based' : 'Room-Based'}
               </Badge>
               {loadingTenants && (
-                <span className="text-xs text-purple-600 animate-pulse">Syncing…</span>
+                <span className="text-xs text-indigo-600 animate-pulse">Syncing…</span>
               )}
             </div>
-            <p className="text-sm text-gray-500 mt-1">Live building occupancy · Click any room for details</p>
+            <p className="text-sm text-gray-500 mt-1">{currentProperty.address}{currentProperty.city ? `, ${currentProperty.city}` : ''}</p>
           </div>
           <div className="text-sm font-semibold text-gray-700">
             {snapshot.occupancyRate}% occupancy
