@@ -12,10 +12,20 @@ import {
   type NotificationRecord,
   type PaymentRecord,
   type TenantPortalSnapshot,
+  type AgreementRecord,
+  type TenantDocument,
   supabaseTenantDataApi,
+  supabaseLifecycleApi,
 } from '../services/supabaseData';
+import {
+  getTenantPortalSnapshot,
+  submitTenantVacateRequest,
+  createTenantMaintenanceTicket,
+} from '../services/dataService';
 import { openReceiptWindow } from '../services/receiptGenerator';
 import { useRealtimeRefresh } from '../hooks/useRealtimeRefresh';
+import { getAppMode } from '../config/appMode';
+import { supabase } from '../lib/supabase';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -38,6 +48,9 @@ const MAINTENANCE_CATEGORIES = [
 ];
 
 const welcomeKey = (userId: string) => `tenant-welcome-v1-seen:${userId}`;
+// Tracks the ISO timestamp when the tenant last opened the notifications tab.
+// Notifications created after this timestamp are shown as "unread" from the tenant's view.
+const notifSeenKey = (tenantId: string) => `tenant-notif-last-seen:${tenantId}`;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -182,6 +195,23 @@ export function TenantPortal() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
   const [showWelcome, setShowWelcome] = useState(false);
+  // Tenant-side notification "last seen" timestamp for unread indicator.
+  const [notifLastSeen, setNotifLastSeen] = useState<string>(() => {
+    if (typeof window === 'undefined') return new Date(0).toISOString();
+    return localStorage.getItem(notifSeenKey('__init')) ?? new Date(0).toISOString();
+  });
+
+  // documents & agreements (loaded separately)
+  const [tenantDocs, setTenantDocs] = useState<TenantDocument[]>([]);
+  const [agreements, setAgreements] = useState<AgreementRecord[]>([]);
+  const [tenantSignModal, setTenantSignModal] = useState<{ agreement: AgreementRecord } | null>(null);
+  const [tenantSignatureName, setTenantSignatureName] = useState('');
+  const [tenantSigning, setTenantSigning] = useState(false);
+  const [tenantSignMethod, setTenantSignMethod] = useState<'typed' | 'draw'>('typed');
+  const [tenantDrawCapture, setTenantDrawCapture] = useState<string | null>(null);
+  const tenantCanvasRef = useRef<HTMLCanvasElement>(null);
+  const tenantDrawing = useRef(false);
+  const [tenantHasStrokes, setTenantHasStrokes] = useState(false);
 
   // maintenance new-ticket form state
   const [ticketForm, setTicketForm] = useState({
@@ -206,24 +236,52 @@ export function TenantPortal() {
     setLoading(true);
     setErr('');
     try {
-      const data = await supabaseTenantDataApi.getPortalSnapshot();
+      const data = await getTenantPortalSnapshot();
       setSnapshot(data);
+
+      // Sync the correct notif-last-seen key now that we know the tenant id.
+      const storedSeen = localStorage.getItem(notifSeenKey(data.tenant.id)) ?? new Date(0).toISOString();
+      setNotifLastSeen(storedSeen);
+
+      // Welcome flow: check DB flag first, fall back to localStorage for existing sessions.
       const key = welcomeKey(data.tenant.id);
-      if (typeof window !== 'undefined' && localStorage.getItem(key) !== 'true') {
+      const localSeen = typeof window !== 'undefined' && localStorage.getItem(key) === 'true';
+      if (!localSeen && getAppMode() !== 'demo') {
+        const { data: profileRow } = await supabase
+          .from('profiles')
+          .select('first_login_completed_at')
+          .eq('id', user?.id ?? '')
+          .maybeSingle<{ first_login_completed_at: string | null }>();
+        const dbSeen = Boolean(profileRow?.first_login_completed_at);
+        if (!dbSeen) {
+          setShowWelcome(true);
+        }
+      } else if (!localSeen) {
         setShowWelcome(true);
+      }
+
+      // Load documents and agreements in the background (graceful — table may not exist yet)
+      if (getAppMode() !== 'demo') {
+        void supabaseLifecycleApi.getTenantDocuments(data.tenant.id)
+          .then(setTenantDocs)
+          .catch(() => {});
+        void supabaseLifecycleApi.getAgreements(data.tenant.id)
+          .then(setAgreements)
+          .catch(() => {});
       }
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Unable to load portal data.');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { void load(); }, [load]);
 
+  const isDemo = getAppMode() === 'demo';
   const { lastUpdatedAt, isSyncing } = useRealtimeRefresh({
     key: 'tenant-portal',
-    tables: ['tenants', 'payments', 'maintenance_tickets', 'maintenance_threads', 'announcements', 'notifications', 'rooms', 'properties', 'vacate_requests'],
+    tables: isDemo ? [] : ['tenants', 'payments', 'maintenance_tickets', 'maintenance_threads', 'announcements', 'notifications', 'rooms', 'properties', 'vacate_requests', 'tenant_documents', 'agreements'],
     onChange: load,
   });
 
@@ -231,10 +289,25 @@ export function TenantPortal() {
   const openTickets = useMemo(() => (snapshot?.maintenance ?? []).filter((t) => t.status !== 'resolved' && t.status !== 'closed'), [snapshot]);
   const pinnedAnnouncements = useMemo(() => (snapshot?.announcements ?? []).filter((a) => a.isPinned), [snapshot]);
   const detailTicket = useMemo(() => snapshot?.maintenance.find((t) => t.id === detailTicketId) ?? null, [snapshot, detailTicketId]);
+  // Tenant-side unread count — based on last-seen timestamp, not owner's read flag.
+  const tenantUnreadCount = useMemo(
+    () => (snapshot?.notifications ?? []).filter((n) => n.createdAt > notifLastSeen).length,
+    [snapshot, notifLastSeen],
+  );
 
   const handleWelcomeDone = () => {
     if (typeof window !== 'undefined' && snapshot) {
       localStorage.setItem(welcomeKey(snapshot.tenant.id), 'true');
+    }
+    // Persist to DB so welcome doesn't re-appear on new devices.
+    if (user?.id && getAppMode() !== 'demo') {
+      const markDone = async () => {
+        await supabase
+          .from('profiles')
+          .update({ first_login_completed_at: new Date().toISOString() })
+          .eq('id', user.id);
+      };
+      void markDone().catch(() => {});
     }
     setShowWelcome(false);
   };
@@ -249,7 +322,7 @@ export function TenantPortal() {
 
     setTicketForm((f) => ({ ...f, submitting: true }));
     try {
-      await supabaseTenantDataApi.createMaintenanceTicket({
+      await createTenantMaintenanceTicket({
         issue: issueFull.trim(),
         description: ticketForm.description.trim(),
         priority: ticketForm.priority,
@@ -271,7 +344,9 @@ export function TenantPortal() {
     if (file.size > 10 * 1024 * 1024) { toast.error('Image must be under 10 MB.'); return; }
     setTicketForm((f) => ({ ...f, imageFile: file, imageUploading: true }));
     try {
-      const url = await supabaseTenantDataApi.uploadMaintenanceImage(file);
+      const url = isDemo
+        ? URL.createObjectURL(file)
+        : await supabaseTenantDataApi.uploadMaintenanceImage(file);
       setTicketForm((f) => ({ ...f, imageUrl: url, imageUploading: false }));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Image upload failed.');
@@ -285,7 +360,7 @@ export function TenantPortal() {
     if (!vacateForm.date || !vacateForm.confirm) return;
     setVacateForm((f) => ({ ...f, submitting: true }));
     try {
-      await supabaseTenantDataApi.submitVacateRequest({ vacateDate: vacateForm.date, reason: vacateForm.reason });
+      await submitTenantVacateRequest({ vacateDate: vacateForm.date, reason: vacateForm.reason });
       await load();
       setView('profile');
       toast.success('Vacate notice submitted. Your manager has been notified.');
@@ -293,6 +368,85 @@ export function TenantPortal() {
       toast.error(e instanceof Error ? e.message : 'Failed to submit notice.');
     } finally {
       setVacateForm((f) => ({ ...f, submitting: false }));
+    }
+  };
+
+  // ── Tenant draw pad helpers ───────────────────────────────────────────────
+  const getTenantCtx = () => tenantCanvasRef.current?.getContext('2d') ?? null;
+  const getTenantPos = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const sx = e.currentTarget.width / r.width;
+    const sy = e.currentTarget.height / r.height;
+    return { x: (e.clientX - r.left) * sx, y: (e.clientY - r.top) * sy };
+  };
+  const getTenantTouchPos = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const sx = e.currentTarget.width / r.width;
+    const sy = e.currentTarget.height / r.height;
+    const t = e.touches[0];
+    return { x: (t.clientX - r.left) * sx, y: (t.clientY - r.top) * sy };
+  };
+  const tenantBeginStroke = (x: number, y: number) => {
+    const ctx = getTenantCtx();
+    if (!ctx) return;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    tenantDrawing.current = true;
+    setTenantHasStrokes(true);
+  };
+  const tenantContinueStroke = (x: number, y: number) => {
+    if (!tenantDrawing.current) return;
+    const ctx = getTenantCtx();
+    if (!ctx) return;
+    ctx.lineTo(x, y);
+    ctx.strokeStyle = '#111827';
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+  };
+  const tenantEndStroke = () => { tenantDrawing.current = false; };
+  const tenantClearCanvas = () => {
+    const canvas = tenantCanvasRef.current;
+    const ctx = getTenantCtx();
+    if (!canvas || !ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    setTenantHasStrokes(false);
+    setTenantDrawCapture(null);
+  };
+  const tenantCaptureCanvas = () => {
+    const canvas = tenantCanvasRef.current;
+    if (!canvas || !tenantHasStrokes) return;
+    setTenantDrawCapture(canvas.toDataURL('image/png'));
+  };
+
+  // ── Tenant agreement signing ──────────────────────────────────────────────
+  const handleTenantSign = async () => {
+    if (!tenantSignModal) return;
+    const name = tenantSignatureName.trim();
+    if (!name) { toast.error('Please provide your name.'); return; }
+    const sigImage = tenantSignMethod === 'draw' ? (tenantDrawCapture ?? undefined) : undefined;
+    setTenantSigning(true);
+    try {
+      const ua = typeof navigator !== 'undefined' ? navigator.userAgent : undefined;
+      const updated = await supabaseLifecycleApi.signAgreement({
+        agreementId: tenantSignModal.agreement.id,
+        signatureName: name,
+        role: 'tenant',
+        signatureImage: sigImage,
+        deviceMetadata: ua,
+      });
+      setAgreements((prev) => prev.map((a) => a.id === updated.id ? updated : a));
+      setTenantSignModal(null);
+      setTenantSignatureName('');
+      setTenantDrawCapture(null);
+      setTenantHasStrokes(false);
+      setTenantSignMethod('typed');
+      toast.success('Agreement signed! The agreement is now fully executed.');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Signing failed');
+    } finally {
+      setTenantSigning(false);
     }
   };
 
@@ -322,6 +476,57 @@ export function TenantPortal() {
   if (!snapshot) return null;
 
   const { tenant, property, owner, ownerPaymentInfo, payments, maintenance, announcements, notifications, vacateRequest } = snapshot;
+
+  // Blocked account guard — inactive/archived tenants cannot use the portal.
+  if (tenant.status === 'archived') {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center p-6">
+        <div className="max-w-sm w-full bg-white border border-gray-200 rounded-2xl p-8 text-center shadow-sm">
+          <div className="w-14 h-14 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <X className="w-7 h-7 text-gray-400" />
+          </div>
+          <h2 className="text-lg font-semibold text-gray-900 mb-2">Account Deactivated</h2>
+          <p className="text-sm text-gray-500 mb-6">
+            Your tenant account has been archived. Please contact your property manager for assistance.
+          </p>
+          <button
+            onClick={() => { void logout(); }}
+            className="w-full py-2.5 bg-gray-800 text-white rounded-xl text-sm font-semibold hover:bg-gray-900 transition-colors"
+          >
+            Sign Out
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (tenant.status === 'inactive') {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center p-6">
+        <div className="max-w-sm w-full bg-white border border-amber-200 rounded-2xl p-8 text-center shadow-sm">
+          <div className="w-14 h-14 bg-amber-50 rounded-full flex items-center justify-center mx-auto mb-4">
+            <AlertCircle className="w-7 h-7 text-amber-500" />
+          </div>
+          <h2 className="text-lg font-semibold text-gray-900 mb-2">Tenancy Ended</h2>
+          <p className="text-sm text-gray-500 mb-6">
+            Your tenancy has ended. You can view past payments and documents, or contact your property manager.
+          </p>
+          <button
+            onClick={() => setView('payments')}
+            className="w-full py-2.5 bg-sky-600 text-white rounded-xl text-sm font-semibold hover:bg-sky-700 transition-colors mb-2"
+          >
+            View Payment History
+          </button>
+          <button
+            onClick={() => { void logout(); }}
+            className="w-full py-2.5 border border-gray-200 text-gray-600 rounded-xl text-sm font-semibold hover:bg-gray-50 transition-colors"
+          >
+            Sign Out
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // ── View: Home ─────────────────────────────────────────────────────────────
   const viewHome = (
@@ -400,7 +605,7 @@ export function TenantPortal() {
           { id: 'payments' as TenantView, icon: CreditCard, label: 'Payments', sub: `${pendingPayments.length} pending`, color: 'text-green-600 bg-green-50' },
           { id: 'maintenance' as TenantView, icon: Wrench, label: 'Maintenance', sub: `${openTickets.length} open`, color: 'text-orange-600 bg-orange-50' },
           { id: 'announcements' as TenantView, icon: Bell, label: 'Announcements', sub: `${pinnedAnnouncements.length} pinned`, color: 'text-blue-600 bg-blue-50' },
-          { id: 'notifications' as TenantView, icon: MessageSquare, label: 'Notifications', sub: `${(snapshot?.notifications ?? []).filter((n) => !n.read).length} unread`, color: 'text-indigo-600 bg-indigo-50' },
+          { id: 'notifications' as TenantView, icon: MessageSquare, label: 'Notifications', sub: `${tenantUnreadCount} unread`, color: 'text-indigo-600 bg-indigo-50' },
           { id: 'documents' as TenantView, icon: FileText, label: 'Documents', sub: `${payments.filter((p) => p.status === 'paid').length} receipts`, color: 'text-purple-600 bg-purple-50' },
         ].map(({ id, icon: Icon, label, sub, color }) => (
           <button
@@ -900,6 +1105,12 @@ export function TenantPortal() {
   // ── View: Documents ────────────────────────────────────────────────────────
   const paidPayments = payments.filter((p) => p.status === 'paid');
 
+  const DOC_TYPE_DISPLAY: Record<string, string> = {
+    aadhaar_front: 'Aadhaar (Front)', aadhaar_back: 'Aadhaar (Back)',
+    pan: 'PAN Card', passport: 'Passport', driving_license: 'Driving License',
+    photo: 'Profile Photo', other: 'Document',
+  };
+
   const viewDocuments = (
     <div className="space-y-4 pb-6">
       <div className="flex items-center gap-3">
@@ -907,6 +1118,65 @@ export function TenantPortal() {
           <ArrowLeft className="w-4 h-4 text-gray-600" />
         </button>
         <h1 className="text-xl font-bold text-gray-900">Documents</h1>
+      </div>
+
+      {/* Rental Agreements */}
+      <div className="bg-white border border-gray-200 rounded-xl">
+        <div className="px-4 py-3 border-b border-gray-100">
+          <p className="text-sm font-semibold text-gray-900">Rental Agreements</p>
+          <p className="text-xs text-gray-500">{agreements.length} agreement{agreements.length !== 1 ? 's' : ''}</p>
+        </div>
+        {agreements.length === 0 ? (
+          <div className="p-6 text-center text-gray-400">
+            <FileText className="w-8 h-8 mx-auto mb-2 opacity-30" />
+            <p className="text-sm">No agreements available yet.</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-gray-100">
+            {agreements.map((ag) => {
+              const needsTenantSign = ag.status === 'pending_tenant_signature' && !ag.tenantSignedAt;
+              const isExecuted = ag.status === 'executed';
+              const statusLabel: Record<string, string> = {
+                draft: 'Draft', pending_owner_signature: 'Awaiting Owner', pending_tenant_signature: 'Action Required — Sign Now',
+                executed: 'Executed ✓', sent: 'Sent', signed: 'Signed', expired: 'Expired', archived: 'Archived', cancelled: 'Cancelled',
+              };
+              return (
+                <div key={ag.id} className="px-4 py-3 space-y-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">
+                        {ag.agreementType === 'license' ? 'License Agreement' : ag.agreementType}
+                      </p>
+                      <p className={`text-xs mt-0.5 font-medium ${needsTenantSign ? 'text-blue-600' : isExecuted ? 'text-green-600' : 'text-gray-500'}`}>
+                        {statusLabel[ag.status] ?? ag.status} · {new Date(ag.createdAt).toLocaleDateString('en-IN')}
+                      </p>
+                      {ag.ownerSignatureName && <p className="text-xs text-gray-400">Owner signed: {ag.ownerSignatureName}</p>}
+                      {ag.tenantSignatureName && <p className="text-xs text-gray-400">You signed: {ag.tenantSignatureName}</p>}
+                    </div>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      {needsTenantSign && (
+                        <button
+                          onClick={() => { setTenantSignModal({ agreement: ag }); setTenantSignatureName(snapshot?.tenant.name ?? ''); }}
+                          className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 transition-colors"
+                        >
+                          Sign Now
+                        </button>
+                      )}
+                      {ag.htmlContent && (
+                        <button
+                          onClick={() => { const win = window.open('', '_blank', 'width=900,height=700'); if (win && ag.htmlContent) { win.document.write(ag.htmlContent); win.document.close(); } }}
+                          className="flex items-center gap-1 px-3 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-600 hover:bg-gray-50"
+                        >
+                          <Download className="w-3.5 h-3.5" /> View
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Receipts */}
@@ -932,7 +1202,7 @@ export function TenantPortal() {
                   onClick={() => openReceiptWindow({ payment: p, propertyName: property?.name ?? '', ownerName: owner?.name })}
                   className="flex items-center gap-1 px-3 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-600 hover:bg-gray-50"
                 >
-                  <Download className="w-3.5 h-3.5" /> Download
+                  <Download className="w-3.5 h-3.5" /> Receipt
                 </button>
               </div>
             ))}
@@ -940,33 +1210,35 @@ export function TenantPortal() {
         )}
       </div>
 
-      {/* Agreements placeholder */}
-      <div className="bg-white border border-gray-200 rounded-xl p-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-purple-100 rounded-xl flex items-center justify-center flex-shrink-0">
-            <FileText className="w-5 h-5 text-purple-600" />
+      {/* ID Documents from tenant_documents table */}
+      {(tenantDocs.length > 0 || tenant.idDocumentUrl) && (
+        <div className="bg-white border border-gray-200 rounded-xl">
+          <div className="px-4 py-3 border-b border-gray-100">
+            <p className="text-sm font-semibold text-gray-900">ID Documents</p>
           </div>
-          <div>
-            <p className="text-sm font-semibold text-gray-900">Rental Agreement</p>
-            <p className="text-xs text-gray-500">
-              {tenant.status === 'active' ? 'Contact your manager to obtain your agreement copy.' : 'Not available.'}
-            </p>
+          <div className="divide-y divide-gray-100">
+            {tenant.idDocumentUrl && (
+              <div className="flex items-center justify-between px-4 py-3">
+                <p className="text-sm text-gray-900">{tenant.idType || 'ID Document'} · {tenant.idNumber || ''}</p>
+                <a href={tenant.idDocumentUrl} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center gap-1 px-3 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-600 hover:bg-gray-50">
+                  <Download className="w-3.5 h-3.5" /> View
+                </a>
+              </div>
+            )}
+            {tenantDocs.map((doc) => (
+              <div key={doc.id} className="flex items-center justify-between px-4 py-3">
+                <div>
+                  <p className="text-sm text-gray-900">{doc.label || DOC_TYPE_DISPLAY[doc.docType] || doc.docType}</p>
+                  <p className="text-xs text-gray-400">{new Date(doc.createdAt).toLocaleDateString('en-IN')}</p>
+                </div>
+                <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center gap-1 px-3 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-600 hover:bg-gray-50">
+                  <Download className="w-3.5 h-3.5" /> View
+                </a>
+              </div>
+            ))}
           </div>
-        </div>
-      </div>
-
-      {/* Tenant files if any */}
-      {tenant.idDocumentUrl && (
-        <div className="bg-white border border-gray-200 rounded-xl p-4">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">ID Document</p>
-          <a
-            href={tenant.idDocumentUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2 text-sm text-sky-600 hover:text-sky-700"
-          >
-            <Download className="w-4 h-4" /> View uploaded document
-          </a>
         </div>
       )}
     </div>
@@ -1000,9 +1272,10 @@ export function TenantPortal() {
         </div>
         {[
           { icon: Phone, label: 'Phone', value: tenant.phone },
+          { icon: Phone, label: 'Alternate Phone', value: tenant.alternatePhone },
           { icon: Building2, label: 'Property', value: property?.name },
           { icon: MapPin, label: 'Address', value: property?.address },
-        ].map(({ icon: Icon, label, value }) => (
+        ].filter(({ value }) => value).map(({ icon: Icon, label, value }) => (
           <div key={label} className="flex items-center gap-3">
             <Icon className="w-4 h-4 text-gray-400 flex-shrink-0" />
             <div className="min-w-0">
@@ -1012,6 +1285,60 @@ export function TenantPortal() {
           </div>
         ))}
       </div>
+
+      {/* Personal Details */}
+      {(tenant.dob || tenant.gender || tenant.parentName) && (
+        <div className="bg-white border border-gray-200 rounded-xl p-4">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Personal Details</p>
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            {tenant.dob && (
+              <div>
+                <p className="text-xs text-gray-500">Date of Birth</p>
+                <p className="font-semibold text-gray-900">{fmtDate(tenant.dob)}</p>
+              </div>
+            )}
+            {tenant.gender && (
+              <div>
+                <p className="text-xs text-gray-500">Gender</p>
+                <p className="font-semibold text-gray-900 capitalize">{tenant.gender.replace(/_/g, ' ')}</p>
+              </div>
+            )}
+            {tenant.parentName && (
+              <div>
+                <p className="text-xs text-gray-500">Guardian</p>
+                <p className="font-semibold text-gray-900">{tenant.parentName}</p>
+              </div>
+            )}
+            {tenant.parentPhone && (
+              <div>
+                <p className="text-xs text-gray-500">Guardian Phone</p>
+                <p className="font-semibold text-gray-900">{tenant.parentPhone}</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ID Details */}
+      {(tenant.idType || tenant.idNumber) && (
+        <div className="bg-white border border-gray-200 rounded-xl p-4">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">ID Details</p>
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            {tenant.idType && (
+              <div>
+                <p className="text-xs text-gray-500">ID Type</p>
+                <p className="font-semibold text-gray-900">{tenant.idType}</p>
+              </div>
+            )}
+            {tenant.idNumber && (
+              <div>
+                <p className="text-xs text-gray-500">ID Number</p>
+                <p className="font-semibold text-gray-900 font-mono tracking-wide">{tenant.idNumber}</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Tenancy details */}
       <div className="bg-white border border-gray-200 rounded-xl p-4">
@@ -1061,6 +1388,13 @@ export function TenantPortal() {
   // ── View: Notifications ───────────────────────────────────────────────────
   const allNotifications = snapshot?.notifications ?? [];
 
+  const markNotifsSeen = () => {
+    if (!snapshot) return;
+    const now = new Date().toISOString();
+    localStorage.setItem(notifSeenKey(snapshot.tenant.id), now);
+    setNotifLastSeen(now);
+  };
+
   const viewNotifications = (
     <div className="space-y-4 pb-6">
       <div className="flex items-center gap-3">
@@ -1068,10 +1402,13 @@ export function TenantPortal() {
           <ArrowLeft className="w-4 h-4 text-gray-600" />
         </button>
         <h1 className="text-xl font-bold text-gray-900 flex-1">Notifications</h1>
-        {allNotifications.some((n) => !n.read) && (
-          <span className="text-xs bg-indigo-600 text-white font-semibold px-2 py-0.5 rounded-full">
-            {allNotifications.filter((n) => !n.read).length} new
-          </span>
+        {tenantUnreadCount > 0 && (
+          <button
+            onClick={markNotifsSeen}
+            className="text-xs bg-indigo-600 text-white font-semibold px-2 py-0.5 rounded-full hover:bg-indigo-700 transition-colors"
+          >
+            {tenantUnreadCount} new · Mark read
+          </button>
         )}
       </div>
 
@@ -1082,13 +1419,15 @@ export function TenantPortal() {
         </div>
       ) : (
         <div className="space-y-2">
-          {allNotifications.map((n) => (
+          {allNotifications.map((n) => {
+            const isUnread = n.createdAt > notifLastSeen;
+            return (
             <div
               key={n.id}
-              className={`bg-white border rounded-xl p-4 ${n.read ? 'border-gray-200' : 'border-indigo-200 bg-indigo-50/40'}`}
+              className={`bg-white border rounded-xl p-4 ${isUnread ? 'border-indigo-200 bg-indigo-50/40' : 'border-gray-200'}`}
             >
               <div className="flex items-start gap-3">
-                <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${n.read ? 'bg-gray-300' : 'bg-indigo-500'}`} />
+                <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${isUnread ? 'bg-indigo-500' : 'bg-gray-300'}`} />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-gray-900">{n.title}</p>
                   <p className="text-xs text-gray-600 mt-0.5">{n.message}</p>
@@ -1098,7 +1437,8 @@ export function TenantPortal() {
                 </div>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
@@ -1240,6 +1580,133 @@ export function TenantPortal() {
           </div>
         </div>
       </div>
+
+      {/* Tenant signing modal */}
+      {tenantSignModal && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div>
+              <h3 className="text-lg font-bold text-gray-900">Sign Your Agreement</h3>
+              <p className="text-sm text-gray-500 mt-1">Your digital signature is legally binding. Please review the agreement before signing.</p>
+            </div>
+
+            {tenantSignModal.agreement.htmlContent && (
+              <button
+                onClick={() => { const win = window.open('', '_blank', 'width=900,height=700'); if (win && tenantSignModal.agreement.htmlContent) { win.document.write(tenantSignModal.agreement.htmlContent); win.document.close(); } }}
+                className="w-full py-2 border border-gray-200 rounded-xl text-sm text-sky-600 font-medium hover:bg-sky-50 transition-colors"
+              >
+                Review Agreement →
+              </button>
+            )}
+
+            {/* Your name — always required */}
+            <div className="space-y-1.5">
+              <label className="text-sm font-semibold text-gray-700">Your Full Name</label>
+              <input
+                type="text"
+                value={tenantSignatureName}
+                onChange={(e) => setTenantSignatureName(e.target.value)}
+                placeholder="Type your full legal name"
+                className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-sky-400"
+              />
+            </div>
+
+            {/* Signature method toggle */}
+            <div className="space-y-3">
+              <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
+                {(['typed', 'draw'] as const).map((method) => (
+                  <button
+                    key={method}
+                    type="button"
+                    onClick={() => { setTenantSignMethod(method); setTenantDrawCapture(null); setTenantHasStrokes(false); }}
+                    className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-colors capitalize ${
+                      tenantSignMethod === method ? 'bg-white shadow text-gray-900' : 'text-gray-500'
+                    }`}
+                  >
+                    {method === 'typed' ? 'Type Signature' : 'Draw Signature'}
+                  </button>
+                ))}
+              </div>
+
+              {tenantSignMethod === 'typed' && tenantSignatureName && (
+                <div className="p-3 bg-gray-50 border border-gray-200 rounded-xl">
+                  <p className="text-2xl font-serif italic text-gray-800">{tenantSignatureName}</p>
+                </div>
+              )}
+
+              {tenantSignMethod === 'draw' && (
+                <div className="space-y-2">
+                  {tenantDrawCapture ? (
+                    <div className="space-y-2">
+                      <div className="p-3 bg-gray-50 border border-gray-200 rounded-xl">
+                        <img src={tenantDrawCapture} alt="Your signature" className="h-14 max-w-full" />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => { setTenantDrawCapture(null); tenantClearCanvas(); }}
+                        className="text-xs text-gray-500 underline"
+                      >
+                        Redraw
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <canvas
+                        ref={tenantCanvasRef}
+                        width={500}
+                        height={120}
+                        className="border border-gray-300 rounded-xl bg-white cursor-crosshair w-full touch-none"
+                        style={{ height: '120px' }}
+                        onMouseDown={(e) => { const p = getTenantPos(e); tenantBeginStroke(p.x, p.y); }}
+                        onMouseMove={(e) => { const p = getTenantPos(e); tenantContinueStroke(p.x, p.y); }}
+                        onMouseUp={tenantEndStroke}
+                        onMouseLeave={tenantEndStroke}
+                        onTouchStart={(e) => { e.preventDefault(); const p = getTenantTouchPos(e); tenantBeginStroke(p.x, p.y); }}
+                        onTouchMove={(e) => { e.preventDefault(); const p = getTenantTouchPos(e); tenantContinueStroke(p.x, p.y); }}
+                        onTouchEnd={tenantEndStroke}
+                      />
+                      <div className="flex gap-2">
+                        <button type="button" onClick={tenantClearCanvas} className="text-xs text-gray-500 underline" disabled={!tenantHasStrokes}>Clear</button>
+                        <button
+                          type="button"
+                          onClick={tenantCaptureCanvas}
+                          disabled={!tenantHasStrokes}
+                          className="text-xs font-semibold text-sky-600 disabled:opacity-40"
+                        >
+                          ✓ Confirm Drawing
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Action buttons */}
+            <div className="flex gap-3 pt-1">
+              <button
+                onClick={() => {
+                  setTenantSignModal(null);
+                  setTenantSignatureName('');
+                  setTenantDrawCapture(null);
+                  setTenantHasStrokes(false);
+                  setTenantSignMethod('typed');
+                }}
+                className="flex-1 py-3 border border-gray-200 rounded-xl text-sm font-semibold text-gray-600 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => void handleTenantSign()}
+                disabled={tenantSigning || !tenantSignatureName.trim() || (tenantSignMethod === 'draw' && !tenantDrawCapture)}
+                className="flex-1 py-3 bg-sky-600 text-white rounded-xl text-sm font-semibold hover:bg-sky-700 disabled:opacity-50 transition-colors"
+              >
+                {tenantSigning ? 'Signing…' : 'Sign Agreement'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

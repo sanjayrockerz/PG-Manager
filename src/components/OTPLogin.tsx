@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArrowLeft, ArrowRight, Check, Home, LayoutGrid, Mail, Phone, Shield, Zap } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, Home, LayoutGrid, Mail, Phone, Shield } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import type { PortalType } from './PortalSelector';
 
@@ -41,7 +41,7 @@ const normalizePhone = (raw: string): string => {
 };
 
 export function OTPLogin({ onSwitchToSignup, portalType, onBack }: OTPLoginProps) {
-  const { sendLoginMagicLink, signInWithGoogle, sendPhoneOtp, verifyPhoneOtp, signInAsDemo, authError, isLoading } = useAuth();
+  const { sendLoginMagicLink, signInWithGoogle, sendPhoneOtp, verifyPhoneOtp, authError, isLoading } = useAuth();
   const [loginMethod, setLoginMethod] = useState<'email' | 'phone'>('email');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
@@ -51,6 +51,7 @@ export function OTPLogin({ onSwitchToSignup, portalType, onBack }: OTPLoginProps
   const [isSent, setIsSent] = useState(false);
 
   const isTenantPortal = portalType === 'tenant';
+  const isAdminPortal = portalType === 'admin';
 
   useEffect(() => {
     if (authError) setError(authError);
@@ -146,16 +147,6 @@ export function OTPLogin({ onSwitchToSignup, portalType, onBack }: OTPLoginProps
               {isTenantPortal ? 'Use your registered email or phone number.' : 'Use Google or a secure email magic link.'}
             </p>
           </div>
-
-          {/* Demo quick-access */}
-          <button
-            type="button"
-            onClick={signInAsDemo}
-            className="w-full mb-5 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold border-2 border-dashed border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 hover:border-amber-400 transition-colors"
-          >
-            <Zap className="w-4 h-4" />
-            Try Demo — no login required
-          </button>
 
           {/* Method tabs — only for tenant portal */}
           {isTenantPortal && (
@@ -305,14 +296,17 @@ export function OTPLogin({ onSwitchToSignup, portalType, onBack }: OTPLoginProps
               </>
             )}
 
-            <div className="flex items-center justify-between mt-4 text-sm">
-              <button
-                onClick={onSwitchToSignup}
-                className="text-[#6366F1] hover:text-[#4F46E5] font-medium"
-              >
-                Create account
-              </button>
-            </div>
+            {/* Only owner portal can self-register; admin/tenant accounts are created by platform/managers */}
+            {!isAdminPortal && !isTenantPortal && (
+              <div className="flex items-center justify-between mt-4 text-sm">
+                <button
+                  onClick={onSwitchToSignup}
+                  className="text-[#6366F1] hover:text-[#4F46E5] font-medium"
+                >
+                  Create account
+                </button>
+              </div>
+            )}
           </div>
         </div>
 

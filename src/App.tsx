@@ -26,6 +26,7 @@ import { Pricing } from './components/Pricing';
 import { PageFrame } from './components/ui/PageFrame';
 import { AcceptInvite } from './components/AcceptInvite';
 import { LocalizationProvider } from './contexts/LocalizationContext';
+import { DateRangeProvider } from './contexts/DateRangeContext';
 import { isPlatformAdminRole } from './utils/roles';
 import { hasPermission, TAB_PERMISSION_MAP, getDefaultTab } from './utils/permissions';
 import { PageGuard } from './guards/PageGuard';
@@ -69,7 +70,7 @@ const writeStoredPortal = (portal: PortalType | null): void => {
 };
 
 function AppContent() {
-  const { user, isLoading } = useAuth();
+  const { user, isLoading, isSuspended } = useAuth();
   const [showSignUp, setShowSignUp] = useState(false);
   const [selectedPortal, setSelectedPortal] = useState<PortalType | null>(() => (
     readStoredPortal() ?? (readInviteToken() ? 'owner' : null)
@@ -88,9 +89,9 @@ function AppContent() {
 
   useEffect(() => {
     if (!user) {
-      if (!selectedPortal && readInviteToken()) {
-        setSelectedPortal('owner');
-      }
+      // Reset portal selection on logout so selector is always shown again
+      setSelectedPortal(readInviteToken() ? 'owner' : null);
+      writeStoredPortal(null);
       return;
     }
 
@@ -153,6 +154,28 @@ function AppContent() {
         <div className="text-center">
           <div className="w-8 h-8 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin mx-auto mb-3"></div>
           <p className="text-sm text-gray-600">Loading account...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (isSuspended) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-100 p-4">
+        <div className="max-w-md w-full bg-white rounded-2xl border border-red-200 shadow-sm p-8 text-center">
+          <div className="w-14 h-14 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <span style={{ fontSize: 28 }}>🔒</span>
+          </div>
+          <h1 className="text-xl font-bold text-gray-900 mb-2">Account Suspended</h1>
+          <p className="text-sm text-gray-500 mb-6">
+            Your account has been suspended. Please contact RentCare support to resolve this.
+          </p>
+          <a
+            href="mailto:support@rentcare.app"
+            className="inline-flex items-center justify-center px-5 py-2.5 bg-indigo-600 text-white rounded-xl text-sm font-semibold hover:bg-indigo-700 transition-colors"
+          >
+            Contact Support
+          </a>
         </div>
       </div>
     );
@@ -347,7 +370,9 @@ export default function App() {
   return (
     <AuthProvider>
       <LocalizationProvider>
-        <AppContent />
+        <DateRangeProvider>
+          <AppContent />
+        </DateRangeProvider>
       </LocalizationProvider>
     </AuthProvider>
   );

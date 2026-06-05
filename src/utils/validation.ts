@@ -178,6 +178,114 @@ export function validatePropertyForm(data: PropertyFormData): string {
   return '';
 }
 
+// ─── Tenant form validation ───────────────────────────────────────────────────
+
+export interface TenantFormData {
+  name: string;
+  phone: string;
+  email: string;
+  propertyId: string;
+  room: string;
+  bed: string;
+  monthlyRent: number | string;
+  securityDeposit: number | string;
+  rentDueDate: number | string;
+  parentName: string;
+  parentPhone: string;
+  idType: string;
+  idNumber: string;
+  joinDate: string;
+}
+
+export interface TenantFormErrors {
+  name?: string;
+  phone?: string;
+  email?: string;
+  propertyId?: string;
+  room?: string;
+  bed?: string;
+  monthlyRent?: string;
+  securityDeposit?: string;
+  rentDueDate?: string;
+  parentName?: string;
+  parentPhone?: string;
+  idType?: string;
+  idNumber?: string;
+  joinDate?: string;
+}
+
+export function validateTenantForm(data: Partial<TenantFormData>): TenantFormErrors {
+  const errors: TenantFormErrors = {};
+
+  if (data.name !== undefined) {
+    if (!data.name.trim()) errors.name = 'Full name is required.';
+    else if (data.name.trim().length < 2) errors.name = 'Name must be at least 2 characters.';
+    else if (/\d/.test(data.name)) errors.name = 'Name cannot contain digits.';
+  }
+
+  if (data.phone !== undefined) {
+    const err = validatePhoneWithPrefix(data.phone);
+    if (err) errors.phone = err;
+  }
+
+  if (data.email !== undefined) {
+    const err = validateEmail(data.email);
+    if (err) errors.email = err;
+  }
+
+  if (data.propertyId !== undefined && !data.propertyId.trim()) {
+    errors.propertyId = 'Property is required.';
+  }
+
+  if (data.room !== undefined && !data.room.trim()) {
+    errors.room = 'Room is required.';
+  }
+
+  if (data.monthlyRent !== undefined) {
+    const err = validatePositiveInt(data.monthlyRent, 'Monthly rent', 1, 9999999);
+    if (err) errors.monthlyRent = err;
+  }
+
+  if (data.securityDeposit !== undefined) {
+    const err = validateNonNegativeNumber(data.securityDeposit, 'Security deposit');
+    if (err) errors.securityDeposit = err;
+  }
+
+  if (data.rentDueDate !== undefined) {
+    const err = validatePositiveInt(data.rentDueDate, 'Due date', 1, 28);
+    if (err) errors.rentDueDate = err;
+  }
+
+  if (data.parentName !== undefined) {
+    if (!data.parentName.trim()) errors.parentName = 'Parent/guardian name is required.';
+    else if (/\d/.test(data.parentName)) errors.parentName = 'Name cannot contain digits.';
+  }
+
+  if (data.parentPhone !== undefined) {
+    const err = validatePhoneWithPrefix(data.parentPhone);
+    if (err) errors.parentPhone = err;
+  }
+
+  if (data.idType !== undefined && !data.idType.trim()) {
+    errors.idType = 'ID type is required.';
+  }
+
+  if (data.idNumber !== undefined) {
+    if (!data.idNumber.trim()) errors.idNumber = 'ID number is required.';
+    else if (data.idNumber.trim().length > 64) errors.idNumber = 'ID number cannot exceed 64 characters.';
+  }
+
+  if (data.joinDate !== undefined && !data.joinDate.trim()) {
+    errors.joinDate = 'Join date is required.';
+  }
+
+  return errors;
+}
+
+export function isTenantFormValid(errors: TenantFormErrors): boolean {
+  return Object.keys(errors).length === 0;
+}
+
 // ─── Invite form validation ────────────────────────────────────────────────────
 
 export interface InviteFormData {

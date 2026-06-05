@@ -1,6 +1,7 @@
 // Invite service: CRUD for owner_invites and team membership management
 import { supabase } from '../lib/supabase';
 import { displayRoleToProfileRole } from '../utils/roles';
+import { domainEvents } from './eventBus';
 
 export type DisplayRole = 'viewer' | 'editor' | 'manager';
 export type InviteStatus = 'pending' | 'accepted' | 'expired' | 'revoked';
@@ -209,6 +210,11 @@ export const inviteService = {
         role: record.displayRole,
         propertyCount: record.propertyIds.length,
       },
+    });
+    domainEvents.teamAccessChanged({
+      ownerId: record.ownerId,
+      targetEmail: record.invitedEmail,
+      action: 'invited',
     });
     return record;
   },

@@ -1,4 +1,5 @@
-import type { TenantRecord } from './supabaseData';
+import type { TenantRecord, AgreementCreateInput, AgreementTemplate } from './supabaseData';
+import { supabaseLifecycleApi } from './supabaseData';
 
 export interface AgreementData {
   tenant: TenantRecord;
@@ -8,6 +9,61 @@ export interface AgreementData {
   ownerName: string;
   ownerPhone: string;
   generatedAt: string;
+  ownerSignature?: {
+    type: 'image' | 'typed';
+    value: string;
+    name: string;
+  };
+  template?: AgreementTemplate | null;
+}
+
+/**
+ * Generate and persist an agreement draft for a tenant.
+ * Auto-fetches active signature vault and agreement template.
+ * Returns the created AgreementRecord id.
+ */
+export async function createAndStoreAgreement(data: AgreementData): Promise<string> {
+  // Fetch active vault signature and template in parallel
+  const [vaultProfile, activeTemplate] = await Promise.all([
+    supabaseLifecycleApi.getActiveSignatureProfile().catch(() => null),
+    supabaseLifecycleApi.getActiveAgreementTemplate().catch(() => null),
+  ]);
+
+  // Build owner signature data from vault
+  let ownerSig: AgreementData['ownerSignature'] | undefined;
+  if (vaultProfile) {
+    if (vaultProfile.signatureType === 'typed' && vaultProfile.signatureText) {
+      ownerSig = { type: 'typed', value: vaultProfile.signatureText, name: data.ownerName };
+    } else if (vaultProfile.signatureImage) {
+      ownerSig = { type: 'image', value: vaultProfile.signatureImage, name: data.ownerName };
+    }
+  }
+
+  const enrichedData: AgreementData = {
+    ...data,
+    ownerSignature: ownerSig,
+    template: activeTemplate,
+  };
+
+  const html = generateAgreementHtml(enrichedData);
+
+  const input: AgreementCreateInput = {
+    tenantId: data.tenant.id,
+    propertyId: data.tenant.propertyId,
+    startDate: data.tenant.joinDate,
+    monthlyRent: data.tenant.rent,
+    securityDeposit: data.tenant.securityDeposit,
+    agreementType: 'license',
+    htmlContent: html,
+    templateVersion: activeTemplate?.version,
+    ...(ownerSig ? {
+      autoOwnerSignatureName: data.ownerName,
+      autoOwnerSignatureImage: ownerSig.type === 'image' ? ownerSig.value : undefined,
+    } : {}),
+  };
+
+  const record = await supabaseLifecycleApi.createAgreement(input);
+  return record.id;
 }
 
 function formatDate(dateStr: string): string {
@@ -26,8 +82,20 @@ function ordinal(n: number): string {
   return n + (s[(v - 20) % 10] || s[v] || s[0]);
 }
 
+function esc(s: string) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function sigBlock(sig: AgreementData['ownerSignature'] | undefined, placeholderComment: string): string {
+  if (!sig) return `<!-- ${placeholderComment} --><p style="margin-top:32px;">Signature: ____________________</p>`;
+  const imgHtml = sig.type === 'image'
+    ? `<img src="${sig.value}" style="height:54px;max-width:220px;margin-top:6px;display:block;" alt="signature" />`
+    : `<span style="font-family:cursive,serif;font-size:24px;color:#1a1a1a;">${esc(sig.value)}</span>`;
+  return imgHtml;
+}
+
 export function generateAgreementHtml(data: AgreementData): string {
-  const { tenant, propertyName, propertyAddress, propertyCity, ownerName, ownerPhone, generatedAt } = data;
+  const { tenant, propertyName, propertyAddress, propertyCity, ownerName, ownerPhone, generatedAt, ownerSignature, template } = data;
 
   const joinDateFormatted = formatDate(tenant.joinDate);
   const generatedDateFormatted = formatDate(generatedAt);
@@ -206,16 +274,19 @@ export function generateAgreementHtml(data: AgreementData): string {
   <div class="section-title">Terms and Conditions</div>
   <ol class="terms">
     <li><strong>Accommodation Use:</strong> The accommodation is provided strictly for residential purposes and may not be sublet or used for commercial activities.</li>
-    <li><strong>Rent Payment:</strong> Rent is due on the ${rentDue} of each month. Late payments attract a penalty as stated above. Persistent non-payment is grounds for termination.</li>
-    <li><strong>Security Deposit:</strong> The security deposit of ₹${tenant.securityDeposit.toLocaleString('en-IN')} is held against damages, dues, or unpaid rent, and will be refunded within 15 days of vacating after deductions (if any).</li>
-    <li><strong>Notice Period:</strong> Either party must provide a minimum of 30 days written notice before termination. Early vacating may result in forfeiture of a portion of the deposit.</li>
-    <li><strong>Guests:</strong> Overnight guests are not permitted without prior approval from the owner/manager.</li>
+    <li><strong>Rent Payment:</strong> ${template?.lateFeeClause || `Rent is due on the ${rentDue} of each month. Late payments attract a penalty as stated above. Persistent non-payment is grounds for termination.`}</li>
+    <li><strong>Security Deposit:</strong> ${template?.securityDepositTerms || `The security deposit of ₹${tenant.securityDeposit.toLocaleString('en-IN')} is held against damages, dues, or unpaid rent, and will be refunded within 15 days of vacating after deductions (if any).`}</li>
+    <li><strong>Notice Period:</strong> ${template?.noticePeriodClause || 'Either party must provide a minimum of 30 days written notice before termination. Early vacating may result in forfeiture of a portion of the deposit.'}</li>
+    <li><strong>Guests / Visitors:</strong> ${template?.visitorRules || 'Overnight guests are not permitted without prior approval from the owner/manager.'}</li>
     <li><strong>Maintenance:</strong> Tenants must maintain the room in good condition. Damage beyond normal wear and tear will be deducted from the security deposit.</li>
     <li><strong>Common Areas:</strong> Tenants are responsible for keeping common areas clean. Any damage to shared facilities will be shared equally among occupants unless attributed to a specific individual.</li>
-    <li><strong>Prohibited Activities:</strong> Smoking, consumption of alcohol on premises, and any illegal activities are strictly prohibited.</li>
+    <li><strong>House Rules:</strong> ${template?.houseRules || 'Smoking, consumption of alcohol on premises, and any illegal activities are strictly prohibited.'}</li>
     <li><strong>Utilities:</strong> Electricity, water, and Wi-Fi (if provided) are included in the rent unless stated otherwise. Excessive usage may attract additional charges.</li>
     <li><strong>Inspections:</strong> The owner/manager reserves the right to inspect the room with 24 hours notice (or immediately in emergencies).</li>
     <li><strong>Keys/Access:</strong> Loss of key/access card will be charged at actual replacement cost plus ₹500 administrative fee.</li>
+    <li><strong>Property Rules:</strong> ${template?.propertyRules || 'All tenants must comply with the property rules as communicated by the owner from time to time.'}</li>
+    <li><strong>Refund Policy:</strong> ${template?.refundPolicy || 'The security deposit refund is subject to property inspection and settlement of all dues.'}</li>
+    ${template?.miscellaneousTerms ? `<li><strong>Additional Terms:</strong> ${template.miscellaneousTerms}</li>` : ''}
     <li><strong>Governing Law:</strong> This agreement is governed by the laws of India. Any disputes shall be resolved through mutual discussion; failing which, in the courts of ${propertyCity || 'the applicable jurisdiction'}.</li>
   </ol>
 
@@ -227,12 +298,13 @@ export function generateAgreementHtml(data: AgreementData): string {
     <div class="sig-block">
       <p>Owner / Authorized Signatory</p>
       <strong>${ownerName}</strong>
-      <p style="margin-top:32px;">Signature: ____________________</p>
-      <p>Date: ____________________</p>
+      ${sigBlock(ownerSignature, 'OWNER_SIGNATURE_SLOT')}
+      ${ownerSignature ? `<p style="font-size:11px;color:#555;margin-top:4px;">Signed: ${generatedDateFormatted}</p>` : `<p>Date: ____________________</p>`}
     </div>
     <div class="sig-block" style="text-align:right;">
       <p>Tenant</p>
       <strong>${tenant.name}</strong>
+      <!-- TENANT_SIGNATURE_SLOT -->
       <p style="margin-top:32px;">Signature: ____________________</p>
       <p>Date: ____________________</p>
     </div>

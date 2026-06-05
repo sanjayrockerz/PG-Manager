@@ -1,4 +1,4 @@
-import { Building2, CreditCard, Home, Settings, Shield, UserCircle, Users, Wrench } from 'lucide-react';
+import { LayoutGrid, CreditCard, Home, Settings, Shield, UserCircle, Users, Wrench } from 'lucide-react';
 import { useLocalization } from '../contexts/LocalizationContext';
 import { isPlatformAdminRole, isScopedOwnerRole } from '../utils/roles';
 
@@ -9,16 +9,16 @@ interface MobileNavProps {
 }
 
 const ownerNavItems = [
-  { id: 'dashboard',     label: 'Home',     icon: Home },
-  { id: 'building-view', label: 'Building',  icon: Building2 },
-  { id: 'tenants',       label: 'Tenants',   icon: Users },
-  { id: 'payments',      label: 'Payments',  icon: CreditCard },
-  { id: 'settings',      label: 'Settings',  icon: Settings },
+  { id: 'dashboard',   label: 'Home',       icon: Home },
+  { id: 'properties',  label: 'Properties', icon: LayoutGrid },
+  { id: 'tenants',     label: 'Tenants',    icon: Users },
+  { id: 'payments',    label: 'Payments',   icon: CreditCard },
+  { id: 'settings',    label: 'Settings',   icon: Settings },
 ];
 
 const staffNavItems = [
   { id: 'dashboard',     label: 'Home',       icon: Home },
-  { id: 'building-view', label: 'Building',   icon: Building2 },
+  { id: 'properties',    label: 'Properties', icon: LayoutGrid },
   { id: 'tenants',       label: 'Tenants',    icon: Users },
   { id: 'maintenance',   label: 'Repairs',    icon: Wrench },
   { id: 'tenant-portal', label: 'Portal',     icon: UserCircle },

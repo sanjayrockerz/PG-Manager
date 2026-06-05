@@ -11,7 +11,7 @@ import {
   AlertTriangle, Archive, ChevronRight, ChevronLeft,
   ReceiptText, Plus, Trash2, Printer, History,
   Upload, Eye, Download, Activity, CreditCard, X,
-  ImageIcon,
+  ImageIcon, Receipt,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useProperty } from '../contexts/PropertyContext';
@@ -25,11 +25,12 @@ import {
   archiveTenantRecord,
   updateTenantRecord,
 } from '../services/dataService';
-import type { TenantRecord, PaymentRecord, MaintenanceTicketRecord } from '../services/supabaseData';
+import type { TenantRecord, PaymentRecord, MaintenanceTicketRecord, AgreementRecord, TenantDocument } from '../services/supabaseData';
 import {
   TENANT_STATUS_LABELS,
   TENANT_STATUS_COLORS,
   isTenantCurrentlyInRoom,
+  supabaseLifecycleApi,
 } from '../services/supabaseData';
 import {
   type SettlementDeductionItem,
@@ -40,6 +41,7 @@ import {
   createDeductionItem,
 } from '../services/depositSettlementService';
 import { printAgreement, downloadAgreementHtml } from '../services/agreementService';
+import { openReceiptWindow } from '../services/receiptGenerator';
 
 interface TenantDetailProps {
   tenantId: string;
@@ -501,11 +503,77 @@ function VacateWorkflowModal({
   );
 }
 
-// ─── Agreement Generator ──────────────────────────────────────────────────────
+// ─── Agreement Tab ────────────────────────────────────────────────────────────
+
+const AGREEMENT_STATUS_LABELS: Record<string, string> = {
+  draft:                    'Draft',
+  pending_owner_signature:  'Awaiting Owner Signature',
+  pending_tenant_signature: 'Awaiting Tenant Signature',
+  executed:                 'Executed',
+  sent:                     'Sent',
+  signed:                   'Signed',
+  expired:                  'Expired',
+  archived:                 'Archived',
+  cancelled:                'Cancelled',
+};
+
+const AGREEMENT_STATUS_STYLE: Record<string, { bg: string; color: string }> = {
+  draft:                    { bg: '#F3F4F6', color: '#374151' },
+  pending_owner_signature:  { bg: '#FEF3C7', color: '#92400E' },
+  pending_tenant_signature: { bg: '#EFF6FF', color: '#1D4ED8' },
+  executed:                 { bg: '#ECFDF5', color: '#065F46' },
+  sent:                     { bg: '#EFF6FF', color: '#1D4ED8' },
+  signed:                   { bg: '#ECFDF5', color: '#065F46' },
+  expired:                  { bg: '#FEF2F2', color: '#991B1B' },
+  archived:                 { bg: '#F9FAFB', color: '#6B7280' },
+  cancelled:                { bg: '#FEF2F2', color: '#991B1B' },
+};
 
 function AgreementTab({ tenant, property }: { tenant: TenantRecord; property?: { name: string; address: string; city: string; state: string } | null }) {
   const [ownerName, setOwnerName] = useState('');
   const [ownerPhone, setOwnerPhone] = useState('');
+  const [agreements, setAgreements] = useState<AgreementRecord[]>([]);
+  const [agreementsLoading, setAgreementsLoading] = useState(false);
+  const [signModalOpen, setSignModalOpen] = useState(false);
+  const [signingAgreement, setSigningAgreement] = useState<AgreementRecord | null>(null);
+  const [signatureName, setSignatureName] = useState('');
+  const [signing, setSigning] = useState(false);
+  const isDemoMode = isDemoModeEnabled();
+
+  const loadAgreements = () => {
+    if (isDemoMode) return;
+    setAgreementsLoading(true);
+    supabaseLifecycleApi.getAgreements(tenant.id)
+      .then(setAgreements)
+      .catch(() => { /* table may not exist yet — graceful */ })
+      .finally(() => setAgreementsLoading(false));
+  };
+
+  useEffect(() => { loadAgreements(); }, [tenant.id, isDemoMode]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleOwnerSign = async () => {
+    if (!signingAgreement || !signatureName.trim()) {
+      toast.error('Please enter your full name to sign.');
+      return;
+    }
+    setSigning(true);
+    try {
+      const updated = await supabaseLifecycleApi.signAgreement({
+        agreementId: signingAgreement.id,
+        signatureName: signatureName.trim(),
+        role: 'owner',
+      });
+      setAgreements((prev) => prev.map((a) => a.id === updated.id ? updated : a));
+      setSignModalOpen(false);
+      setSigningAgreement(null);
+      setSignatureName('');
+      toast.success('Agreement signed. Tenant signature is now pending.');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Signing failed');
+    } finally {
+      setSigning(false);
+    }
+  };
 
   const agreementData = {
     tenant,
@@ -519,6 +587,91 @@ function AgreementTab({ tenant, property }: { tenant: TenantRecord; property?: {
 
   return (
     <div className="space-y-5">
+      {/* Stored agreements list */}
+      {!isDemoMode && (
+        <Card className="border-gray-200">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <FileText className="w-4 h-4 text-indigo-600" /> Stored Agreements
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {agreementsLoading ? (
+              <div className="flex items-center gap-2 py-4 text-sm text-gray-400">
+                <Loader2 className="w-4 h-4 animate-spin" /> Loading…
+              </div>
+            ) : agreements.length === 0 ? (
+              <p className="text-sm text-gray-400 py-4 text-center">
+                No stored agreements yet. Generate one below — it will be saved automatically.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {agreements.map((ag) => {
+                  const style = AGREEMENT_STATUS_STYLE[ag.status] ?? AGREEMENT_STATUS_STYLE.draft;
+                  const canOwnerSign = ag.status === 'draft' && !ag.isLocked;
+                  const isExecuted = ag.status === 'executed';
+                  return (
+                    <div key={ag.id} className="p-3 bg-gray-50 rounded-lg border border-gray-200 space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <p className="text-sm font-medium text-gray-900">
+                            {ag.agreementType === 'license' ? 'License Agreement' : ag.agreementType}
+                            {' · '}
+                            <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 99, background: style.bg, color: style.color }}>
+                              {AGREEMENT_STATUS_LABELS[ag.status] ?? ag.status}
+                            </span>
+                            {ag.isLocked && (
+                              <span style={{ fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 4, background: '#F0FDF4', color: '#166534', marginLeft: 6 }}>
+                                LOCKED
+                              </span>
+                            )}
+                          </p>
+                          <p className="text-xs text-gray-500 mt-0.5">
+                            Created {new Date(ag.createdAt).toLocaleDateString('en-IN')}
+                            {ag.startDate ? ` · Start: ${new Date(ag.startDate).toLocaleDateString('en-IN')}` : ''}
+                            {' · '}₹{ag.monthlyRent.toLocaleString('en-IN')}/mo · v{ag.version}
+                          </p>
+                          {ag.ownerSignatureName && (
+                            <p className="text-xs text-indigo-600 mt-0.5">Owner signed: {ag.ownerSignatureName} · {ag.ownerSignedAt ? new Date(ag.ownerSignedAt).toLocaleDateString('en-IN') : ''}</p>
+                          )}
+                          {ag.tenantSignatureName && (
+                            <p className="text-xs text-green-700 mt-0.5">Tenant signed: {ag.tenantSignatureName} · {ag.tenantSignedAt ? new Date(ag.tenantSignedAt).toLocaleDateString('en-IN') : ''}</p>
+                          )}
+                        </div>
+                        <div className="flex gap-1.5 flex-shrink-0 flex-wrap justify-end">
+                          {canOwnerSign && (
+                            <Button
+                              size="sm"
+                              className="h-7 text-xs gap-1 bg-indigo-600 hover:bg-indigo-700 text-white"
+                              onClick={() => { setSigningAgreement(ag); setSignatureName(''); setSignModalOpen(true); }}
+                            >
+                              Sign as Owner
+                            </Button>
+                          )}
+                          {ag.htmlContent && (
+                            <Button size="sm" variant="outline" className="h-7 text-xs gap-1"
+                              onClick={() => { const win = window.open('', '_blank', 'width=900,height=700'); if (win && ag.htmlContent) { win.document.write(ag.htmlContent); win.document.close(); } }}>
+                              <Eye className="w-3.5 h-3.5" /> View
+                            </Button>
+                          )}
+                          {ag.htmlContent && (
+                            <Button size="sm" variant="outline" className="h-7 text-xs gap-1"
+                              onClick={() => { const blob = new Blob([ag.htmlContent!], { type: 'text/html' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `agreement-${tenant.name.replace(/\s+/g, '-').toLowerCase()}${isExecuted ? '-executed' : ''}.html`; a.click(); URL.revokeObjectURL(url); }}>
+                              <Download className="w-3.5 h-3.5" /> {isExecuted ? 'Download' : 'Download'}
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Agreement generator */}
       <Card className="border-gray-200">
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -595,11 +748,60 @@ function AgreementTab({ tenant, property }: { tenant: TenantRecord; property?: {
 
           <div className="bg-blue-50 border border-blue-100 rounded-lg p-3">
             <p className="text-xs text-blue-700">
-              The agreement is generated from existing tenant data and standard PG terms. Both parties should sign printed copies. Keep one copy with records and give one to the tenant.
+              The agreement is generated from existing tenant data and standard PG terms. Use "Sign as Owner" on the saved agreement above to begin the signing workflow.
             </p>
           </div>
         </CardContent>
       </Card>
+
+      {/* Owner signing modal */}
+      {signModalOpen && signingAgreement && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 space-y-5">
+            <div>
+              <h3 className="text-lg font-bold text-gray-900">Sign Agreement as Owner</h3>
+              <p className="text-sm text-gray-500 mt-1">
+                Type your full legal name to apply your signature. This action cannot be undone.
+              </p>
+            </div>
+
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+              <p className="text-xs text-amber-800 font-medium">
+                By signing, you confirm that all agreement details are correct and legally binding. Tenant will be notified to review and sign.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-semibold text-gray-700">Full Name (as signature)</label>
+              <input
+                type="text"
+                value={signatureName}
+                onChange={(e) => setSignatureName(e.target.value)}
+                placeholder="Type your full legal name"
+                className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm font-medium italic focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                autoFocus
+              />
+              {signatureName && (
+                <p className="text-xs text-gray-500 mt-1 font-serif italic text-xl text-gray-700 pl-1">{signatureName}</p>
+              )}
+            </div>
+
+            <div className="flex gap-3">
+              <Button variant="outline" className="flex-1" onClick={() => { setSignModalOpen(false); setSigningAgreement(null); setSignatureName(''); }}>
+                Cancel
+              </Button>
+              <Button
+                className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white gap-2"
+                onClick={() => void handleOwnerSign()}
+                disabled={signing || !signatureName.trim()}
+              >
+                {signing ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                {signing ? 'Signing…' : 'Apply Signature'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -631,7 +833,7 @@ function ActivityTimeline({
     date: tenant.joinDate,
     type: 'joined',
     title: 'Tenant moved in',
-    detail: `Joined ${tenant.pgName ?? ''} · Room ${tenant.room}${tenant.bed ? ` · Bed ${tenant.bed}` : ''}`,
+    detail: `Room ${tenant.room}${tenant.bed ? ` · Bed ${tenant.bed}` : ''}`,
   });
 
   // Payment events
@@ -876,125 +1078,215 @@ function IdProofSection({
 
 // ─── Document Vault ───────────────────────────────────────────────────────────
 
-interface DocumentItem {
-  name: string;
-  label: string;
-  url: string | null | undefined;
-  category: 'id' | 'photo' | 'agreement' | 'other';
+const DOC_TYPE_LABELS: Record<string, string> = {
+  aadhaar_front:   'Aadhaar (Front)',
+  aadhaar_back:    'Aadhaar (Back)',
+  pan:             'PAN Card',
+  passport:        'Passport',
+  driving_license: 'Driving License',
+  photo:           'Profile Photo',
+  other:           'Other Document',
+};
+
+const DOC_GROUP_ORDER = ['id_proof', 'agreement', 'receipt', 'other'] as const;
+const DOC_GROUP_LABELS: Record<string, string> = {
+  id_proof:  'ID Proofs',
+  agreement: 'Agreements',
+  receipt:   'Receipts',
+  other:     'Other Documents',
+};
+
+function docGroup(docType: string): string {
+  if (['aadhaar_front', 'aadhaar_back', 'pan', 'passport', 'driving_license', 'photo'].includes(docType)) return 'id_proof';
+  if (docType === 'agreement') return 'agreement';
+  if (docType === 'receipt') return 'receipt';
+  return 'other';
 }
+
+const DOC_UPLOAD_TYPES = [
+  { value: 'aadhaar_front', label: 'Aadhaar (Front)' },
+  { value: 'aadhaar_back',  label: 'Aadhaar (Back)' },
+  { value: 'pan',           label: 'PAN Card' },
+  { value: 'passport',      label: 'Passport' },
+  { value: 'driving_license', label: 'Driving License' },
+  { value: 'other',         label: 'Other Document' },
+] as const;
 
 function DocumentVaultTab({ tenant }: { tenant: TenantRecord }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isDemoMode = isDemoModeEnabled();
+  const [docs, setDocs] = useState<TenantDocument[]>([]);
+  const [docsLoading, setDocsLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadDocType, setUploadDocType] = useState<string>('aadhaar_front');
 
-  const documents: DocumentItem[] = [
-    { name: 'ID Document', label: `${tenant.idType || 'ID'} · ${tenant.idNumber || '—'}`, url: tenant.idDocumentUrl, category: 'id' },
-    { name: 'Profile Photo', label: 'Tenant photo', url: tenant.photoUrl, category: 'photo' },
-  ];
-
-  const existing = documents.filter((d) => d.url);
-  const missing = documents.filter((d) => !d.url);
-
-  const handleUploadClick = () => {
-    if (isDemoMode) {
-      toast.info('Document upload is available in live mode. Connect Supabase to enable.');
-      return;
+  const loadDocs = async () => {
+    if (isDemoMode) return;
+    setDocsLoading(true);
+    try {
+      const result = await supabaseLifecycleApi.getTenantDocuments(tenant.id);
+      setDocs(result);
+    } catch {
+      // table may not be migrated yet
+    } finally {
+      setDocsLoading(false);
     }
-    fileInputRef.current?.click();
   };
 
+  useEffect(() => { void loadDocs(); }, [tenant.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) { toast.error('File must be under 10 MB.'); return; }
+    if (isDemoMode) { toast.info('Document upload is available in live mode.'); return; }
+    setUploading(true);
+    try {
+      const uploaded = await supabaseLifecycleApi.uploadTenantDocument({
+        tenantId: tenant.id,
+        docType: uploadDocType,
+        label: DOC_TYPE_LABELS[uploadDocType] ?? uploadDocType,
+        file,
+      });
+      setDocs((prev) => [...prev, uploaded]);
+      toast.success('Document uploaded successfully.');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Upload failed.');
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const handleDeleteDoc = async (docId: string) => {
+    if (isDemoMode) return;
+    try {
+      await supabaseLifecycleApi.deleteTenantDocument(docId);
+      setDocs((prev) => prev.filter((d) => d.id !== docId));
+      toast.success('Document removed.');
+    } catch {
+      toast.error('Failed to remove document.');
+    }
+  };
+
+  // Static docs from tenant profile (id proof + photo)
+  const staticDocs: Array<{ name: string; url: string; docType: string }> = [];
+  if (tenant.idDocumentUrl) staticDocs.push({ name: `${tenant.idType || 'ID'} · ${tenant.idNumber || ''}`, url: tenant.idDocumentUrl, docType: 'aadhaar_front' });
+  if (tenant.photoUrl) staticDocs.push({ name: 'Profile Photo', url: tenant.photoUrl, docType: 'photo' });
+
+  // Group uploaded documents
+  const grouped = new Map<string, TenantDocument[]>();
+  for (const g of DOC_GROUP_ORDER) grouped.set(g, []);
+  for (const doc of docs) {
+    const g = docGroup(doc.docType);
+    grouped.get(g)?.push(doc);
+  }
+
+  const totalDocs = docs.length + staticDocs.length;
+
   return (
-    <div className="space-y-4">
-      {/* Upload prompt */}
-      <div
-        className="border-2 border-dashed border-gray-200 rounded-xl p-6 text-center cursor-pointer hover:border-indigo-300 hover:bg-indigo-50/30 transition-all"
-        onClick={handleUploadClick}
-      >
-        <Upload className="w-8 h-8 text-gray-300 mx-auto mb-2" />
-        <p className="text-sm font-medium text-gray-600">Upload Documents</p>
-        <p className="text-xs text-gray-400 mt-1">Aadhaar, Passport, ID proof, agreements…</p>
-        {isDemoMode && (
-          <span className="mt-2 inline-block text-xs text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded-full">
-            Live mode only
-          </span>
-        )}
-        <input ref={fileInputRef} type="file" className="hidden" multiple accept="image/*,.pdf" />
-      </div>
-
-      {/* Existing documents */}
-      {existing.length > 0 && (
-        <>
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Uploaded Documents</p>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {existing.map((doc) => (
-              <Card key={doc.name} className="border-gray-200 hover:shadow-md transition-shadow">
-                <CardContent className="p-4">
-                  <div className="flex items-start gap-3">
-                    <div className="p-2.5 bg-purple-100 rounded-lg flex-shrink-0">
-                      <FileText className="w-5 h-5 text-purple-600" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-semibold text-gray-900 text-sm">{doc.name}</h3>
-                      <p className="text-xs text-gray-500 truncate mt-0.5">{doc.label}</p>
-                    </div>
-                  </div>
-                  <div className="flex gap-2 mt-3">
-                    <Button
-                      size="sm"
-                      className="flex-1 bg-[#4F46E5] hover:bg-[#4338CA] text-white h-8 text-xs gap-1"
-                      onClick={() => window.open(doc.url!, '_blank')}
-                    >
-                      <Eye className="w-3.5 h-3.5" /> View
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-8 text-xs gap-1"
-                      onClick={() => {
-                        const a = document.createElement('a');
-                        a.href = doc.url!;
-                        a.download = doc.name;
-                        a.click();
-                      }}
-                    >
-                      <Download className="w-3.5 h-3.5" />
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+    <div className="space-y-5">
+      {/* Upload area */}
+      <Card className="border-gray-200">
+        <CardContent className="p-4">
+          <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center mb-3">
+            <select
+              value={uploadDocType}
+              onChange={(e) => setUploadDocType(e.target.value)}
+              className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+            >
+              {DOC_UPLOAD_TYPES.map((t) => (
+                <option key={t.value} value={t.value}>{t.label}</option>
+              ))}
+            </select>
+            <button
+              disabled={uploading}
+              onClick={() => {
+                if (isDemoMode) { toast.info('Document upload is available in live mode.'); return; }
+                fileInputRef.current?.click();
+              }}
+              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium disabled:opacity-50 transition-colors"
+            >
+              {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+              {uploading ? 'Uploading…' : 'Upload Document'}
+            </button>
+            {isDemoMode && <span className="text-xs text-indigo-500 bg-indigo-50 px-2 py-1 rounded-full">Live mode only</span>}
           </div>
-        </>
-      )}
+          <p className="text-xs text-gray-400">Accepted: JPG, PNG, PDF · Max 10 MB</p>
+          <input ref={fileInputRef} type="file" className="hidden" accept="image/*,.pdf" onChange={(e) => void handleFileChange(e)} />
+        </CardContent>
+      </Card>
 
-      {/* Missing documents */}
-      {missing.length > 0 && (
-        <>
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Pending Upload</p>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-            {missing.map((doc) => (
-              <div
-                key={doc.name}
-                className="border border-dashed border-gray-200 rounded-lg p-4 flex items-center gap-3 opacity-60 cursor-pointer hover:opacity-80 transition-opacity"
-                onClick={handleUploadClick}
-              >
-                <div className="p-2 bg-gray-100 rounded-lg">
-                  <FileText className="w-4 h-4 text-gray-400" />
+      {/* Static profile documents */}
+      {staticDocs.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">From Tenant Profile</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {staticDocs.map((doc) => (
+              <div key={doc.name} className="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="p-2 bg-indigo-100 rounded-lg flex-shrink-0"><FileText className="w-4 h-4 text-indigo-600" /></div>
+                  <p className="text-sm font-medium text-gray-900 truncate">{doc.name}</p>
                 </div>
-                <div>
-                  <p className="text-sm font-medium text-gray-600">{doc.name}</p>
-                  <p className="text-xs text-gray-400">Not uploaded yet</p>
+                <div className="flex gap-1.5">
+                  <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => window.open(doc.url, '_blank')}>
+                    <Eye className="w-3.5 h-3.5" /> View
+                  </Button>
+                  <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => { const a = document.createElement('a'); a.href = doc.url; a.download = doc.name; a.click(); }}>
+                    <Download className="w-3.5 h-3.5" />
+                  </Button>
                 </div>
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* Grouped uploaded documents */}
+      {docsLoading ? (
+        <div className="flex items-center gap-2 py-4 text-sm text-gray-400"><Loader2 className="w-4 h-4 animate-spin" /> Loading documents…</div>
+      ) : (
+        <>
+          {DOC_GROUP_ORDER.map((group) => {
+            const groupDocs = grouped.get(group) ?? [];
+            if (groupDocs.length === 0) return null;
+            return (
+              <div key={group}>
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">{DOC_GROUP_LABELS[group]}</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {groupDocs.map((doc) => (
+                    <div key={doc.id} className="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="p-2 bg-purple-100 rounded-lg flex-shrink-0"><FileText className="w-4 h-4 text-purple-600" /></div>
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-gray-900 truncate">{doc.label || DOC_TYPE_LABELS[doc.docType] || doc.docType}</p>
+                          <p className="text-xs text-gray-400">{new Date(doc.createdAt).toLocaleDateString('en-IN')}</p>
+                        </div>
+                      </div>
+                      <div className="flex gap-1.5">
+                        <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => window.open(doc.fileUrl, '_blank')}>
+                          <Eye className="w-3.5 h-3.5" /> View
+                        </Button>
+                        <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => { const a = document.createElement('a'); a.href = doc.fileUrl; a.download = doc.label || doc.docType; a.click(); }}>
+                          <Download className="w-3.5 h-3.5" />
+                        </Button>
+                        <Button size="sm" variant="outline" className="h-7 text-xs text-red-500 hover:bg-red-50" onClick={() => void handleDeleteDoc(doc.id)}>
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
         </>
       )}
 
-      {existing.length === 0 && missing.length === 0 && (
+      {totalDocs === 0 && !docsLoading && (
         <div className="text-center py-8 text-gray-400">
           <FileText className="w-10 h-10 mx-auto mb-2 opacity-20" />
-          <p className="text-sm">No documents configured</p>
+          <p className="text-sm">No documents uploaded yet</p>
         </div>
       )}
     </div>
@@ -1053,7 +1345,7 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
 
   useRealtimeRefresh({
     key: `tenant-detail-${tenantId}`,
-    tables: ['tenants', 'payments', 'maintenance_tickets'],
+    tables: ['tenants', 'payments', 'maintenance_tickets', 'agreements', 'tenant_documents'],
     onChange: () => void load(),
     enabled: !isDemoModeEnabled(),
   });
@@ -1236,6 +1528,9 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
           <TabsTrigger value="documents" className="data-[state=active]:bg-[#4F46E5] data-[state=active]:text-white">
             <FileText className="w-4 h-4 mr-1.5" /> Documents
           </TabsTrigger>
+          <TabsTrigger value="receipts" className="data-[state=active]:bg-[#4F46E5] data-[state=active]:text-white">
+            <Receipt className="w-4 h-4 mr-1.5" /> Receipts
+          </TabsTrigger>
           <TabsTrigger value="agreement" className="data-[state=active]:bg-[#4F46E5] data-[state=active]:text-white">
             <ReceiptText className="w-4 h-4 mr-1.5" /> Agreement
           </TabsTrigger>
@@ -1355,19 +1650,39 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <IdProofSection tenant={tenant} onUpdate={(updated) => setTenant(updated)} />
 
-            <Card className="border-gray-200">
-              <CardHeader><CardTitle className="text-base">Guardian / Emergency Contact</CardTitle></CardHeader>
-              <CardContent className="space-y-3 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Name</span>
-                  <span className="font-semibold text-gray-900">{tenant.parentName || '—'}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-gray-600">Phone</span>
-                  <span className="font-semibold text-gray-900">{tenant.parentPhone || '—'}</span>
-                </div>
-              </CardContent>
-            </Card>
+            <div className="space-y-4">
+              <Card className="border-gray-200">
+                <CardHeader><CardTitle className="text-base">Personal Details</CardTitle></CardHeader>
+                <CardContent className="space-y-3 text-sm">
+                  {[
+                    ['Date of Birth', tenant.dob ? new Date(tenant.dob).toLocaleDateString('en-IN') : '—'],
+                    ['Gender', tenant.gender || '—'],
+                    ['Alternate Phone', tenant.alternatePhone || '—'],
+                  ].map(([label, value]) => (
+                    <div key={label} className="flex justify-between">
+                      <span className="text-gray-600">{label}</span>
+                      <span className="font-semibold text-gray-900">{String(value)}</span>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+
+              <Card className="border-gray-200">
+                <CardHeader><CardTitle className="text-base">Guardian / Emergency Contact</CardTitle></CardHeader>
+                <CardContent className="space-y-3 text-sm">
+                  {[
+                    ['Name', tenant.parentName || '—'],
+                    ['Relationship', tenant.guardianRelationship || '—'],
+                    ['Phone', tenant.parentPhone || '—'],
+                  ].map(([label, value]) => (
+                    <div key={label} className="flex justify-between">
+                      <span className="text-gray-600">{label}</span>
+                      <span className="font-semibold text-gray-900">{String(value)}</span>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            </div>
           </div>
         </TabsContent>
 
@@ -1376,7 +1691,45 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
           <DocumentVaultTab tenant={tenant} />
         </TabsContent>
 
-        {/* Agreement tab */}
+        {/* Receipts tab */}
+        <TabsContent value="receipts">
+          <Card className="border-gray-200">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <ReceiptText className="w-4 h-4 text-indigo-600" /> Payment Receipts
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {payments.filter((p) => p.status === 'paid').length === 0 ? (
+                <p className="text-center py-8 text-gray-400 text-sm">No receipts yet — receipts are generated when payments are marked as paid</p>
+              ) : (
+                <div className="space-y-2">
+                  {payments.filter((p) => p.status === 'paid').map((p) => (
+                    <div key={p.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">
+                          {new Date(p.dueDate).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          ₹{p.totalAmount.toLocaleString('en-IN')} · Paid {p.paidDate ? new Date(p.paidDate).toLocaleDateString('en-IN') : '—'}
+                        </p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs gap-1"
+                        onClick={() => openReceiptWindow({ payment: p, propertyName: property?.name ?? '' })}
+                      >
+                        <Printer className="w-3.5 h-3.5" /> Receipt
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
         <TabsContent value="agreement">
           <AgreementTab tenant={tenant} property={property} />
         </TabsContent>

@@ -1,7 +1,7 @@
 import {
   Activity, Bell, CreditCard, Home, LayoutGrid, LifeBuoy,
   LogOut, Settings, Shield, Users, Wrench, X,
-  ChevronRight, Zap, UserCog, Building2,
+  ChevronRight, Zap, UserCog,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { isPlatformAdminRole } from '../utils/roles';
@@ -24,9 +24,8 @@ const ownerSections: { title: string; items: NavItem[] }[] = [
     title: 'Management',
     items: [
       { id: 'dashboard',    label: 'Dashboard',    icon: Home },
-      { id: 'properties',     label: 'Properties',     icon: LayoutGrid },
-      { id: 'building-view', label: 'Building View', icon: Building2 },
-      { id: 'tenants',       label: 'Tenants',        icon: Users },
+      { id: 'properties',   label: 'Properties',   icon: LayoutGrid },
+      { id: 'tenants',      label: 'Tenants',       icon: Users },
     ],
   },
   {
@@ -88,7 +87,6 @@ export function Sidebar({
     ...section,
     items: section.items.filter((item) => {
       switch (item.id) {
-        case 'building-view':
         case 'properties':    return hasPermission(userRole, 'page:properties');
         case 'tenants':       return hasPermission(userRole, 'page:tenants');
         case 'payments':      return hasPermission(userRole, 'page:payments');
@@ -118,7 +116,6 @@ export function Sidebar({
   const NavBtn = ({ item }: { item: NavItem }) => {
     const Icon = item.icon;
     const isActive = activeTab === item.id;
-    const isBuildingView = item.id === 'building-view';
     return (
       <div className="relative group/nav">
         <button
@@ -127,24 +124,15 @@ export function Sidebar({
           style={{ width: '100%' }}
           title={sidebarCollapsed ? item.label : undefined}
         >
-          {isBuildingView && !isActive ? (
-            <div
-              className="flex-shrink-0 flex items-center justify-center rounded-md"
-              style={{ width: 20, height: 20, background: '#EEF2FF' }}
-            >
-              <Icon style={{ width: 12, height: 12, strokeWidth: 2, color: '#6366F1' }} />
-            </div>
-          ) : (
-            <Icon
-              className="flex-shrink-0"
-              style={{
-                width: 15,
-                height: 15,
-                strokeWidth: isActive ? 2 : 1.75,
-                color: isActive ? 'var(--ds-accent)' : 'var(--ds-text-3)',
-              }}
-            />
-          )}
+          <Icon
+            className="flex-shrink-0"
+            style={{
+              width: 15,
+              height: 15,
+              strokeWidth: isActive ? 2 : 1.75,
+              color: isActive ? 'var(--ds-accent)' : 'var(--ds-text-3)',
+            }}
+          />
           {!sidebarCollapsed && (
             <span style={{ fontSize: 13, letterSpacing: '-0.01em' }}>{item.label}</span>
           )}

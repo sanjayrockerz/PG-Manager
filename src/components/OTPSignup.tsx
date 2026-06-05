@@ -34,6 +34,23 @@ export function OTPSignup({ onSwitchToLogin }: OTPSignupProps) {
     }
   }, [authError]);
 
+  // Capture UTM parameters from URL into localStorage so they can be persisted
+  // to the lead_sources table when the account is created.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const utm: Record<string, string> = {};
+    ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content'].forEach((key) => {
+      const val = params.get(key);
+      if (val) utm[key] = val;
+    });
+    utm.referrer_url = document.referrer || '';
+    utm.landing_page = window.location.pathname + window.location.search;
+    try {
+      localStorage.setItem('rentcare:signup_utm', JSON.stringify(utm));
+    } catch { /* storage may not be available */ }
+  }, []);
+
   const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 
   const validateDetails = (): string => {

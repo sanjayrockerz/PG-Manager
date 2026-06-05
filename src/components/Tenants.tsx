@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRealtimeRefresh } from '../hooks/useRealtimeRefresh';
 import {
-  Plus, Search, Eye, Edit, Trash, User, Phone, MapPin,
+  Plus, Search, Eye, Edit, Trash, Phone, MapPin,
   IndianRupee, CheckCircle, XCircle, Save, AlertTriangle,
   Bed, FileText, Loader2, Calendar, Upload, Download,
-  Clock, AlertCircle, Users,
+  Clock, AlertCircle, Users, ShieldAlert, ChevronRight,
 } from 'lucide-react';
+import { validateTenantForm, type TenantFormErrors } from '../utils/validation';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
@@ -19,6 +20,8 @@ import {
   AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from './ui/alert-dialog';
+import { Sheet, SheetContent } from './ui/sheet';
+import { TenantDetail } from './TenantDetail';
 import { toast } from 'sonner';
 import { useProperty } from '../contexts/PropertyContext';
 import {
@@ -35,23 +38,47 @@ interface TenantsProps {
 }
 
 const makeEmptyForm = (defaultPropertyId = ''): TenantCreateInput => ({
-  name: '', phone: '', email: '', propertyId: defaultPropertyId,
-  floor: 1, room: '', bed: '', monthlyRent: 0, securityDeposit: 0,
-  rentDueDate: 1, parentName: '', parentPhone: '', idType: 'Aadhaar', idNumber: '',
+  name: '', phone: '', alternatePhone: '', email: '',
+  dob: '', gender: '',
+  propertyId: defaultPropertyId,
+  floor: 1, room: '', bed: '',
+  monthlyRent: 0, securityDeposit: 0,
+  rentDueDate: 1, billingCycle: 'monthly',
+  parentName: '', parentPhone: '', guardianRelationship: 'parent',
+  idType: 'Aadhaar', idNumber: '',
   joinDate: new Date().toISOString().split('T')[0], status: 'active',
 });
 
 const fmt = (n: number) => `₹${n.toLocaleString('en-IN')}`;
 
-function StatusChip({ status, joinDate }: { status: TenantStatus; joinDate?: string }) {
-  const daysSinceJoin = joinDate ? Math.floor((Date.now() - new Date(joinDate).getTime()) / 86400000) : null;
+function computeDaysOverdue(rentDueDate: number): number {
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  const thisMonth = new Date(now.getFullYear(), now.getMonth(), rentDueDate);
+  if (thisMonth <= now) return Math.floor((now.getTime() - thisMonth.getTime()) / 86400000);
+  const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, rentDueDate);
+  return Math.floor((now.getTime() - lastMonth.getTime()) / 86400000);
+}
+
+function StatusChip({ status, rentDueDate, vacateDate }: { status: TenantStatus; rentDueDate?: number; vacateDate?: string }) {
+  const daysOverdue = status === 'payment_overdue' && rentDueDate ? computeDaysOverdue(rentDueDate) : null;
+  const daysUntilVacate = vacateDate ? Math.ceil((new Date(vacateDate).getTime() - Date.now()) / 86400000) : null;
   return (
-    <div className="flex items-center gap-1.5">
-      <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${TENANT_STATUS_COLORS[status] ?? 'bg-gray-100 text-gray-600'}`}>
-        {TENANT_STATUS_LABELS[status] ?? status}
-      </span>
-      {status === 'payment_overdue' && daysSinceJoin !== null && (
-        <span style={{ fontSize: 10, color: '#991B1B', fontWeight: 600 }}>!</span>
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center gap-1.5">
+        <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${TENANT_STATUS_COLORS[status] ?? 'bg-gray-100 text-gray-600'}`}>
+          {TENANT_STATUS_LABELS[status] ?? status}
+        </span>
+        {daysOverdue !== null && daysOverdue > 0 && (
+          <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 5px', borderRadius: 99, background: '#FEF2F2', color: '#991B1B', border: '1px solid #FECACA' }}>
+            {daysOverdue}d
+          </span>
+        )}
+      </div>
+      {(status === 'notice_submitted' || status === 'vacating') && daysUntilVacate !== null && (
+        <span style={{ fontSize: 10, color: '#92400E' }}>
+          {daysUntilVacate > 0 ? `Move-out in ${daysUntilVacate}d` : 'Move-out today'}
+        </span>
       )}
     </div>
   );
@@ -72,11 +99,14 @@ export function Tenants({ onViewTenant }: TenantsProps) {
   const [importFile, setImportFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Add modal — simplified 3-step: Basic → Room+Finances → Review
+  // Add modal — 3-step: Identity → Room+Finances → Guardian+Review
   const [addOpen, setAddOpen] = useState(false);
   const [addStep, setAddStep] = useState(1);
   const [addForm, setAddForm] = useState<TenantCreateInput>(() => makeEmptyForm(properties[0]?.id));
+  const [addErrors, setAddErrors] = useState<TenantFormErrors>({});
   const [addLoading, setAddLoading] = useState(false);
+  const [idDocFile, setIdDocFile] = useState<File | null>(null);
+  const idDocInputRef = useRef<HTMLInputElement>(null);
 
   // Edit modal
   const [editOpen, setEditOpen] = useState(false);
@@ -89,9 +119,11 @@ export function Tenants({ onViewTenant }: TenantsProps) {
   const [deletingTenant, setDeletingTenant] = useState<TenantRecord | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
-  // View modal
-  const [viewOpen, setViewOpen] = useState(false);
-  const [viewingTenant, setViewingTenant] = useState<TenantRecord | null>(null);
+  // Tenant detail drawer
+  const [drawerTenantId, setDrawerTenantId] = useState<string | null>(null);
+
+  // Bulk select
+  const [selectedTenantIds, setSelectedTenantIds] = useState<Set<string>>(new Set());
 
   const getPropertyName = (propertyId: string) =>
     properties.find((p) => p.id === propertyId)?.name ?? propertyId;
@@ -181,18 +213,27 @@ export function Tenants({ onViewTenant }: TenantsProps) {
   };
 
   const handleAdd = async () => {
-    if (!addForm.name || !addForm.email || !addForm.phone || !addForm.propertyId || !addForm.room) {
-      toast.error('Please fill all required fields');
+    const allErrs = validateTenantForm(addForm as Parameters<typeof validateTenantForm>[0]);
+    if (Object.keys(allErrs).length > 0) {
+      setAddErrors(allErrs);
+      toast.error('Please fix the highlighted fields');
       return;
     }
     setAddLoading(true);
     try {
-      const created = await createTenantRecord(addForm);
+      const created = await createTenantRecord({ ...addForm, idDocument: idDocFile ?? undefined });
       setTenants((prev) => [created, ...prev]);
       setAddOpen(false);
       setAddStep(1);
+      setAddErrors({});
       setAddForm(makeEmptyForm(properties[0]?.id));
-      toast.success('Tenant added successfully!');
+      setIdDocFile(null);
+      // Show access instructions — tenant must self-register using their registered email/phone
+      const appUrl = window.location.origin;
+      toast.success(
+        `Tenant added! Share this link with ${created.name} to set up their portal account: ${appUrl}`,
+        { duration: 8000 },
+      );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to add tenant');
     } finally {
@@ -229,6 +270,19 @@ export function Tenants({ onViewTenant }: TenantsProps) {
     }
   };
 
+  const handleBulkMarkOverdue = async () => {
+    const toUpdate = [...selectedTenantIds];
+    setSelectedTenantIds(new Set());
+    try {
+      await Promise.all(toUpdate.map((id) => updateTenantRecord(id, { status: 'payment_overdue' })));
+      await loadTenants();
+      toast.success(`${toUpdate.length} tenant${toUpdate.length > 1 ? 's' : ''} marked as overdue`);
+    } catch {
+      toast.error('Some updates failed');
+      await loadTenants();
+    }
+  };
+
   const handleDelete = async () => {
     if (!deletingTenant) return;
     setDeleteLoading(true);
@@ -245,114 +299,455 @@ export function Tenants({ onViewTenant }: TenantsProps) {
     }
   };
 
+  // ── Add wizard helpers ─────────────────────
+  const selectedPropertyForAdd = properties.find((p) => p.id === addForm.propertyId);
+  const occupancyMode = selectedPropertyForAdd?.occupancyMode ?? 'BED_BASED';
+  const availableRooms = selectedPropertyForAdd?.rooms ?? [];
+  const selectedRoom = availableRooms.find((r) => r.number === addForm.room);
+  const availableBeds = selectedRoom
+    ? Array.from({ length: selectedRoom.beds }, (_, i) => String(i + 1))
+    : [];
+
+  const fieldClass = (err?: string) =>
+    `w-full h-10 px-3 text-sm rounded-md border transition-colors focus:outline-none focus:ring-2 focus:ring-purple-400/30 focus:border-purple-500
+     ${err ? 'border-red-400 bg-red-50' : 'border-gray-300 bg-white'}`;
+
+  const selectClass = (err?: string) =>
+    `w-full h-10 px-3 text-sm rounded-md border transition-colors focus:outline-none focus:ring-2 focus:ring-purple-400/30 focus:border-purple-500 appearance-none
+     ${err ? 'border-red-400 bg-red-50' : 'border-gray-300 bg-white'}`;
+
+  const FieldError = ({ msg }: { msg?: string }) =>
+    msg ? <p className="text-xs text-red-600 font-medium mt-1">{msg}</p> : null;
+
+  const WizardStepIndicator = () => (
+    <div className="flex items-center gap-0 mb-4">
+      {(['Basic', 'Guardian', 'Accommodation', 'Review'] as const).map((label, i) => {
+        const step = i + 1;
+        const active = addStep === step;
+        const done = addStep > step;
+        return (
+          <div key={label} className="flex items-center flex-1">
+            <div className={`flex items-center gap-1 ${active ? 'text-indigo-600' : done ? 'text-emerald-600' : 'text-gray-400'}`}>
+              <div className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0
+                ${active ? 'bg-indigo-600 text-white' : done ? 'bg-emerald-500 text-white' : 'bg-gray-200 text-gray-500'}`}>
+                {done ? '✓' : step}
+              </div>
+              <span className="text-xs font-medium whitespace-nowrap hidden sm:inline">{label}</span>
+            </div>
+            {i < 3 && <div className={`flex-1 h-px mx-1.5 ${done ? 'bg-emerald-400' : 'bg-gray-200'}`} />}
+          </div>
+        );
+      })}
+    </div>
+  );
+
   // ── Add wizard steps ──────────────────────
   const renderAddStep = () => {
     switch (addStep) {
       case 1:
         return (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <p style={{ fontSize: 13, fontWeight: 600, color: '#0A0A0B' }}>Basic Information</p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <Label style={{ fontSize: 12, fontWeight: 600 }}>Full Name *</Label>
-              <Input placeholder="e.g., Amit Kumar" value={addForm.name} onChange={(e) => setAddForm({ ...addForm, name: e.target.value })} style={{ height: 40 }} />
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <Label style={{ fontSize: 12, fontWeight: 600 }}>Phone *</Label>
-              <InternationalPhoneField value={addForm.phone} onChange={(v) => setAddForm({ ...addForm, phone: v })} required placeholder="9876543210" />
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <Label style={{ fontSize: 12, fontWeight: 600 }}>Email *</Label>
-              <Input type="email" placeholder="amit@example.com" value={addForm.email} onChange={(e) => setAddForm({ ...addForm, email: e.target.value })} style={{ height: 40 }} />
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <Label style={{ fontSize: 12, fontWeight: 600 }}>Join Date</Label>
-              <Input type="date" value={addForm.joinDate} onChange={(e) => setAddForm({ ...addForm, joinDate: e.target.value })} style={{ height: 40 }} />
-            </div>
-          </div>
-        );
+          <div className="flex flex-col gap-3.5">
+            <WizardStepIndicator />
+            <p className="text-sm font-semibold text-gray-900">Basic Info</p>
 
-      case 2:
-        return (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            <p style={{ fontSize: 13, fontWeight: 600, color: '#0A0A0B' }}>Room & Financials</p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <Label style={{ fontSize: 12, fontWeight: 600 }}>Property *</Label>
-              <select
-                value={addForm.propertyId}
-                onChange={(e) => setAddForm({ ...addForm, propertyId: e.target.value })}
-                style={{ width: '100%', height: 40, padding: '0 10px', border: '1px solid #E4E4E7', borderRadius: 8, fontSize: 13, color: '#0A0A0B', background: '#fff' }}
-              >
-                <option value="">Select a property</option>
-                {properties.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
+            <div className="flex flex-col gap-1">
+              <Label className="text-xs font-semibold">Full Name <span className="text-red-500">*</span></Label>
+              <Input
+                className={fieldClass(addErrors.name)}
+                placeholder="e.g., Amit Kumar"
+                value={addForm.name}
+                onChange={(e) => { setAddForm({ ...addForm, name: e.target.value }); setAddErrors((prev) => ({ ...prev, name: undefined })); }}
+              />
+              <FieldError msg={addErrors.name} />
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <Label style={{ fontSize: 12, fontWeight: 600 }}>Floor</Label>
-                <Input type="number" min="0" value={addForm.floor} onChange={(e) => setAddForm({ ...addForm, floor: parseInt(e.target.value) || 0 })} style={{ height: 40 }} />
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <Label style={{ fontSize: 12, fontWeight: 600 }}>Room *</Label>
-                <Input placeholder="e.g., 301" value={addForm.room} onChange={(e) => setAddForm({ ...addForm, room: e.target.value })} style={{ height: 40 }} />
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <Label style={{ fontSize: 12, fontWeight: 600 }}>Bed</Label>
-                <Input placeholder="e.g., A" value={addForm.bed} onChange={(e) => setAddForm({ ...addForm, bed: e.target.value })} style={{ height: 40 }} />
-              </div>
+
+            <InternationalPhoneField
+              label="Phone"
+              required
+              value={addForm.phone}
+              onChange={(v) => { setAddForm({ ...addForm, phone: v }); setAddErrors((prev) => ({ ...prev, phone: undefined })); }}
+              invalid={Boolean(addErrors.phone)}
+              errorText={addErrors.phone}
+            />
+
+            <InternationalPhoneField
+              label="Alternate Phone"
+              value={addForm.alternatePhone ?? ''}
+              onChange={(v) => setAddForm({ ...addForm, alternatePhone: v })}
+            />
+
+            <div className="flex flex-col gap-1">
+              <Label className="text-xs font-semibold">Email <span className="text-red-500">*</span></Label>
+              <Input
+                type="email"
+                className={fieldClass(addErrors.email)}
+                placeholder="amit@example.com"
+                value={addForm.email}
+                onChange={(e) => { setAddForm({ ...addForm, email: e.target.value }); setAddErrors((prev) => ({ ...prev, email: undefined })); }}
+              />
+              <FieldError msg={addErrors.email} />
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <Label style={{ fontSize: 12, fontWeight: 600 }}>Monthly Rent (₹) *</Label>
-                <Input type="number" placeholder="8000" value={addForm.monthlyRent || ''} onChange={(e) => setAddForm({ ...addForm, monthlyRent: parseInt(e.target.value) || 0 })} style={{ height: 40 }} />
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1">
+                <Label className="text-xs font-semibold">Date of Birth</Label>
+                <Input
+                  type="date"
+                  className={fieldClass()}
+                  value={addForm.dob ?? ''}
+                  onChange={(e) => setAddForm({ ...addForm, dob: e.target.value })}
+                />
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <Label style={{ fontSize: 12, fontWeight: 600 }}>Security Deposit (₹)</Label>
-                <Input type="number" placeholder="16000" value={addForm.securityDeposit || ''} onChange={(e) => setAddForm({ ...addForm, securityDeposit: parseInt(e.target.value) || 0 })} style={{ height: 40 }} />
-              </div>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <Label style={{ fontSize: 12, fontWeight: 600 }}>Due Day (1–28)</Label>
-                <Input type="number" min="1" max="28" placeholder="1" value={addForm.rentDueDate || ''} onChange={(e) => setAddForm({ ...addForm, rentDueDate: parseInt(e.target.value) || 1 })} style={{ height: 40 }} />
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <Label style={{ fontSize: 12, fontWeight: 600 }}>Status</Label>
+              <div className="flex flex-col gap-1">
+                <Label className="text-xs font-semibold">Gender</Label>
                 <select
-                  value={addForm.status}
-                  onChange={(e) => setAddForm({ ...addForm, status: e.target.value as TenantStatus })}
-                  style={{ width: '100%', height: 40, padding: '0 10px', border: '1px solid #E4E4E7', borderRadius: 8, fontSize: 13, color: '#0A0A0B', background: '#fff' }}
+                  className={selectClass()}
+                  value={addForm.gender ?? ''}
+                  onChange={(e) => setAddForm({ ...addForm, gender: e.target.value })}
                 >
-                  <option value="active">Active</option>
-                  <option value="pending_onboarding">Pending Onboarding</option>
+                  <option value="">Prefer not to say</option>
+                  <option value="male">Male</option>
+                  <option value="female">Female</option>
+                  <option value="other">Other</option>
+                  <option value="prefer_not_to_say">Prefer not to say</option>
                 </select>
               </div>
             </div>
           </div>
         );
 
-      case 3:
+      case 2:
         return (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <p style={{ fontSize: 13, fontWeight: 600, color: '#0A0A0B', marginBottom: 4 }}>Review & Confirm</p>
-            <div style={{ padding: '12px 14px', background: '#F8FAFC', border: '1px solid #E4E4E7', borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {[
+          <div className="flex flex-col gap-3.5">
+            <WizardStepIndicator />
+            <p className="text-sm font-semibold text-gray-900">Guardian Details</p>
+
+            <div className="flex flex-col gap-1">
+              <Label className="text-xs font-semibold">Guardian Name <span className="text-red-500">*</span></Label>
+              <Input
+                className={fieldClass(addErrors.parentName)}
+                placeholder="e.g., Ramesh Kumar"
+                value={addForm.parentName}
+                onChange={(e) => { setAddForm({ ...addForm, parentName: e.target.value }); setAddErrors((prev) => ({ ...prev, parentName: undefined })); }}
+              />
+              <FieldError msg={addErrors.parentName} />
+            </div>
+
+            <InternationalPhoneField
+              label="Guardian Phone"
+              required
+              value={addForm.parentPhone}
+              onChange={(v) => { setAddForm({ ...addForm, parentPhone: v }); setAddErrors((prev) => ({ ...prev, parentPhone: undefined })); }}
+              invalid={Boolean(addErrors.parentPhone)}
+              errorText={addErrors.parentPhone}
+            />
+
+            <div className="flex flex-col gap-1">
+              <Label className="text-xs font-semibold">Relationship</Label>
+              <select
+                className={selectClass()}
+                value={addForm.guardianRelationship ?? 'parent'}
+                onChange={(e) => setAddForm({ ...addForm, guardianRelationship: e.target.value })}
+              >
+                <option value="parent">Parent</option>
+                <option value="spouse">Spouse</option>
+                <option value="sibling">Sibling</option>
+                <option value="friend">Friend</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+          </div>
+        );
+
+      case 3: {
+        const handlePropertyChange = (propertyId: string) => {
+          setAddForm({ ...addForm, propertyId, room: '', bed: '', floor: 1, monthlyRent: 0 });
+          setAddErrors((prev) => ({ ...prev, propertyId: undefined, room: undefined }));
+        };
+
+        const handleRoomChange = (roomNumber: string) => {
+          const room = availableRooms.find((r) => r.number === roomNumber);
+          setAddForm({
+            ...addForm,
+            room: roomNumber,
+            bed: '',
+            floor: room?.floor ?? addForm.floor,
+            monthlyRent: room?.rent ?? addForm.monthlyRent,
+          });
+          setAddErrors((prev) => ({ ...prev, room: undefined }));
+        };
+
+        return (
+          <div className="flex flex-col gap-3.5">
+            <WizardStepIndicator />
+            <p className="text-sm font-semibold text-gray-900">Accommodation</p>
+
+            <div className="flex flex-col gap-1">
+              <Label className="text-xs font-semibold">Property <span className="text-red-500">*</span></Label>
+              <select
+                className={selectClass(addErrors.propertyId)}
+                value={addForm.propertyId}
+                onChange={(e) => handlePropertyChange(e.target.value)}
+              >
+                <option value="">Select a property</option>
+                {properties.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+              <FieldError msg={addErrors.propertyId} />
+            </div>
+
+            {/* Occupancy mode badge */}
+            {selectedPropertyForAdd && (
+              <div className="flex items-center gap-2 px-3 py-1.5 bg-indigo-50 border border-indigo-100 rounded-md">
+                <Bed className="w-3.5 h-3.5 text-indigo-500 flex-shrink-0" />
+                <span className="text-xs text-indigo-700 font-medium">
+                  {occupancyMode === 'BED_BASED' ? 'Bed-based occupancy — select room then bed' : 'Room-based occupancy — one tenant per room'}
+                </span>
+              </div>
+            )}
+
+            <div className="flex flex-col gap-1">
+              <Label className="text-xs font-semibold">Room <span className="text-red-500">*</span></Label>
+              {availableRooms.length > 0 ? (
+                <select
+                  className={selectClass(addErrors.room)}
+                  value={addForm.room}
+                  onChange={(e) => handleRoomChange(e.target.value)}
+                >
+                  <option value="">Select a room</option>
+                  {availableRooms.map((r) => (
+                    <option key={r.id} value={r.number}>
+                      {r.roomCode || r.number} — Floor {r.floor} · {r.type} · {r.beds} bed{r.beds > 1 ? 's' : ''} · ₹{r.rent.toLocaleString('en-IN')}
+                      {r.status !== 'vacant' ? ` (${r.status})` : ''}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <Input
+                  className={fieldClass(addErrors.room)}
+                  placeholder="e.g., 301"
+                  value={addForm.room}
+                  onChange={(e) => { setAddForm({ ...addForm, room: e.target.value }); setAddErrors((prev) => ({ ...prev, room: undefined })); }}
+                />
+              )}
+              <FieldError msg={addErrors.room} />
+            </div>
+
+            {occupancyMode === 'BED_BASED' && (
+              <div className="flex flex-col gap-1">
+                <Label className="text-xs font-semibold">Bed</Label>
+                {availableBeds.length > 0 ? (() => {
+                  // Compute which bed codes are taken by active tenants in the same room
+                  const occupiedBedCodes = new Set(
+                    tenants
+                      .filter((t) =>
+                        t.propertyId === addForm.propertyId &&
+                        t.room === addForm.room &&
+                        ['active', 'payment_overdue', 'notice_submitted', 'vacating', 'pending_onboarding'].includes(t.status) &&
+                        t.bed,
+                      )
+                      .map((t) => t.bed),
+                  );
+                  return (
+                    <select
+                      className={selectClass()}
+                      value={addForm.bed}
+                      onChange={(e) => setAddForm({ ...addForm, bed: e.target.value })}
+                    >
+                      <option value="">Select a bed</option>
+                      {availableBeds.map((b) => {
+                        const taken = occupiedBedCodes.has(b);
+                        return (
+                          <option key={b} value={b} disabled={taken}>
+                            Bed {b}{taken ? ' (occupied)' : ' (available)'}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  );
+                })() : (
+                  <Input
+                    className={fieldClass()}
+                    placeholder="e.g., A or 1"
+                    value={addForm.bed}
+                    onChange={(e) => setAddForm({ ...addForm, bed: e.target.value })}
+                  />
+                )}
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1">
+                <Label className="text-xs font-semibold">Monthly Rent (₹) <span className="text-red-500">*</span></Label>
+                <Input
+                  type="number"
+                  className={fieldClass(addErrors.monthlyRent)}
+                  placeholder="8000"
+                  value={addForm.monthlyRent || ''}
+                  onChange={(e) => { setAddForm({ ...addForm, monthlyRent: parseInt(e.target.value) || 0 }); setAddErrors((prev) => ({ ...prev, monthlyRent: undefined })); }}
+                />
+                <FieldError msg={addErrors.monthlyRent} />
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label className="text-xs font-semibold">Security Deposit (₹)</Label>
+                <Input
+                  type="number"
+                  className={fieldClass(addErrors.securityDeposit)}
+                  placeholder="16000"
+                  value={addForm.securityDeposit || ''}
+                  onChange={(e) => setAddForm({ ...addForm, securityDeposit: parseInt(e.target.value) || 0 })}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1">
+                <Label className="text-xs font-semibold">Rent Due Day (1–28)</Label>
+                <Input
+                  type="number"
+                  min="1"
+                  max="28"
+                  className={fieldClass(addErrors.rentDueDate)}
+                  placeholder="1"
+                  value={addForm.rentDueDate || ''}
+                  onChange={(e) => setAddForm({ ...addForm, rentDueDate: parseInt(e.target.value) || 1 })}
+                />
+                <FieldError msg={addErrors.rentDueDate} />
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label className="text-xs font-semibold">Billing Cycle</Label>
+                <select
+                  className={selectClass()}
+                  value={addForm.billingCycle ?? 'monthly'}
+                  onChange={(e) => setAddForm({ ...addForm, billingCycle: e.target.value })}
+                >
+                  <option value="monthly">Monthly</option>
+                  <option value="quarterly">Quarterly</option>
+                  <option value="half_yearly">Half-Yearly</option>
+                  <option value="yearly">Yearly</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1">
+                <Label className="text-xs font-semibold">Join Date <span className="text-red-500">*</span></Label>
+                <Input
+                  type="date"
+                  className={fieldClass(addErrors.joinDate)}
+                  value={addForm.joinDate}
+                  onChange={(e) => setAddForm({ ...addForm, joinDate: e.target.value })}
+                />
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      case 4:
+        return (
+          <div className="flex flex-col gap-3.5">
+            <WizardStepIndicator />
+            <p className="text-sm font-semibold text-gray-900">Review</p>
+
+            <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg grid grid-cols-2 gap-1.5">
+              {([
                 ['Name', addForm.name || '—'],
                 ['Phone', addForm.phone || '—'],
                 ['Email', addForm.email || '—'],
+                ['DOB', addForm.dob || '—'],
+                ['Guardian', addForm.parentName || '—'],
+                ['Guardian Phone', addForm.parentPhone || '—'],
                 ['Property', getPropertyName(addForm.propertyId) || '—'],
-                ['Room', addForm.room ? `${addForm.room}${addForm.bed ? ` / Bed ${addForm.bed}` : ''}` : '—'],
+                ['Room', addForm.room
+                  ? `${addForm.room}${addForm.bed && occupancyMode === 'BED_BASED' ? ` · Bed ${addForm.bed}` : ''}`
+                  : '—'],
                 ['Monthly Rent', addForm.monthlyRent ? fmt(addForm.monthlyRent) : '—'],
                 ['Security Deposit', addForm.securityDeposit ? fmt(addForm.securityDeposit) : '₹0'],
                 ['Join Date', addForm.joinDate || '—'],
-              ].map(([label, val]) => (
-                <div key={label} className="flex items-center justify-between">
-                  <span style={{ fontSize: 12, color: '#71717A' }}>{label}</span>
-                  <span style={{ fontSize: 12, fontWeight: 500, color: '#0A0A0B' }}>{val}</span>
+                ['Billing', addForm.billingCycle ?? 'monthly'],
+              ] as [string, string][]).map(([label, val]) => (
+                <div key={label} className="flex flex-col">
+                  <span className="text-xs text-gray-400">{label}</span>
+                  <span className="text-xs font-medium text-gray-900 truncate">{val}</span>
                 </div>
               ))}
             </div>
-            <div style={{ padding: '10px 14px', background: '#ECFDF5', border: '1px solid #A7F3D0', borderRadius: 8 }}>
-              <p style={{ fontSize: 12, color: '#065F46' }}>Rent payment invoice will be auto-generated on save.</p>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="flex flex-col gap-1">
+                <Label className="text-xs font-semibold">ID Type <span className="text-red-500">*</span></Label>
+                <select
+                  className={selectClass(addErrors.idType)}
+                  value={addForm.idType}
+                  onChange={(e) => { setAddForm({ ...addForm, idType: e.target.value }); setAddErrors((prev) => ({ ...prev, idType: undefined })); }}
+                >
+                  <option value="Aadhaar">Aadhaar</option>
+                  <option value="PAN">PAN</option>
+                  <option value="Passport">Passport</option>
+                  <option value="Driving License">Driving License</option>
+                  <option value="Voter ID">Voter ID</option>
+                </select>
+                <FieldError msg={addErrors.idType} />
+              </div>
+              <div className="flex flex-col gap-1">
+                <Label className="text-xs font-semibold">ID Number <span className="text-red-500">*</span></Label>
+                <Input
+                  className={fieldClass(addErrors.idNumber)}
+                  placeholder="e.g., 1234 5678 9012"
+                  value={addForm.idNumber}
+                  onChange={(e) => { setAddForm({ ...addForm, idNumber: e.target.value }); setAddErrors((prev) => ({ ...prev, idNumber: undefined })); }}
+                />
+                <FieldError msg={addErrors.idNumber} />
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <Label className="text-xs font-semibold">ID Document Upload (optional)</Label>
+              <input
+                ref={idDocInputRef}
+                type="file"
+                accept="image/*,.pdf"
+                className="hidden"
+                onChange={(e) => setIdDocFile(e.target.files?.[0] ?? null)}
+              />
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => idDocInputRef.current?.click()}
+                  className="ds-btn ds-btn-secondary"
+                  style={{ fontSize: 12, padding: '5px 10px', gap: 5 }}
+                >
+                  <Upload style={{ width: 12, height: 12 }} />
+                  {idDocFile ? idDocFile.name : 'Choose File'}
+                </button>
+                {idDocFile && (
+                  <button
+                    type="button"
+                    onClick={() => { setIdDocFile(null); if (idDocInputRef.current) idDocInputRef.current.value = ''; }}
+                    className="text-xs text-red-500 hover:text-red-700"
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+              <p className="text-xs text-gray-400">Aadhaar, PAN, Passport, or Driving License. Accepted: JPG, PNG, PDF.</p>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <Label className="text-xs font-semibold">Status</Label>
+              <select
+                className={selectClass()}
+                value={addForm.status}
+                onChange={(e) => setAddForm({ ...addForm, status: e.target.value as TenantStatus })}
+              >
+                <option value="active">Active</option>
+                <option value="pending_onboarding">Pending Onboarding</option>
+              </select>
+            </div>
+
+            <div className="flex items-start gap-2 px-3 py-2.5 bg-emerald-50 border border-emerald-200 rounded-md">
+              <CheckCircle className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0 mt-0.5" />
+              <p className="text-xs text-emerald-700">Rent invoice will be auto-generated. Agreement and documents can be attached from Tenant Detail.</p>
             </div>
           </div>
         );
@@ -360,6 +755,24 @@ export function Tenants({ onViewTenant }: TenantsProps) {
       default:
         return null;
     }
+  };
+
+  const handleNextStep = () => {
+    const stepFields: Record<number, (keyof typeof addForm)[]> = {
+      1: ['name', 'phone', 'email'],
+      2: ['parentName', 'parentPhone'],
+      3: ['propertyId', 'room', 'monthlyRent'],
+      4: ['idType', 'idNumber'],
+    };
+    const fields = stepFields[addStep] ?? [];
+    const subset = Object.fromEntries(fields.map((f) => [f, addForm[f]]));
+    const errs = validateTenantForm(subset as Parameters<typeof validateTenantForm>[0]);
+    if (Object.keys(errs).length > 0) {
+      setAddErrors(errs);
+      return;
+    }
+    setAddErrors({});
+    setAddStep((s) => s + 1);
   };
 
   if (loading) {
@@ -384,8 +797,12 @@ export function Tenants({ onViewTenant }: TenantsProps) {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="ds-page-title">Tenants</h1>
-          <p style={{ fontSize: 13, color: '#A1A1AA', marginTop: 2 }}>
-            {activeInRoom.length} active · {tenants.length} total
+          <p style={{ fontSize: 12, color: '#71717A', marginTop: 2 }}>
+            <span style={{ color: '#059669', fontWeight: 600 }}>{filterCounts.active}</span> active
+            {overdueTenants.length > 0 && <>{' · '}<span style={{ color: '#DC2626', fontWeight: 600 }}>{overdueTenants.length}</span> overdue</>}
+            {vacatingTenants.length > 0 && <>{' · '}<span style={{ color: '#D97706', fontWeight: 600 }}>{vacatingTenants.length}</span> vacating</>}
+            {' · '}{tenants.length} total{' · '}
+            <span style={{ fontWeight: 600, color: '#0A0A0B' }}>{fmt(activeInRoom.reduce((s, t) => s + t.rent, 0))}/mo</span>
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -408,124 +825,115 @@ export function Tenants({ onViewTenant }: TenantsProps) {
         </div>
       </div>
 
-      {/* ── KPI Cards ───────────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
-        {[
-          { label: 'Total Tenants', value: tenants.length.toString(), meta: `${properties.length} propert${properties.length === 1 ? 'y' : 'ies'}`, icon: Users, iconBg: '#EEF2FF', iconColor: '#6366F1' },
-          { label: 'Active', value: filterCounts.active.toString(), meta: 'In residence', icon: CheckCircle, iconBg: '#ECFDF5', iconColor: '#059669' },
-          { label: 'Overdue', value: overdueTenants.length.toString(), meta: overdueTenants.length > 0 ? 'Need collection' : 'All clear', icon: AlertCircle, iconBg: overdueTenants.length > 0 ? '#FEF2F2' : '#ECFDF5', iconColor: overdueTenants.length > 0 ? '#DC2626' : '#059669' },
-          { label: 'Monthly Revenue', value: fmt(activeInRoom.reduce((s, t) => s + t.rent, 0)), meta: 'From active tenants', icon: IndianRupee, iconBg: '#ECFDF5', iconColor: '#059669' },
-        ].map(({ label, value, meta, icon: Icon, iconBg, iconColor }) => (
-          <div key={label} className="ds-card flex items-start justify-between" style={{ padding: '14px 16px', gap: 12 }}>
-            <div className="flex-1 min-w-0">
-              <p style={{ fontSize: 11, fontWeight: 600, color: '#71717A', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 6 }}>{label}</p>
-              <p style={{ fontSize: 22, fontWeight: 700, color: '#0A0A0B', letterSpacing: '-0.03em', fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>{value}</p>
-              <p style={{ fontSize: 11, color: '#A1A1AA', marginTop: 4 }}>{meta}</p>
-            </div>
-            <div className="flex-shrink-0 flex items-center justify-center rounded-xl" style={{ width: 36, height: 36, background: iconBg }}>
-              <Icon style={{ width: 16, height: 16, color: iconColor, strokeWidth: 1.75 }} />
-            </div>
-          </div>
-        ))}
-      </div>
 
-      {/* ── Operational alerts ───────────────── */}
-      {overdueTenants.length > 0 && (
-        <div
-          className="flex items-center justify-between rounded-xl"
-          style={{ padding: '12px 16px', background: '#FEF2F2', border: '1px solid #FECACA', gap: 12 }}
-        >
-          <div className="flex items-center gap-3">
-            <AlertCircle style={{ width: 16, height: 16, color: '#DC2626', flexShrink: 0 }} />
-            <div>
-              <p style={{ fontSize: 13, fontWeight: 600, color: '#991B1B' }}>
-                {overdueTenants.length} tenant{overdueTenants.length > 1 ? 's' : ''} with overdue payments
-              </p>
-              <p style={{ fontSize: 12, color: '#B91C1C', marginTop: 1 }}>
-                {overdueTenants.slice(0, 3).map((t) => t.name).join(', ')}{overdueTenants.length > 3 ? ` +${overdueTenants.length - 3} more` : ''}
-              </p>
+      {/* ── Operational alerts (compact single-line) ───── */}
+      {(overdueTenants.length > 0 || vacatingTenants.length > 0) && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {overdueTenants.length > 0 && (
+            <div className="flex items-center justify-between rounded-lg"
+              style={{ padding: '7px 12px', background: '#FEF2F2', border: '1px solid #FECACA', gap: 10 }}>
+              <div className="flex items-center gap-2">
+                <AlertCircle style={{ width: 13, height: 13, color: '#DC2626', flexShrink: 0 }} />
+                <p style={{ fontSize: 12, fontWeight: 500, color: '#991B1B' }}>
+                  <strong>{overdueTenants.length}</strong> overdue —{' '}
+                  {overdueTenants.slice(0, 3).map((t) => t.name).join(', ')}{overdueTenants.length > 3 ? ` +${overdueTenants.length - 3}` : ''}
+                </p>
+              </div>
+              <button onClick={() => setFilterStatus('payment_overdue')} className="ds-btn ds-btn-secondary flex-shrink-0"
+                style={{ fontSize: 11, padding: '3px 8px', borderColor: '#FECACA', color: '#991B1B' }}>
+                Filter
+              </button>
             </div>
-          </div>
-          <button
-            onClick={() => setFilterStatus('payment_overdue')}
-            className="ds-btn ds-btn-secondary flex-shrink-0"
-            style={{ fontSize: 12, padding: '5px 10px', borderColor: '#FECACA', color: '#991B1B' }}
-          >
-            View Overdue
-          </button>
+          )}
+          {vacatingTenants.length > 0 && (
+            <div className="flex items-center justify-between rounded-lg"
+              style={{ padding: '7px 12px', background: '#FFFBEB', border: '1px solid #FDE68A', gap: 10 }}>
+              <div className="flex items-center gap-2">
+                <Clock style={{ width: 13, height: 13, color: '#D97706', flexShrink: 0 }} />
+                <p style={{ fontSize: 12, fontWeight: 500, color: '#92400E' }}>
+                  <strong>{vacatingTenants.length}</strong> vacating —{' '}
+                  {vacatingTenants.slice(0, 3).map((t) => `${t.name}${t.vacateDate ? ` (${new Date(t.vacateDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })})` : ''}`).join(', ')}
+                </p>
+              </div>
+              <button onClick={() => setFilterStatus('notice_submitted')} className="ds-btn ds-btn-secondary flex-shrink-0"
+                style={{ fontSize: 11, padding: '3px 8px', borderColor: '#FDE68A', color: '#92400E' }}>
+                Filter
+              </button>
+            </div>
+          )}
         </div>
       )}
 
-      {vacatingTenants.length > 0 && (
-        <div
-          className="flex items-center justify-between rounded-xl"
-          style={{ padding: '12px 16px', background: '#FFFBEB', border: '1px solid #FDE68A', gap: 12 }}
-        >
-          <div className="flex items-center gap-3">
-            <Clock style={{ width: 16, height: 16, color: '#D97706', flexShrink: 0 }} />
-            <div>
-              <p style={{ fontSize: 13, fontWeight: 600, color: '#92400E' }}>
-                {vacatingTenants.length} tenant{vacatingTenants.length > 1 ? 's' : ''} vacating soon
-              </p>
-              <p style={{ fontSize: 12, color: '#B45309', marginTop: 1 }}>
-                {vacatingTenants.slice(0, 3).map((t) => `${t.name}${t.vacateDate ? ` (${new Date(t.vacateDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })})` : ''}`).join(', ')}
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={() => setFilterStatus('notice_submitted')}
-            className="ds-btn ds-btn-secondary flex-shrink-0"
-            style={{ fontSize: 12, padding: '5px 10px', borderColor: '#FDE68A', color: '#92400E' }}
-          >
-            View Vacating
-          </button>
-        </div>
-      )}
-
-      {/* ── Filters + search ─────────────────── */}
+      {/* ── Filters + search (single row) ────── */}
       <div className="ds-card" style={{ padding: 0, overflow: 'hidden' }}>
 
-        {/* Filter row */}
-        <div style={{ padding: '10px 14px', borderBottom: '1px solid #F4F4F6', display: 'flex', alignItems: 'center', gap: 8, overflowX: 'auto' }}>
-          {(['all', 'active', 'payment_overdue', 'notice_submitted', 'vacating', 'inactive', 'archived'] as const).map((s) => (
-            <button
-              key={s}
-              onClick={() => setFilterStatus(s)}
-              style={{
-                fontSize: 12, fontWeight: 500, padding: '4px 10px', borderRadius: 99, cursor: 'pointer',
-                whiteSpace: 'nowrap', flexShrink: 0,
-                border: `1px solid ${filterStatus === s ? '#6366F1' : '#E4E4E7'}`,
-                background: filterStatus === s ? '#6366F1' : '#fff',
-                color: filterStatus === s ? '#fff' : '#52525B',
-                transition: 'all 0.15s',
-              }}
-            >
-              {s === 'all' ? 'All' : TENANT_STATUS_LABELS[s as TenantStatus]}
-              <span style={{ marginLeft: 5, opacity: 0.75, fontSize: 11 }}>
-                {filterCounts[s as keyof typeof filterCounts] ?? 0}
-              </span>
-            </button>
-          ))}
+        {/* Filter + search merged */}
+        <div style={{ padding: '8px 12px', borderBottom: '1px solid #F4F4F6', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div className="flex items-center gap-1.5" style={{ flexShrink: 0, overflowX: 'auto' }}>
+            {(['all', 'active', 'payment_overdue', 'notice_submitted', 'vacating', 'inactive', 'archived'] as const).map((s) => (
+              <button
+                key={s}
+                onClick={() => setFilterStatus(s)}
+                style={{
+                  fontSize: 11, fontWeight: 500, padding: '3px 9px', borderRadius: 99, cursor: 'pointer',
+                  whiteSpace: 'nowrap', flexShrink: 0,
+                  border: `1px solid ${filterStatus === s ? '#6366F1' : '#E4E4E7'}`,
+                  background: filterStatus === s ? '#6366F1' : '#fff',
+                  color: filterStatus === s ? '#fff' : '#52525B',
+                  transition: 'all 0.15s',
+                }}
+              >
+                {s === 'all' ? 'All' : TENANT_STATUS_LABELS[s as TenantStatus]}
+                <span style={{ marginLeft: 4, opacity: 0.75, fontSize: 10 }}>
+                  {filterCounts[s as keyof typeof filterCounts] ?? 0}
+                </span>
+              </button>
+            ))}
+          </div>
+          <div style={{ flex: 1, position: 'relative', minWidth: 140 }}>
+            <Search style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', width: 13, height: 13, color: '#A1A1AA' }} />
+            <Input
+              type="text"
+              placeholder="Search name, room, phone…"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              style={{ paddingLeft: 30, height: 32, fontSize: 12 }}
+            />
+          </div>
         </div>
 
-        {/* Search */}
-        <div style={{ padding: '10px 14px', borderBottom: '1px solid #F4F4F6', position: 'relative' }}>
-          <Search style={{ position: 'absolute', left: 26, top: '50%', transform: 'translateY(-50%)', width: 14, height: 14, color: '#A1A1AA' }} />
-          <Input
-            type="text"
-            placeholder="Search by name, room, phone, or property…"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            style={{ paddingLeft: 36, height: 38, fontSize: 13 }}
-          />
-        </div>
+        {/* Bulk actions bar */}
+        {selectedTenantIds.size > 0 && (
+          <div style={{ padding: '7px 12px', background: '#EEF2FF', borderBottom: '1px solid #C7D2FE', display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: '#4338CA' }}>{selectedTenantIds.size} selected</span>
+            <button onClick={() => void handleBulkMarkOverdue()} className="ds-btn ds-btn-secondary"
+              style={{ fontSize: 11, padding: '3px 9px', color: '#DC2626', borderColor: '#FECACA' }}>
+              Mark Overdue
+            </button>
+            <button onClick={() => setSelectedTenantIds(new Set())} className="ds-btn ds-btn-secondary"
+              style={{ fontSize: 11, padding: '3px 8px' }}>
+              Clear
+            </button>
+          </div>
+        )}
 
         {/* Desktop table */}
         <div className="hidden md:block overflow-x-auto">
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ background: '#FAFAFA', borderBottom: '1px solid #F1F1F3' }}>
-                {['Tenant', 'Property', 'Room', 'Rent / Deposit', 'Since', 'Status', 'Actions'].map((h) => (
+                <th style={{ width: 36, padding: '8px 6px 8px 12px' }}>
+                  <input
+                    type="checkbox"
+                    checked={selectedTenantIds.size === filteredTenants.length && filteredTenants.length > 0}
+                    onChange={(e) => {
+                      if (e.target.checked) setSelectedTenantIds(new Set(filteredTenants.map((t) => t.id)));
+                      else setSelectedTenantIds(new Set());
+                    }}
+                    style={{ cursor: 'pointer', accentColor: '#6366F1' }}
+                  />
+                </th>
+                {['Tenant', 'Property', 'Room', 'Rent / Deposit', 'Since', 'Status', 'Docs', 'Actions'].map((h) => (
                   <th key={h} style={{ padding: '8px 12px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: '#71717A', letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
                     {h}
                   </th>
@@ -535,18 +943,33 @@ export function Tenants({ onViewTenant }: TenantsProps) {
             <tbody>
               {filteredTenants.length === 0 ? (
                 <tr>
-                  <td colSpan={7} style={{ padding: '40px 14px', textAlign: 'center', fontSize: 13, color: '#A1A1AA' }}>
+                  <td colSpan={9} style={{ padding: '40px 14px', textAlign: 'center', fontSize: 13, color: '#A1A1AA' }}>
                     No tenants found
                   </td>
                 </tr>
               ) : filteredTenants.map((tenant, i) => (
                 <tr
                   key={tenant.id}
+                  onClick={() => setDrawerTenantId(tenant.id)}
                   style={{
                     borderBottom: i < filteredTenants.length - 1 ? '1px solid #F4F4F6' : 'none',
-                    background: tenant.status === 'payment_overdue' ? '#FFFAFA' : '#fff',
+                    background: selectedTenantIds.has(tenant.id) ? '#F5F3FF' : tenant.status === 'payment_overdue' ? '#FFFAFA' : '#fff',
+                    cursor: 'pointer',
                   }}
                 >
+                  <td style={{ padding: '7px 6px 7px 12px' }} onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={selectedTenantIds.has(tenant.id)}
+                      onChange={(e) => {
+                        const next = new Set(selectedTenantIds);
+                        if (e.target.checked) next.add(tenant.id);
+                        else next.delete(tenant.id);
+                        setSelectedTenantIds(next);
+                      }}
+                      style={{ cursor: 'pointer', accentColor: '#6366F1' }}
+                    />
+                  </td>
                   <td style={{ padding: '7px 12px' }}>
                     <div className="flex items-center gap-2">
                       <div
@@ -578,18 +1001,26 @@ export function Tenants({ onViewTenant }: TenantsProps) {
                     {new Date(tenant.joinDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' })}
                   </td>
                   <td style={{ padding: '7px 12px' }}>
-                    <StatusChip status={tenant.status} joinDate={tenant.joinDate} />
+                    <StatusChip status={tenant.status} rentDueDate={tenant.rentDueDate} vacateDate={tenant.vacateDate} />
                   </td>
-                  <td style={{ padding: '7px 12px' }}>
+                  <td style={{ padding: '7px 12px', textAlign: 'center' }}>
+                    {!tenant.idDocumentUrl || !tenant.idNumber ? (
+                      <span title="ID document missing" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10, fontWeight: 600, color: '#D97706' }}>
+                        <ShieldAlert style={{ width: 13, height: 13 }} />
+                      </span>
+                    ) : (
+                      <CheckCircle style={{ width: 13, height: 13, color: '#059669' }} />
+                    )}
+                  </td>
+                  <td style={{ padding: '7px 12px' }} onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center gap-1">
                       <button
-                        title="View full profile"
-                        onClick={() => onViewTenant(tenant.id)}
+                        title="View profile"
+                        onClick={() => setDrawerTenantId(tenant.id)}
                         className="ds-btn ds-btn-primary"
                         style={{ fontSize: 11, padding: '4px 8px', gap: 4 }}
                       >
-                        <Eye style={{ width: 12, height: 12 }} />
-                        View
+                        <Eye style={{ width: 12, height: 12 }} /> View
                       </button>
                       <button
                         title="Edit"
@@ -616,16 +1047,18 @@ export function Tenants({ onViewTenant }: TenantsProps) {
         </div>
 
         {/* Mobile cards */}
-        <div className="md:hidden" style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div className="md:hidden flex flex-col gap-2" style={{ padding: 12 }}>
           {filteredTenants.length === 0 ? (
             <p style={{ textAlign: 'center', fontSize: 13, color: '#A1A1AA', padding: '32px 0' }}>No tenants found</p>
           ) : filteredTenants.map((tenant) => (
             <div
               key={tenant.id}
+              onClick={() => setDrawerTenantId(tenant.id)}
               style={{
                 border: `1px solid ${tenant.status === 'payment_overdue' ? '#FECACA' : '#E4E4E7'}`,
                 borderRadius: 10, padding: '12px 14px',
                 background: tenant.status === 'payment_overdue' ? '#FFFAFA' : '#fff',
+                cursor: 'pointer',
               }}
             >
               <div className="flex items-start justify-between gap-2 mb-2.5">
@@ -643,7 +1076,7 @@ export function Tenants({ onViewTenant }: TenantsProps) {
                     <p style={{ fontSize: 11, color: '#A1A1AA' }}>{tenant.phone}</p>
                   </div>
                 </div>
-                <StatusChip status={tenant.status} />
+                <StatusChip status={tenant.status} rentDueDate={tenant.rentDueDate} vacateDate={tenant.vacateDate} />
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginBottom: 10 }}>
@@ -657,14 +1090,7 @@ export function Tenants({ onViewTenant }: TenantsProps) {
                 </div>
               </div>
 
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => onViewTenant(tenant.id)}
-                  className="ds-btn ds-btn-primary"
-                  style={{ flex: 1, fontSize: 12, padding: '6px 0', justifyContent: 'center', gap: 4 }}
-                >
-                  <Eye style={{ width: 12, height: 12 }} /> View
-                </button>
+              <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                 <button
                   onClick={() => openEdit(tenant)}
                   className="ds-btn ds-btn-secondary"
@@ -686,44 +1112,25 @@ export function Tenants({ onViewTenant }: TenantsProps) {
       </div>
 
       {/* ── Add Tenant Modal (3-step) ────────── */}
-      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+      <Dialog open={addOpen} onOpenChange={(v) => { setAddOpen(v); if (!v) { setAddErrors({}); setAddStep(1); setIdDocFile(null); } }}>
         <DialogContent style={{ maxWidth: 520, maxHeight: '90vh', overflowY: 'auto' }}>
           <DialogHeader>
             <DialogTitle>Add New Tenant</DialogTitle>
-            <DialogDescription>Step {addStep} of 3</DialogDescription>
           </DialogHeader>
 
-          {/* Progress bar */}
-          <div style={{ display: 'flex', gap: 6, marginBottom: 4 }}>
-            {[1, 2, 3].map((s) => (
-              <div
-                key={s}
-                style={{
-                  flex: 1, height: 3, borderRadius: 99,
-                  background: s <= addStep ? '#6366F1' : '#E4E4E7',
-                  transition: 'background 0.2s',
-                }}
-              />
-            ))}
-          </div>
-
-          <div style={{ paddingTop: 4, paddingBottom: 4 }}>{renderAddStep()}</div>
+          <div className="pt-1 pb-1">{renderAddStep()}</div>
 
           <DialogFooter style={{ gap: 8 }}>
             {addStep > 1 && (
-              <Button variant="outline" onClick={() => setAddStep(addStep - 1)}>Back</Button>
+              <Button variant="outline" onClick={() => { setAddStep(addStep - 1); setAddErrors({}); }}>Back</Button>
             )}
-            {addStep < 3 ? (
-              <Button
-                onClick={() => setAddStep(addStep + 1)}
-                className="ds-btn ds-btn-primary"
-                disabled={addStep === 1 && (!addForm.name || !addForm.phone || !addForm.email)}
-              >
-                Next
+            {addStep < 4 ? (
+              <Button onClick={handleNextStep} className="ds-btn ds-btn-primary">
+                Next <ChevronRight className="w-3.5 h-3.5 ml-1" />
               </Button>
             ) : (
               <Button onClick={() => void handleAdd()} disabled={addLoading} className="ds-btn ds-btn-primary">
-                {addLoading ? <Loader2 style={{ width: 14, height: 14, marginRight: 6 }} className="animate-spin" /> : <Save style={{ width: 14, height: 14, marginRight: 6 }} />}
+                {addLoading ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Save className="w-3.5 h-3.5 mr-1.5" />}
                 Add Tenant
               </Button>
             )}
@@ -731,69 +1138,17 @@ export function Tenants({ onViewTenant }: TenantsProps) {
         </DialogContent>
       </Dialog>
 
-      {/* ── View Tenant Modal ────────────────── */}
-      <Dialog open={viewOpen} onOpenChange={setViewOpen}>
-        <DialogContent style={{ maxWidth: 560, maxHeight: '90vh', overflowY: 'auto' }}>
-          <DialogHeader>
-            <DialogTitle>Tenant Details</DialogTitle>
-          </DialogHeader>
-          {viewingTenant && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14, paddingTop: 4 }}>
-              <div className="flex items-center gap-3" style={{ padding: '12px 14px', background: '#F8FAFC', borderRadius: 10, border: '1px solid #E4E4E7' }}>
-                <div
-                  className="flex-shrink-0 flex items-center justify-center rounded-xl"
-                  style={{ width: 44, height: 44, background: '#EEF2FF' }}
-                >
-                  <span style={{ fontSize: 16, fontWeight: 700, color: '#6366F1' }}>
-                    {viewingTenant.name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)}
-                  </span>
-                </div>
-                <div>
-                  <p style={{ fontSize: 15, fontWeight: 600, color: '#0A0A0B' }}>{viewingTenant.name}</p>
-                  <p style={{ fontSize: 12, color: '#A1A1AA', marginTop: 2 }}>{viewingTenant.email}</p>
-                </div>
-                <div style={{ marginLeft: 'auto' }}>
-                  <StatusChip status={viewingTenant.status} />
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                {[
-                  { label: 'Phone', value: viewingTenant.phone, icon: Phone },
-                  { label: 'Property', value: getPropertyName(viewingTenant.propertyId), icon: MapPin },
-                  { label: 'Room', value: `${viewingTenant.room}${viewingTenant.bed ? ` · Bed ${viewingTenant.bed}` : ''}`, icon: Bed },
-                  { label: 'Floor', value: `Floor ${viewingTenant.floor}`, icon: Bed },
-                  { label: 'Monthly Rent', value: fmt(viewingTenant.rent), icon: IndianRupee },
-                  { label: 'Security Deposit', value: fmt(viewingTenant.securityDeposit), icon: IndianRupee },
-                  { label: 'Due Day', value: `${viewingTenant.rentDueDate}th of month`, icon: Calendar },
-                  { label: 'Joined', value: new Date(viewingTenant.joinDate).toLocaleDateString('en-IN'), icon: Calendar },
-                ].map(({ label, value, icon: Icon }) => (
-                  <div key={label} style={{ padding: '10px 12px', background: '#F8FAFC', borderRadius: 8, border: '1px solid #F1F1F3' }}>
-                    <p style={{ fontSize: 11, color: '#A1A1AA', marginBottom: 3 }}>{label}</p>
-                    <p style={{ fontSize: 13, fontWeight: 500, color: '#0A0A0B' }}>{value}</p>
-                  </div>
-                ))}
-              </div>
-
-              {(viewingTenant.parentName || viewingTenant.parentPhone) && (
-                <div style={{ padding: '10px 12px', background: '#F8FAFC', borderRadius: 8, border: '1px solid #F1F1F3' }}>
-                  <p style={{ fontSize: 11, color: '#A1A1AA', marginBottom: 6 }}>Guardian / Emergency Contact</p>
-                  {viewingTenant.parentName && <p style={{ fontSize: 13, fontWeight: 500, color: '#0A0A0B' }}>{viewingTenant.parentName}</p>}
-                  {viewingTenant.parentPhone && <p style={{ fontSize: 12, color: '#71717A', marginTop: 2 }}>{viewingTenant.parentPhone}</p>}
-                </div>
-              )}
-            </div>
+      {/* ── Tenant Detail Drawer ─────────────── */}
+      <Sheet open={!!drawerTenantId} onOpenChange={(v) => { if (!v) setDrawerTenantId(null); }}>
+        <SheetContent side="right" className="sm:max-w-4xl w-full overflow-y-auto p-0">
+          {drawerTenantId && (
+            <TenantDetail
+              tenantId={drawerTenantId}
+              onBack={() => setDrawerTenantId(null)}
+            />
           )}
-          <DialogFooter>
-            <Button
-              onClick={() => { if (viewingTenant) { openEdit(viewingTenant); setViewOpen(false); } }}
-              className="ds-btn ds-btn-secondary"
-            >
-              <Edit style={{ width: 13, height: 13, marginRight: 6 }} /> Edit Tenant
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        </SheetContent>
+      </Sheet>
 
       {/* ── Edit Tenant Modal ────────────────── */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>

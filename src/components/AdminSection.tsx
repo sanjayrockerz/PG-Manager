@@ -4,6 +4,7 @@ import {
   AlertCircle,
   ArrowLeft,
   BarChart3,
+  Bell,
   Building2,
   CheckCircle,
   ChevronLeft,
@@ -35,6 +36,7 @@ import {
 import { useRealtimeRefresh } from '../hooks/useRealtimeRefresh';
 import { LiveStatusBadge } from './LiveStatusBadge';
 import { useLocalization } from '../contexts/LocalizationContext';
+import { useDateRange } from '../contexts/DateRangeContext';
 
 type AdminView =
   | 'dashboard'
@@ -47,7 +49,8 @@ type AdminView =
   | 'referrals'
   | 'leads'
   | 'activity'
-  | 'infrastructure';
+  | 'infrastructure'
+  | 'notifications';
 
 type AdminSummary = Awaited<ReturnType<typeof supabaseAdminDataApi.getAdminSummary>>;
 type OwnerCard = AdminSummary['owners'][number];
@@ -108,6 +111,7 @@ function Pagination({ page, total, pageSize, onChange }: { page: number; total: 
 
 export function AdminSection() {
   const { t } = useLocalization();
+  const { range } = useDateRange();
   const [currentView, setCurrentView] = useState<AdminView>('dashboard');
   const [summary, setSummary] = useState<AdminSummary | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -155,6 +159,12 @@ export function AdminSection() {
   const [leadStats, setLeadStats] = useState<Awaited<ReturnType<typeof supabaseAdminDataApi.getLeadSourceStats>> | null>(null);
   const [isLoadingLeads, setIsLoadingLeads] = useState(false);
 
+  // Referral create form
+  const [createReferralOpen, setCreateReferralOpen] = useState(false);
+  const [newReferralEmail, setNewReferralEmail] = useState('');
+  const [newReferralReward, setNewReferralReward] = useState('');
+  const [isCreatingReferral, setIsCreatingReferral] = useState(false);
+
   // Suspend dialog
   const [suspendTarget, setSuspendTarget] = useState<OwnerCard | null>(null);
   const [suspendReason, setSuspendReason] = useState('');
@@ -183,7 +193,7 @@ export function AdminSection() {
 
   const { lastUpdatedAt, isSyncing } = useRealtimeRefresh({
     key: 'platform-admin-summary',
-    tables: ['profiles', 'properties', 'tenants', 'payments', 'owner_subscriptions', 'support_tickets', 'support_ticket_comments', 'admin_coupons', 'referrals'],
+    tables: ['profiles', 'properties', 'tenants', 'payments', 'owner_subscriptions', 'support_tickets', 'support_ticket_comments', 'admin_coupons', 'referrals', 'lead_sources'],
     onChange: loadSummary,
   });
 
@@ -211,7 +221,7 @@ export function AdminSection() {
     setIsLoadingAnalytics(true);
     try {
       const [mrr, ana] = await Promise.all([
-        supabaseAdminDataApi.getMRRHistory(),
+        supabaseAdminDataApi.getMRRHistory(range),
         supabaseAdminDataApi.getPlatformAnalytics(),
       ]);
       setMrrData(mrr);
@@ -259,9 +269,14 @@ export function AdminSection() {
     }
   }, []);
 
+  // Reload analytics when date range changes while on analytics view
+  useEffect(() => {
+    if (currentView === 'analytics') void loadAnalytics();
+  }, [range]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const navigateTo = (view: AdminView) => {
     setCurrentView(view);
-    if (view === 'analytics' && !mrrData) void loadAnalytics();
+    if (view === 'analytics') void loadAnalytics();
     if (view === 'coupons' && coupons.length === 0) void loadCoupons();
     if (view === 'referrals' && !referralStats) void loadReferrals();
     if (view === 'leads' && !leadStats) void loadLeads();
@@ -281,8 +296,10 @@ export function AdminSection() {
 
   const handlePlanChange = async (ownerId: string, planCode: string) => {
     if (!planCode.trim()) return;
+    const prevPlan = summary?.owners.find((o) => o.id === ownerId)?.planCode ?? 'unknown';
     try {
       await supabaseAdminDataApi.updateOwnerSubscription(ownerId, { planCode: planCode.trim().toLowerCase() });
+      void supabaseAdminDataApi.logPlanChange(ownerId, prevPlan, planCode.trim().toLowerCase()).catch(() => {});
       toast.success('Plan updated');
       await loadSummary();
     } catch (err) {
@@ -465,12 +482,19 @@ export function AdminSection() {
   // ── Nav tabs ──────────────────────────────────────────────────────────────
 
   const NavTabs = () => {
-    const tabs: { id: AdminView; label: string; icon: typeof Shield }[] = [
+    // Derive unread admin alert count from summary data
+    const adminAlertCount = summary ? (
+      (summary.support ?? []).filter((t) => t.status === 'open').length
+      + (summary.owners ?? []).filter((o) => o.subscriptionStatus === 'past_due').length
+    ) : 0;
+
+    const tabs: { id: AdminView; label: string; icon: typeof Shield; badge?: number }[] = [
       { id: 'dashboard', label: 'Dashboard', icon: Shield },
       { id: 'owners', label: 'Owners', icon: Users },
       { id: 'subscriptions', label: 'Plans', icon: Package },
       { id: 'analytics', label: 'Analytics', icon: BarChart3 },
-      { id: 'support', label: 'Support', icon: HeadphonesIcon },
+      { id: 'support', label: 'Support', icon: HeadphonesIcon, badge: (summary?.support ?? []).filter((t) => t.status === 'open').length },
+      { id: 'notifications', label: 'Alerts', icon: Bell, badge: adminAlertCount },
       { id: 'coupons', label: 'Coupons', icon: Tag },
       { id: 'referrals', label: 'Referrals', icon: Link2 },
       { id: 'leads', label: 'Leads', icon: Globe },
@@ -480,14 +504,19 @@ export function AdminSection() {
 
     return (
       <div className="flex flex-wrap gap-2">
-        {tabs.map(({ id, label, icon: Icon }) => (
+        {tabs.map(({ id, label, icon: Icon, badge }) => (
           <button
             key={id}
             onClick={() => navigateTo(id)}
-            className={`px-3 py-2 rounded-lg text-sm flex items-center gap-2 whitespace-nowrap ${currentView === id || (currentView === 'owner-detail' && id === 'owners') ? 'bg-gray-900 text-white' : 'bg-white border border-gray-200 text-gray-700 hover:bg-gray-50'}`}
+            className={`px-3 py-2 rounded-lg text-sm flex items-center gap-2 whitespace-nowrap relative ${currentView === id || (currentView === 'owner-detail' && id === 'owners') ? 'bg-gray-900 text-white' : 'bg-white border border-gray-200 text-gray-700 hover:bg-gray-50'}`}
           >
             <Icon className="w-4 h-4" />
             <span className="hidden sm:inline">{label}</span>
+            {badge != null && badge > 0 && (
+              <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center">
+                {badge > 9 ? '9+' : badge}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -686,7 +715,14 @@ export function AdminSection() {
               ? <button onClick={() => void handleUnsuspend(selectedOwner)} className="px-3 py-1.5 bg-gray-600 text-white rounded-lg text-sm hover:bg-gray-700">Unsuspend</button>
               : <button onClick={() => setSuspendTarget(selectedOwner)} className="px-3 py-1.5 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700 flex items-center gap-1"><XCircle className="w-3.5 h-3.5" />Suspend</button>
             }
-            <button onClick={() => { setViewAsOwnerOpen(!viewAsOwnerOpen); if (!ownerDetail) void loadOwnerDetail(selectedOwner.id); }} className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 flex items-center gap-1">
+            <button onClick={() => {
+              const opening = !viewAsOwnerOpen;
+              setViewAsOwnerOpen(opening);
+              if (!ownerDetail) void loadOwnerDetail(selectedOwner.id);
+              if (opening) {
+                void supabaseAdminDataApi.logImpersonation(selectedOwner.id, selectedOwner.name).catch(() => {});
+              }
+            }} className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 flex items-center gap-1">
               <Eye className="w-3.5 h-3.5" />View As Owner
             </button>
           </div>
@@ -1196,10 +1232,72 @@ export function AdminSection() {
 
     return (
       <div className="space-y-6">
-        <div>
-          <h1 className="text-gray-900 flex items-center gap-2"><Link2 className="w-5 h-5 text-purple-600" />Referral Dashboard</h1>
-          <p className="text-gray-600 mt-1">Track referral signups, conversions, and rewards.</p>
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <h1 className="text-gray-900 flex items-center gap-2"><Link2 className="w-5 h-5 text-purple-600" />Referral Dashboard</h1>
+            <p className="text-gray-600 mt-1">Track referral signups, conversions, and rewards.</p>
+          </div>
+          <button
+            onClick={() => setCreateReferralOpen(true)}
+            className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700 flex items-center gap-2"
+          >
+            <Gift className="w-4 h-4" /> Create Referral Code
+          </button>
         </div>
+
+        {/* Create referral modal */}
+        {createReferralOpen && (
+          <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-xl p-6 w-full max-w-sm shadow-xl space-y-4">
+              <h3 className="text-gray-900 font-semibold">Issue Referral Code</h3>
+              <div>
+                <label className="text-xs text-gray-500 uppercase font-semibold mb-1 block">Referee Email</label>
+                <input
+                  type="email"
+                  value={newReferralEmail}
+                  onChange={(e) => setNewReferralEmail(e.target.value)}
+                  placeholder="prospect@example.com"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-gray-500 uppercase font-semibold mb-1 block">Reward Amount (₹)</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={newReferralReward}
+                  onChange={(e) => setNewReferralReward(e.target.value)}
+                  placeholder="500"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                />
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => { setCreateReferralOpen(false); setNewReferralEmail(''); setNewReferralReward(''); }} className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-sm">Cancel</button>
+                <button
+                  disabled={isCreatingReferral || !newReferralEmail.trim()}
+                  onClick={async () => {
+                    setIsCreatingReferral(true);
+                    try {
+                      await supabaseAdminDataApi.createReferralCode({ refereeEmail: newReferralEmail, rewardAmount: parseFloat(newReferralReward) || 0 });
+                      toast.success('Referral code created');
+                      setCreateReferralOpen(false);
+                      setNewReferralEmail('');
+                      setNewReferralReward('');
+                      void loadReferrals();
+                    } catch (err) {
+                      toast.error(err instanceof Error ? err.message : 'Failed to create referral');
+                    } finally {
+                      setIsCreatingReferral(false);
+                    }
+                  }}
+                  className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700 disabled:opacity-50"
+                >
+                  {isCreatingReferral ? 'Creating…' : 'Create'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {[
@@ -1323,6 +1421,92 @@ export function AdminSection() {
     );
   };
 
+  // ── View: Admin Notifications ─────────────────────────────────────────────
+
+  const renderNotifications = () => {
+    const openTickets = (summary?.support ?? []).filter((t) => t.status === 'open');
+    const pastDueOwners = (summary?.owners ?? []).filter((o) => o.subscriptionStatus === 'past_due');
+    const suspendedOwners = (summary?.owners ?? []).filter((o) => o.isSuspended);
+    const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString();
+    const newOwners = (summary?.owners ?? []).filter((o) => o.joinedAt && o.joinedAt > sevenDaysAgo);
+
+    type Alert = { id: string; level: 'high' | 'medium' | 'low'; title: string; detail: string; action?: () => void; actionLabel?: string };
+    const alerts: Alert[] = [
+      ...openTickets.map((t) => ({
+        id: `ticket-${t.id}`, level: 'high' as const,
+        title: `Open support ticket: ${t.subject}`,
+        detail: `Priority: ${t.priority} · ${t.category} · ${fmtDate(t.createdAt)}`,
+        action: () => navigateTo('support'), actionLabel: 'View Ticket',
+      })),
+      ...pastDueOwners.map((o) => ({
+        id: `pastdue-${o.id}`, level: 'high' as const,
+        title: `Payment overdue: ${o.name}`,
+        detail: `Plan: ${o.planCode} · ${o.email}`,
+        action: () => { setSelectedOwner(o); void loadOwnerDetail(o.id); setCurrentView('owner-detail'); }, actionLabel: 'View Owner',
+      })),
+      ...suspendedOwners.map((o) => ({
+        id: `suspended-${o.id}`, level: 'medium' as const,
+        title: `Suspended account: ${o.name}`,
+        detail: o.email,
+        action: () => { setSelectedOwner(o); void loadOwnerDetail(o.id); setCurrentView('owner-detail'); }, actionLabel: 'View Owner',
+      })),
+      ...newOwners.map((o) => ({
+        id: `new-${o.id}`, level: 'low' as const,
+        title: `New owner signup: ${o.name}`,
+        detail: `${o.email} · ${o.city} · ${fmtDate(o.joinedAt)}`,
+        action: () => { setSelectedOwner(o); void loadOwnerDetail(o.id); setCurrentView('owner-detail'); }, actionLabel: 'View Owner',
+      })),
+    ];
+
+    const levelStyle = {
+      high: 'border-red-200 bg-red-50',
+      medium: 'border-amber-200 bg-amber-50',
+      low: 'border-blue-200 bg-blue-50',
+    };
+    const dotStyle = { high: 'bg-red-500', medium: 'bg-amber-500', low: 'bg-blue-400' };
+
+    return (
+      <div className="space-y-4">
+        <div>
+          <h1 className="text-gray-900">Admin Alerts</h1>
+          <p className="text-gray-600 mt-1 text-sm">
+            Real-time actionable items requiring attention.
+            {isSyncing && <span className="ml-2 text-blue-500 text-xs animate-pulse">Syncing…</span>}
+          </p>
+        </div>
+        {alerts.length === 0 ? (
+          <div className="bg-white border border-gray-200 rounded-xl p-12 text-center">
+            <CheckCircle className="w-10 h-10 text-green-500 mx-auto mb-3" />
+            <p className="text-gray-900 font-semibold">All clear</p>
+            <p className="text-gray-500 text-sm mt-1">No open tickets, past-due accounts, or suspensions.</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {alerts.map((alert) => (
+              <div key={alert.id} className={`flex items-start justify-between gap-4 border rounded-xl px-4 py-3 ${levelStyle[alert.level]}`}>
+                <div className="flex items-start gap-3 min-w-0">
+                  <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${dotStyle[alert.level]}`} />
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-gray-900">{alert.title}</p>
+                    <p className="text-xs text-gray-600 mt-0.5">{alert.detail}</p>
+                  </div>
+                </div>
+                {alert.action && (
+                  <button
+                    onClick={alert.action}
+                    className="flex-shrink-0 text-xs font-semibold text-gray-700 border border-gray-300 bg-white rounded-lg px-3 py-1.5 hover:bg-gray-50"
+                  >
+                    {alert.actionLabel}
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   // ── View: Activity ────────────────────────────────────────────────────────
 
   const renderActivity = () => (
@@ -1357,6 +1541,7 @@ export function AdminSection() {
       case 'coupons': return renderCoupons();
       case 'referrals': return renderReferrals();
       case 'leads': return renderLeads();
+      case 'notifications': return renderNotifications();
       case 'activity': return renderActivity();
       case 'infrastructure': return <InfrastructureHealth />;
       default: return renderDashboard();

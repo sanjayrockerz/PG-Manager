@@ -10,6 +10,7 @@ import {
   demoTenants,
   demoVacateRequests,
 } from '../data/demoData';
+import type { TenantPortalSnapshot } from './supabaseData';
 import {
   type ActivityLogEntry,
   type AnnouncementCategory,
@@ -26,6 +27,7 @@ import {
   type WhatsAppQueueEntry,
   supabaseOwnerDataApi,
   supabasePropertyApi,
+  supabaseTenantDataApi,
   type TenantCreateInput,
   type TenantRecord,
   type VacateRequest,
@@ -35,6 +37,7 @@ import {
 import { domainEvents } from './eventBus';
 import { prepareImportRows, buildImportResult } from './csvImport';
 import { initNotificationEngine } from './notificationEngine';
+import { createAndStoreAgreement } from './agreementService';
 
 // Initialize the event-driven notification engine once at module load
 initNotificationEngine();
@@ -181,29 +184,38 @@ const withDemoStoreMutation = <T>(mutator: (store: DemoDataStore) => T): T => {
 
 const getDemoOwnerId = (store: DemoDataStore): string => store.tenants[0]?.ownerId ?? 'demo-owner-1';
 
-const buildDemoRevenueChartData = (payments: PaymentRecord[]): DashboardSnapshot['revenueChartData'] => {
+const buildDemoRevenueChartData = (
+  payments: PaymentRecord[],
+  rangeStart?: Date,
+  rangeEnd?: Date,
+): DashboardSnapshot['revenueChartData'] => {
   const now = new Date();
-  const buckets: Array<{ key: string; name: string; revenue: number }> = [];
+  const end = rangeEnd ?? now;
+  const start = rangeStart ?? new Date(now.getFullYear(), now.getMonth() - 5, 1);
 
-  for (let offset = 5; offset >= 0; offset -= 1) {
-    const date = new Date(now.getFullYear(), now.getMonth() - offset, 1);
+  // Build monthly buckets covering the full range
+  const buckets: Array<{ key: string; name: string; revenue: number }> = [];
+  const cursor = new Date(start.getFullYear(), start.getMonth(), 1);
+  while (cursor <= end) {
     buckets.push({
-      key: `${date.getFullYear()}-${date.getMonth()}`,
-      name: date.toLocaleDateString('en-US', { month: 'short' }),
+      key: `${cursor.getFullYear()}-${cursor.getMonth()}`,
+      name: cursor.toLocaleDateString('en-US', { month: 'short' }),
       revenue: 0,
     });
+    cursor.setMonth(cursor.getMonth() + 1);
+    if (buckets.length > 12) break; // safety cap
+  }
+
+  // Ensure at least 1 bucket
+  if (buckets.length === 0) {
+    buckets.push({ key: `${now.getFullYear()}-${now.getMonth()}`, name: now.toLocaleDateString('en-US', { month: 'short' }), revenue: 0 });
   }
 
   payments.forEach((payment) => {
-    if (payment.status !== 'paid') {
-      return;
-    }
-
+    if (payment.status !== 'paid') return;
     const reference = new Date(payment.paidDate || payment.dueDate);
     const bucket = buckets.find((entry) => entry.key === `${reference.getFullYear()}-${reference.getMonth()}`);
-    if (bucket) {
-      bucket.revenue += Number(payment.totalAmount) || 0;
-    }
+    if (bucket) bucket.revenue += Number(payment.totalAmount) || 0;
   });
 
   const averageRevenue = buckets.length > 0
@@ -220,6 +232,7 @@ const buildDemoRevenueChartData = (payments: PaymentRecord[]): DashboardSnapshot
 const buildDemoDashboardSnapshotFromStore = (
   store: DemoDataStore,
   propertyId: string | 'all',
+  dateRange?: { start: Date; end: Date },
 ): DashboardSnapshot => {
   const properties = propertyId === 'all'
     ? store.properties
@@ -233,16 +246,14 @@ const buildDemoDashboardSnapshotFromStore = (
   const totalRooms = rooms.length;
 
   const now = new Date();
-  const currentMonth = now.getMonth();
-  const currentYear = now.getFullYear();
+  const rangeStart = dateRange?.start ?? new Date(now.getFullYear(), now.getMonth(), 1);
+  const rangeEnd = dateRange?.end ?? now;
 
   const monthlyRevenue = payments
     .filter((payment) => {
-      if (payment.status !== 'paid') {
-        return false;
-      }
-      const date = new Date(payment.paidDate || payment.dueDate);
-      return date.getMonth() === currentMonth && date.getFullYear() === currentYear;
+      if (payment.status !== 'paid') return false;
+      const d = new Date(payment.paidDate || payment.dueDate);
+      return d >= rangeStart && d <= rangeEnd;
     })
     .reduce((sum, payment) => sum + (Number(payment.totalAmount) || 0), 0);
 
@@ -251,6 +262,10 @@ const buildDemoDashboardSnapshotFromStore = (
     .reduce((sum, payment) => sum + (Number(payment.totalAmount) || 0), 0);
 
   const recentPayments = [...payments]
+    .filter((p) => {
+      const d = new Date(p.createdAt);
+      return d >= rangeStart && d <= rangeEnd;
+    })
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
     .slice(0, 5);
 
@@ -262,8 +277,11 @@ const buildDemoDashboardSnapshotFromStore = (
     pendingAmount,
     pendingIssues: fallback.pendingIssues,
     recentPayments,
-    recentActivity: fallback.recentActivity,
-    revenueChartData: buildDemoRevenueChartData(payments),
+    recentActivity: fallback.recentActivity.filter((a) => {
+      const d = new Date(a.createdAt);
+      return d >= rangeStart && d <= rangeEnd;
+    }),
+    revenueChartData: buildDemoRevenueChartData(payments, rangeStart, rangeEnd),
   };
 };
 
@@ -355,13 +373,16 @@ export const isDemoModeEnabled = (): boolean => getAppMode() === 'demo';
 
 export const getCurrentAppMode = (): AppMode => getAppMode();
 
-export async function getDashboardData(propertyId: string | 'all'): Promise<DashboardSnapshot> {
+export async function getDashboardData(
+  propertyId: string | 'all',
+  dateRange?: { start: Date; end: Date },
+): Promise<DashboardSnapshot> {
   const mode = getAppMode();
   if (mode === 'demo') {
-    return clone(buildDemoDashboardSnapshotFromStore(readDemoStore(), propertyId));
+    return clone(buildDemoDashboardSnapshotFromStore(readDemoStore(), propertyId, dateRange));
   }
 
-  return runSupabase(mode, () => supabaseOwnerDataApi.getDashboardSnapshot(propertyId));
+  return runSupabase(mode, () => supabaseOwnerDataApi.getDashboardSnapshot(propertyId, dateRange));
 }
 
 export async function getTenants(propertyId: string | 'all' = 'all'): Promise<TenantRecord[]> {
@@ -604,7 +625,51 @@ export async function createTenantRecord(input: TenantCreateInput): Promise<Tena
     }));
   }
 
-  return runSupabase(mode, () => supabaseOwnerDataApi.createTenant(input));
+  return runSupabase(mode, async () => {
+    const created = await supabaseOwnerDataApi.createTenant(input);
+
+    // Fire-and-forget agreement draft creation
+    void (async () => {
+      try {
+        const propertyList = await getProperties();
+        const prop = propertyList.find((p) => p.id === created.propertyId);
+        if (prop) {
+          await createAndStoreAgreement({
+            tenant: created,
+            propertyName: prop.name,
+            propertyAddress: prop.address,
+            propertyCity: `${prop.city}, ${prop.state}`,
+            ownerName: 'Property Owner',
+            ownerPhone: prop.contactPhone,
+            generatedAt: new Date().toISOString(),
+          });
+        }
+      } catch (agreementErr) {
+        // Non-blocking — agreement can be regenerated manually from TenantDetail.
+        // Write a notification so the owner knows to generate it manually.
+        void (async () => {
+          try {
+            const { supabase } = await import('../lib/supabase');
+            const { data: profile } = await supabase.auth.getUser();
+            const ownerId = profile.user?.id;
+            if (ownerId) {
+              await supabase.from('notifications').insert({
+                owner_id: ownerId,
+                property_id: created.propertyId,
+                type: 'tenant',
+                title: 'Agreement not generated',
+                message: `Auto-generation failed for ${created.name}. Open Tenant Detail to generate manually.`,
+                read: false,
+              });
+            }
+          } catch { /* best-effort */ }
+        })();
+        console.warn('Agreement generation failed (non-blocking):', agreementErr);
+      }
+    })();
+
+    return created;
+  });
 }
 
 export async function updateTenantRecord(tenantId: string, input: Partial<TenantCreateInput>): Promise<TenantRecord> {
@@ -665,7 +730,7 @@ export async function deleteTenantRecord(tenantId: string): Promise<void> {
   await runSupabase(mode, () => supabaseOwnerDataApi.deleteTenant(tenantId));
 }
 
-export async function updatePaymentStatusRecord(paymentId: string, status: PaymentStatus): Promise<PaymentRecord> {
+export async function updatePaymentStatusRecord(paymentId: string, status: PaymentStatus, meta?: { paymentMode?: string; referenceNumber?: string; paidDate?: string; paymentNotes?: string }): Promise<PaymentRecord> {
   const mode = getAppMode();
   if (mode === 'demo') {
     return clone(withDemoStoreMutation((store) => {
@@ -733,7 +798,7 @@ export async function updatePaymentStatusRecord(paymentId: string, status: Payme
     }));
   }
 
-  return runSupabase(mode, () => supabaseOwnerDataApi.updatePaymentStatus(paymentId, status));
+  return runSupabase(mode, () => supabaseOwnerDataApi.updatePaymentStatus(paymentId, status, meta));
 }
 
 export async function addPaymentChargeRecord(
@@ -812,6 +877,7 @@ export async function getMaintenanceTickets(propertyId: string | 'all' = 'all'):
 
 export async function createMaintenanceTicketRecord(input: {
   tenant: string;
+  tenantId?: string | null;
   propertyId: string;
   room: string;
   issue: string;
@@ -819,7 +885,7 @@ export async function createMaintenanceTicketRecord(input: {
   priority: MaintenancePriority;
   source?: MaintenanceSource;
   phone?: string;
-  assignedTo?: string;
+  assignedTo?: string | null;
 }): Promise<MaintenanceTicketRecord> {
   const mode = getAppMode();
   if (mode === 'demo') {
@@ -843,7 +909,7 @@ export async function createMaintenanceTicketRecord(input: {
         phone: input.phone ?? '',
         notes: [],
         threads: [],
-        assignedTo: input.assignedTo,
+        assignedTo: input.assignedTo ?? undefined,
         updatedAt: now,
       };
 
@@ -908,6 +974,7 @@ export async function updateMaintenanceStatusRecord(
       // Thread entry for transition
       const statusLabels: Record<MaintenanceStatus, string> = {
         open: 'Open',
+        assigned: 'Assigned',
         'in-progress': 'In Progress',
         waiting: 'Waiting',
         resolved: 'Resolved',
@@ -1342,6 +1409,14 @@ export async function archiveTenantRecord(tenantId: string): Promise<TenantRecor
   return runSupabase(mode, () => supabaseOwnerDataApi.archiveTenant(tenantId));
 }
 
+// ─── Team Members ─────────────────────────────────────────────────────────────
+
+export async function getTeamMembers(): Promise<import('./supabaseData').TeamMemberRecord[]> {
+  const mode = getAppMode();
+  if (mode === 'demo') return [];
+  return runSupabase(mode, () => supabaseOwnerDataApi.listTeamMembers());
+}
+
 // ─── Vacate requests ──────────────────────────────────────────────────────────
 
 export async function getVacateRequests(propertyId: string | 'all' = 'all'): Promise<VacateRequest[]> {
@@ -1425,4 +1500,131 @@ export async function importTenantsFromCSV(
   });
 
   return buildImportResult(rows, createdTenants, runtimeErrors);
+}
+
+// ─── Tenant portal ────────────────────────────────────────────────────────────
+
+export async function getTenantPortalSnapshot(): Promise<TenantPortalSnapshot> {
+  const mode = getAppMode();
+  if (mode === 'demo') {
+    const store = readDemoStore();
+    const tenant = store.tenants.find((t) => t.id === 'demo-tenant-1') ?? store.tenants[0];
+    const property = demoProperties.find((p) => p.id === tenant.propertyId) ?? null;
+    const payments = store.payments.filter((p) => p.tenantId === tenant.id);
+    const maintenance = store.maintenanceTickets.filter(
+      (t) => t.tenant === tenant.name || t.propertyId === tenant.propertyId,
+    ).slice(0, 5);
+    const announcements = demoAnnouncements.filter(
+      (a) => a.propertyId === null || a.propertyId === tenant.propertyId,
+    );
+    const vacateRequest = demoVacateRequests.find((v) => v.tenantId === tenant.id) ?? null;
+
+    return {
+      profile: {
+        id: tenant.id,
+        name: tenant.name,
+        email: tenant.email,
+        phone: tenant.phone,
+        role: 'tenant',
+        ownerScopeId: null,
+        pgName: property?.name ?? 'Shree Niwas PG',
+        city: 'Jaipur',
+        photoUrl: null,
+      },
+      tenant,
+      property: property
+        ? { ...property, rooms: [] }
+        : null,
+      owner: {
+        id: 'demo-owner-1',
+        name: 'Vikram Singhania',
+        email: 'owner.demo@rentcare.demo',
+        phone: '+919887654321',
+        role: 'owner',
+        ownerScopeId: null,
+        pgName: 'Singhania PG Network',
+        city: 'Jaipur',
+        photoUrl: null,
+      },
+      payments,
+      maintenance,
+      announcements,
+      notifications: [],
+      ownerPaymentInfo: {
+        upiId: 'vikram.singhania@upi',
+        qrCodeUrl: '',
+        pgRules: [
+          'Rent due by the 7th of every month.',
+          'Late fee of ₹250 after the 10th.',
+          'Guests allowed till 9 PM only.',
+          'No cooking in rooms.',
+          'Noise curfew after 11 PM.',
+        ],
+        ownerPhone: '+919887654321',
+        pgName: 'Singhania PG Network',
+      },
+      vacateRequest,
+    };
+  }
+  return runSupabase(mode, () => supabaseTenantDataApi.getPortalSnapshot());
+}
+
+export async function submitTenantVacateRequest(input: { vacateDate: string; reason: string }): Promise<void> {
+  const mode = getAppMode();
+  if (mode === 'demo') {
+    withDemoStoreMutation((store) => {
+      const tenant = store.tenants.find((t) => t.id === 'demo-tenant-1');
+      if (!tenant) return;
+      const vacateDate = new Date(input.vacateDate);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const newStatus = vacateDate <= today ? 'inactive' : 'notice_submitted';
+      const idx = store.tenants.indexOf(tenant);
+      store.tenants[idx] = { ...tenant, status: newStatus, vacateDate: input.vacateDate, vacateReason: input.reason };
+    });
+    return;
+  }
+  return runSupabase(mode, () => supabaseTenantDataApi.submitVacateRequest(input));
+}
+
+export async function createTenantMaintenanceTicket(input: {
+  issue: string;
+  description: string;
+  priority: MaintenancePriority;
+  imageUrl?: string;
+}): Promise<MaintenanceTicketRecord> {
+  const mode = getAppMode();
+  if (mode === 'demo') {
+    return clone(withDemoStoreMutation((store) => {
+      const tenant = store.tenants.find((t) => t.id === 'demo-tenant-1') ?? store.tenants[0];
+      const ticketId = createDemoId('ticket');
+      const now = new Date().toISOString();
+      const ticket: MaintenanceTicketRecord = {
+        id: ticketId,
+        ticketId: `TKT-${String(store.maintenanceTickets.length + 1).padStart(3, '0')}`,
+        tenant: tenant.name,
+        propertyId: tenant.propertyId,
+        room: tenant.room,
+        issue: input.issue.trim(),
+        description: input.imageUrl ? `${input.description}\n\n📷 Photo: ${input.imageUrl}` : input.description.trim(),
+        source: 'portal',
+        status: 'open',
+        priority: input.priority,
+        date: toDateOnly(new Date()),
+        phone: tenant.phone,
+        notes: [],
+        threads: [],
+        updatedAt: now,
+      };
+      store.maintenanceTickets.unshift(ticket);
+      appendDemoActivity(store, {
+        propertyId: tenant.propertyId,
+        event: 'MAINTENANCE_CREATED',
+        detail: `${tenant.name} reported: ${input.issue} (Room ${tenant.room})`,
+        metadata: { ticketId, priority: input.priority },
+      });
+      return ticket;
+    }));
+  }
+  return runSupabase(mode, () => supabaseTenantDataApi.createMaintenanceTicket(input));
 }

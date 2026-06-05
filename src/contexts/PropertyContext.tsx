@@ -15,12 +15,13 @@ export interface Room {
   id: string;
   number: string;
   floor: number;
-  type: 'single' | 'double' | 'triple';
+  type: 'single' | 'double' | 'triple' | 'custom';
   beds: number;
   rent: number;
   status: 'occupied' | 'vacant' | 'maintenance';
   tenant?: string;
   occupiedBeds?: number;
+  roomCode?: string;
 }
 
 export interface Property {

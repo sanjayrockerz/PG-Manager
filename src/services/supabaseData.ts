@@ -2,6 +2,7 @@ import { supabase } from '../lib/supabase';
 import type { Property, Room } from '../contexts/PropertyContext';
 import { isPlatformAdminRole, isScopedOwnerRole } from '../utils/roles';
 import { isValidStoredPhoneNumber as isValidStoredPhoneFromUtils, parseStoredPhone } from '../utils/phone';
+import { domainEvents } from './eventBus';
 
 export type UserRole = 'owner' | 'owner_manager' | 'staff' | 'tenant' | 'platform_admin' | 'admin' | 'super_admin';
 export type DisplayRole = 'viewer' | 'editor' | 'manager';
@@ -48,7 +49,7 @@ export const TENANT_STATUS_COLORS: Record<TenantStatus, string> = {
 };
 
 export type PaymentStatus = 'paid' | 'pending' | 'overdue';
-export type MaintenanceStatus = 'open' | 'in-progress' | 'waiting' | 'resolved' | 'closed';
+export type MaintenanceStatus = 'open' | 'assigned' | 'in-progress' | 'waiting' | 'resolved' | 'closed';
 export type MaintenancePriority = 'low' | 'medium' | 'high';
 export type MaintenanceSource = 'portal' | 'manual' | 'admin_created' | 'whatsapp' | 'staff_created';
 export type AnnouncementCategory = 'maintenance' | 'payment' | 'rules' | 'general';
@@ -61,7 +62,13 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const INDIAN_PINCODE_PATTERN = /^\d{6}$/;
 const STARTER_MARKER = '[starter-reference-v2]';
 const STARTER_EMAIL_PREFIX = 'starter.';
-const SYNTHETIC_EMAIL_MARKERS = ['.demo@pgmanager.app', '@demo.app'] as const;
+const SYNTHETIC_EMAIL_MARKERS = ['.demo@pgmanager.app', '@demo.app', '@noemail.placeholder'] as const;
+const NO_EMAIL_MARKER = '@noemail.placeholder';
+
+/** Returns true if the stored email is a system-generated placeholder (tenant had no email). */
+export function isNoEmailPlaceholder(email: string | null | undefined): boolean {
+  return Boolean(email && email.includes(NO_EMAIL_MARKER));
+}
 
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
@@ -103,6 +110,7 @@ interface PropertyRow {
   contact_name: string;
   contact_phone: string;
   contact_email: string;
+  occupancy_mode: 'BED_BASED' | 'ROOM_BASED' | null;
   created_at: string;
 }
 
@@ -111,11 +119,101 @@ interface RoomRow {
   property_id: string;
   number: string;
   floor: number;
-  type: 'single' | 'double' | 'triple';
+  type: 'single' | 'double' | 'triple' | 'custom';
   beds: number;
   rent: number | string;
   status: 'occupied' | 'vacant' | 'maintenance';
   occupied_beds: number | null;
+  room_code: string | null;
+}
+
+interface FloorRow {
+  id: string;
+  property_id: string;
+  floor_number: number;
+  label: string;
+  created_at: string;
+}
+
+interface BedRow {
+  id: string;
+  room_id: string;
+  property_id: string;
+  bed_code: string;
+  position: number;
+  status: 'occupied' | 'vacant' | 'maintenance';
+  tenant_id: string | null;
+  created_at: string;
+}
+
+interface TenantDocumentRow {
+  id: string;
+  tenant_id: string;
+  owner_id: string;
+  doc_type: string;
+  label: string;
+  file_url: string;
+  verified: boolean;
+  verified_at: string | null;
+  created_at: string;
+}
+
+interface AgreementRow {
+  id: string;
+  tenant_id: string;
+  property_id: string;
+  owner_id: string;
+  status: AgreementStatus;
+  agreement_type: string;
+  start_date: string;
+  end_date: string | null;
+  monthly_rent: number | string;
+  security_deposit: number | string;
+  html_content: string | null;
+  pdf_url: string | null;
+  signed_at: string | null;
+  sent_at: string | null;
+  owner_signature_name?: string | null;
+  owner_signed_at?: string | null;
+  owner_signature_image?: string | null;
+  tenant_signature_name?: string | null;
+  tenant_signed_at?: string | null;
+  tenant_signature_image?: string | null;
+  is_locked?: boolean;
+  version?: number;
+  template_version?: number | null;
+  ip_address?: string | null;
+  device_metadata?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface OwnerSignatureProfileRow {
+  id: string;
+  owner_id: string;
+  is_active: boolean;
+  signature_type: 'draw' | 'upload' | 'typed';
+  signature_image: string | null;
+  signature_text: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface AgreementTemplateRow {
+  id: string;
+  owner_id: string;
+  version: number;
+  is_active: boolean;
+  house_rules: string | null;
+  visitor_rules: string | null;
+  late_fee_clause: string | null;
+  notice_period_clause: string | null;
+  refund_policy: string | null;
+  security_deposit_terms: string | null;
+  property_rules: string | null;
+  miscellaneous_terms: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 interface TenantRow {
@@ -143,6 +241,11 @@ interface TenantRow {
   vacate_reason?: string | null;
   created_at: string;
   updated_at?: string | null;
+  alternate_phone?: string | null;
+  dob?: string | null;
+  gender?: string | null;
+  guardian_relationship?: string | null;
+  billing_cycle?: string;
 }
 
 interface PaymentRow {
@@ -159,6 +262,9 @@ interface PaymentRow {
   paid_date: string | null;
   status: PaymentStatus;
   created_at: string;
+  payment_mode?: string | null;
+  reference_number?: string | null;
+  payment_notes?: string | null;
 }
 
 interface MaintenanceTicketRow {
@@ -176,6 +282,8 @@ interface MaintenanceTicketRow {
   phone: string | null;
   date: string;
   created_at: string;
+  assigned_to?: string | null;
+  updated_at?: string | null;
 }
 
 interface MaintenanceNoteRow {
@@ -322,6 +430,11 @@ export interface TenantRecord {
   vacateDate?: string;
   vacateReason?: string;
   createdAt: string;
+  alternatePhone?: string;
+  dob?: string;
+  gender?: string;
+  guardianRelationship?: string;
+  billingCycle?: string;
 }
 
 export interface VacateRequest {
@@ -397,7 +510,7 @@ export interface CSVImportResult {
 export interface TenantCreateInput {
   name: string;
   phone: string;
-  email: string;
+  email?: string;   // optional — phone is the primary identifier
   propertyId: string;
   floor: number;
   room: string;
@@ -413,6 +526,158 @@ export interface TenantCreateInput {
   status: TenantStatus;
   photo?: File | null;
   idDocument?: File | null;
+  alternatePhone?: string;
+  dob?: string;
+  gender?: string;
+  guardianRelationship?: string;
+  billingCycle?: string;
+}
+
+export type AgreementStatus =
+  | 'draft'
+  | 'pending_owner_signature'
+  | 'pending_tenant_signature'
+  | 'executed'
+  | 'sent'
+  | 'signed'
+  | 'expired'
+  | 'archived'
+  | 'cancelled';
+export type TenantDocType = 'aadhaar_front' | 'aadhaar_back' | 'pan' | 'passport' | 'driving_license' | 'photo' | 'other';
+
+export interface FloorRecord {
+  id: string;
+  propertyId: string;
+  floorNumber: number;
+  label: string;
+  createdAt: string;
+}
+
+export interface BedRecord {
+  id: string;
+  roomId: string;
+  propertyId: string;
+  bedCode: string;
+  position: number;
+  status: 'occupied' | 'vacant' | 'maintenance';
+  tenantId: string | null;
+  createdAt: string;
+}
+
+export interface BedCreateInput {
+  roomId: string;
+  propertyId: string;
+  bedCode: string;
+  position?: number;
+}
+
+export interface TenantDocument {
+  id: string;
+  tenantId: string;
+  ownerId: string;
+  docType: TenantDocType | string;
+  label: string;
+  fileUrl: string;
+  verified: boolean;
+  verifiedAt: string | null;
+  createdAt: string;
+}
+
+export interface TenantDocumentCreateInput {
+  tenantId: string;
+  docType: TenantDocType | string;
+  label?: string;
+  file: File;
+}
+
+export interface AgreementRecord {
+  id: string;
+  tenantId: string;
+  propertyId: string;
+  ownerId: string;
+  status: AgreementStatus;
+  agreementType: string;
+  startDate: string;
+  endDate: string | null;
+  monthlyRent: number;
+  securityDeposit: number;
+  htmlContent: string | null;
+  pdfUrl: string | null;
+  signedAt: string | null;
+  sentAt: string | null;
+  ownerSignatureName: string | null;
+  ownerSignedAt: string | null;
+  ownerSignatureImage: string | null;
+  tenantSignatureName: string | null;
+  tenantSignedAt: string | null;
+  tenantSignatureImage: string | null;
+  isLocked: boolean;
+  version: number;
+  templateVersion: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AgreementSignInput {
+  agreementId: string;
+  signatureName: string;
+  role: 'owner' | 'tenant';
+  signatureImage?: string;
+  ipAddress?: string;
+  deviceMetadata?: string;
+}
+
+export interface AgreementCreateInput {
+  tenantId: string;
+  propertyId: string;
+  startDate: string;
+  endDate?: string;
+  monthlyRent: number;
+  securityDeposit: number;
+  agreementType?: string;
+  htmlContent?: string;
+  templateVersion?: number;
+  autoOwnerSignatureName?: string;
+  autoOwnerSignatureImage?: string;
+}
+
+export interface OwnerSignatureProfile {
+  id: string;
+  ownerId: string;
+  isActive: boolean;
+  signatureType: 'draw' | 'upload' | 'typed';
+  signatureImage: string | null;
+  signatureText: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AgreementTemplate {
+  id: string;
+  ownerId: string;
+  version: number;
+  isActive: boolean;
+  houseRules: string | null;
+  visitorRules: string | null;
+  lateFeeClause: string | null;
+  noticePeriodClause: string | null;
+  refundPolicy: string | null;
+  securityDepositTerms: string | null;
+  propertyRules: string | null;
+  miscellaneousTerms: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AgreementTemplateUpsertInput {
+  houseRules?: string;
+  visitorRules?: string;
+  lateFeeClause?: string;
+  noticePeriodClause?: string;
+  refundPolicy?: string;
+  securityDepositTerms?: string;
+  propertyRules?: string;
+  miscellaneousTerms?: string;
 }
 
 export interface PaymentRecord {
@@ -428,6 +693,9 @@ export interface PaymentRecord {
   paidDate: string;
   status: PaymentStatus;
   createdAt: string;
+  paymentMode?: string;
+  referenceNumber?: string;
+  paymentNotes?: string;
 }
 
 export interface MaintenanceThreadEntry {
@@ -636,6 +904,18 @@ export interface OwnerSettingsRecord {
     language: string;
     timezone: string;
     currency: string;
+  };
+  integrations: {
+    smsProvider: {
+      provider: string;
+      enabled: boolean;
+      config: Record<string, string>;
+    };
+    paymentGateway: {
+      gateway: string;
+      enabled: boolean;
+      config: Record<string, string>;
+    };
   };
 }
 
@@ -931,10 +1211,9 @@ function validateTenantInput(input: Partial<TenantCreateInput>, requireAll: bool
     }
   }
 
-  if (requireAll || input.email !== undefined) {
-    if (!email || !isValidEmailAddress(email)) {
-      throw new Error('Tenant email must be a valid email address.');
-    }
+  // Email is optional — validate format only when a non-empty value is provided.
+  if (email && !isValidEmailAddress(email)) {
+    throw new Error('Tenant email must be a valid email address.');
   }
 
   if (requireAll || input.phone !== undefined) {
@@ -950,9 +1229,9 @@ function validateTenantInput(input: Partial<TenantCreateInput>, requireAll: bool
   }
 
   if (requireAll || input.floor !== undefined) {
-    const floor = Number(input.floor ?? 0);
-    if (!Number.isFinite(floor) || floor < 1) {
-      throw new Error('Floor must be at least 1.');
+    const floor = Number(input.floor ?? -1);
+    if (!Number.isFinite(floor) || floor < 0) {
+      throw new Error('Floor must be 0 or greater (0 = ground floor).');
     }
   }
 
@@ -962,10 +1241,9 @@ function validateTenantInput(input: Partial<TenantCreateInput>, requireAll: bool
     }
   }
 
-  if (requireAll || input.bed !== undefined) {
-    if (!String(input.bed ?? '').trim()) {
-      throw new Error('Bed is required.');
-    }
+  // Bed is optional — required only when explicitly provided and empty
+  if (!requireAll && input.bed !== undefined && input.bed !== null) {
+    // allow empty string (room-based properties may not have a bed)
   }
 
   if (requireAll || input.monthlyRent !== undefined) {
@@ -1121,11 +1399,11 @@ async function getCurrentUserContext(): Promise<CurrentUserContext> {
 
   let { data: profile, error: profileError } = await supabase
     .from('profiles')
-    .select('id,role,owner_scope_id')
+    .select('id,role,owner_scope_id,is_suspended')
     .eq('id', userId)
-    .maybeSingle<Pick<ProfileRow, 'id' | 'role' | 'owner_scope_id'>>();
+    .maybeSingle<Pick<ProfileRow, 'id' | 'role' | 'owner_scope_id' | 'is_suspended'>>();
 
-  if (profileError && isMissingColumnError(profileError, ['owner_scope_id'])) {
+  if (profileError && isMissingColumnError(profileError, ['owner_scope_id', 'is_suspended'])) {
     const legacy = await supabase
       .from('profiles')
       .select('id,role')
@@ -1133,7 +1411,7 @@ async function getCurrentUserContext(): Promise<CurrentUserContext> {
       .maybeSingle<Pick<ProfileRow, 'id' | 'role'>>();
 
     profileError = legacy.error;
-    profile = legacy.data ? { ...legacy.data, owner_scope_id: null } : null;
+    profile = legacy.data ? { ...legacy.data, owner_scope_id: null, is_suspended: false } : null;
   }
 
   if (profileError) {
@@ -1142,6 +1420,12 @@ async function getCurrentUserContext(): Promise<CurrentUserContext> {
 
   if (!profile) {
     throw new Error('Profile not found for authenticated user.');
+  }
+
+  // Suspension enforcement: block API access for suspended owner accounts
+  if (profile.is_suspended && (profile.role === 'owner' || isScopedOwnerRole(profile.role))) {
+    await supabase.auth.signOut();
+    throw new Error('ACCOUNT_SUSPENDED');
   }
 
   const role = profile.role;
@@ -1473,25 +1757,8 @@ async function resolveTenantContextForCurrentUser(): Promise<{
     row = await fetchTenantByPhone(phone);
   }
 
-  if (!row && (profile.role === 'owner' || isScopedOwnerRole(profile.role) || isPlatformAdminRole(profile.role))) {
-    let fallbackQuery = supabase
-      .from('tenants')
-      .select('*')
-      .order('status', { ascending: false })
-      .order('created_at', { ascending: false })
-      .limit(1);
-
-    if (!isPlatformAdminRole(profile.role)) {
-      fallbackQuery = fallbackQuery.eq('owner_id', profile.ownerScopeId ?? profile.id);
-    }
-
-    const { data: fallbackRows, error: fallbackError } = await fallbackQuery.returns<TenantRow[]>();
-    if (fallbackError) {
-      throw fallbackError;
-    }
-
-    row = fallbackRows?.[0] ?? null;
-  }
+  // Non-tenant roles (owner, platform_admin, etc.) must never silently inherit a random
+  // tenant record. If email/phone did not match, this is an unlinked or wrong-role account.
 
   if (!row) {
     throw new Error('No tenant record found for this account.');
@@ -1524,6 +1791,7 @@ function mapRoom(row: RoomRow): Room {
     rent: toNumber(row.rent),
     status: row.status,
     occupiedBeds: row.occupied_beds ?? 0,
+    roomCode: row.room_code ?? undefined,
   };
 }
 
@@ -1547,8 +1815,108 @@ function mapProperty(row: PropertyRow, rooms: Room[]): Property {
     contactName: row.contact_name,
     contactPhone: row.contact_phone,
     contactEmail: row.contact_email,
+    occupancyMode: row.occupancy_mode ?? 'BED_BASED',
     createdAt: row.created_at,
     rooms,
+  };
+}
+
+function mapFloor(row: FloorRow): FloorRecord {
+  return {
+    id: row.id,
+    propertyId: row.property_id,
+    floorNumber: row.floor_number,
+    label: row.label,
+    createdAt: row.created_at,
+  };
+}
+
+function mapBed(row: BedRow): BedRecord {
+  return {
+    id: row.id,
+    roomId: row.room_id,
+    propertyId: row.property_id,
+    bedCode: row.bed_code,
+    position: row.position,
+    status: row.status,
+    tenantId: row.tenant_id,
+    createdAt: row.created_at,
+  };
+}
+
+function mapTenantDocument(row: TenantDocumentRow): TenantDocument {
+  return {
+    id: row.id,
+    tenantId: row.tenant_id,
+    ownerId: row.owner_id,
+    docType: row.doc_type,
+    label: row.label,
+    fileUrl: row.file_url,
+    verified: row.verified,
+    verifiedAt: row.verified_at,
+    createdAt: row.created_at,
+  };
+}
+
+function mapAgreement(row: AgreementRow): AgreementRecord {
+  return {
+    id: row.id,
+    tenantId: row.tenant_id,
+    propertyId: row.property_id,
+    ownerId: row.owner_id,
+    status: row.status,
+    agreementType: row.agreement_type,
+    startDate: toDateOnly(row.start_date),
+    endDate: row.end_date ? toDateOnly(row.end_date) : null,
+    monthlyRent: toNumber(row.monthly_rent),
+    securityDeposit: toNumber(row.security_deposit),
+    htmlContent: row.html_content,
+    pdfUrl: row.pdf_url,
+    signedAt: row.signed_at,
+    sentAt: row.sent_at,
+    ownerSignatureName: row.owner_signature_name ?? null,
+    ownerSignedAt: row.owner_signed_at ?? null,
+    ownerSignatureImage: row.owner_signature_image ?? null,
+    tenantSignatureName: row.tenant_signature_name ?? null,
+    tenantSignedAt: row.tenant_signed_at ?? null,
+    tenantSignatureImage: row.tenant_signature_image ?? null,
+    isLocked: row.is_locked ?? false,
+    version: row.version ?? 1,
+    templateVersion: row.template_version ?? null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapSignatureProfile(row: OwnerSignatureProfileRow): OwnerSignatureProfile {
+  return {
+    id: row.id,
+    ownerId: row.owner_id,
+    isActive: row.is_active,
+    signatureType: row.signature_type,
+    signatureImage: row.signature_image,
+    signatureText: row.signature_text,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function mapAgreementTemplate(row: AgreementTemplateRow): AgreementTemplate {
+  return {
+    id: row.id,
+    ownerId: row.owner_id,
+    version: row.version,
+    isActive: row.is_active,
+    houseRules: row.house_rules,
+    visitorRules: row.visitor_rules,
+    lateFeeClause: row.late_fee_clause,
+    noticePeriodClause: row.notice_period_clause,
+    refundPolicy: row.refund_policy,
+    securityDepositTerms: row.security_deposit_terms,
+    propertyRules: row.property_rules,
+    miscellaneousTerms: row.miscellaneous_terms,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }
 
@@ -1558,7 +1926,8 @@ function mapTenant(row: TenantRow): TenantRecord {
     ownerId: row.owner_id,
     name: row.name,
     phone: row.phone,
-    email: row.email,
+    // Surface synthetic placeholder emails as empty string so UI shows '—' naturally.
+    email: isNoEmailPlaceholder(row.email) ? '' : row.email,
     photoUrl: row.photo_url ?? '',
     propertyId: row.property_id,
     floor: row.floor,
@@ -1577,6 +1946,11 @@ function mapTenant(row: TenantRow): TenantRecord {
     vacateDate: row.vacate_date ? toDateOnly(row.vacate_date) : undefined,
     vacateReason: row.vacate_reason ?? undefined,
     createdAt: row.created_at,
+    alternatePhone: row.alternate_phone ?? undefined,
+    dob: row.dob ?? undefined,
+    gender: row.gender ?? undefined,
+    guardianRelationship: row.guardian_relationship ?? undefined,
+    billingCycle: row.billing_cycle ?? 'monthly',
   };
 }
 
@@ -1594,6 +1968,9 @@ function mapPayment(row: PaymentRow): PaymentRecord {
     paidDate: toDateOnly(row.paid_date),
     status: row.status,
     createdAt: row.created_at,
+    paymentMode: row.payment_mode ?? undefined,
+    referenceNumber: row.reference_number ?? undefined,
+    paymentNotes: row.payment_notes ?? undefined,
   };
 }
 
@@ -1616,6 +1993,8 @@ function mapMaintenanceTicket(row: MaintenanceTicketRow, notes: MaintenanceNoteR
     date: toDateOnly(row.date),
     phone: row.phone ?? '',
     notes: sortedNotes,
+    assignedTo: row.assigned_to ?? undefined,
+    updatedAt: row.updated_at ?? undefined,
   };
 }
 
@@ -1805,6 +2184,10 @@ const defaultSettings: OwnerSettingsRecord = {
     timezone: 'IST (UTC+5:30)',
     currency: 'INR (Rs)',
   },
+  integrations: {
+    smsProvider: { provider: 'supabase', enabled: false, config: {} },
+    paymentGateway: { gateway: 'manual', enabled: false, config: {} },
+  },
 };
 
 function parseOwnerSettings(row: OwnerSettingsRow | null): OwnerSettingsRecord {
@@ -1869,6 +2252,23 @@ function parseOwnerSettings(row: OwnerSettingsRow | null): OwnerSettingsRecord {
       timezone: String(wsAdditional.timezone ?? defaultSettings.additionalSettings.timezone),
       currency: String(wsAdditional.currency ?? defaultSettings.additionalSettings.currency),
     },
+    integrations: (() => {
+      const wsIntegrations = (ws.integrations as Record<string, unknown> | undefined) ?? {};
+      const smsCfg = (wsIntegrations.smsProvider as Record<string, unknown> | undefined) ?? {};
+      const gwCfg = (wsIntegrations.paymentGateway as Record<string, unknown> | undefined) ?? {};
+      return {
+        smsProvider: {
+          provider: String(smsCfg.provider ?? 'supabase'),
+          enabled: Boolean(smsCfg.enabled ?? false),
+          config: (typeof smsCfg.config === 'object' && smsCfg.config !== null ? smsCfg.config : {}) as Record<string, string>,
+        },
+        paymentGateway: {
+          gateway: String(gwCfg.gateway ?? 'manual'),
+          enabled: Boolean(gwCfg.enabled ?? false),
+          config: (typeof gwCfg.config === 'object' && gwCfg.config !== null ? gwCfg.config : {}) as Record<string, string>,
+        },
+      };
+    })(),
   };
 }
 
@@ -1921,62 +2321,62 @@ async function ensureOwnerStarterData(ownerId: string, ownerName: string, ownerE
 
   const referenceProperties = [
     {
-      key: 'hsr',
-      name: 'Reference - Sunrise Habitat (HSR)',
-      address: '42, 19th Main Road, Sector 4, HSR Layout',
-      city: 'Bengaluru',
-      state: 'Karnataka',
-      pincode: '560102',
+      key: 'vai',
+      name: 'RentCare Residency (Vaishali Nagar)',
+      address: '14, Sector 3, Vaishali Nagar',
+      city: 'Jaipur',
+      state: 'Rajasthan',
+      pincode: '302021',
       floors: 3,
-      contactName: 'Nikhil Reddy',
-      contactPhone: '9845012345',
-      addressLine1: '42, 19th Main Road',
-      locality: 'HSR Layout Sector 4',
-      landmark: 'Near BDA Complex',
-      formattedAddress: '42, 19th Main Road, Sector 4, HSR Layout, Bengaluru, Karnataka 560102',
+      contactName: 'Rahul Sharma',
+      contactPhone: '9876501234',
+      addressLine1: '14, Sector 3',
+      locality: 'Vaishali Nagar',
+      landmark: 'Near DCM Chowk',
+      formattedAddress: '14, Sector 3, Vaishali Nagar, Jaipur, Rajasthan 302021',
       rooms: [
-        { number: '101', floor: 1, type: 'double' as const, beds: 2, rent: 12500 },
-        { number: '102', floor: 1, type: 'double' as const, beds: 2, rent: 11800 },
-        { number: '201', floor: 2, type: 'single' as const, beds: 1, rent: 14500 },
+        { number: '101', floor: 1, type: 'double' as const, beds: 2, rent: 9500 },
+        { number: '102', floor: 1, type: 'single' as const, beds: 1, rent: 10200 },
+        { number: '201', floor: 2, type: 'double' as const, beds: 2, rent: 9000 },
       ],
     },
     {
-      key: 'kor',
-      name: 'Reference - City Nest (Koramangala)',
-      address: '17, 5th Block, Koramangala',
-      city: 'Bengaluru',
-      state: 'Karnataka',
-      pincode: '560095',
+      key: 'mal',
+      name: 'Sunrise Boys PG (Malviya Nagar)',
+      address: '22, Adarsh Nagar, Malviya Nagar',
+      city: 'Jaipur',
+      state: 'Rajasthan',
+      pincode: '302017',
       floors: 2,
-      contactName: 'Ananya Rao',
-      contactPhone: '9900123456',
-      addressLine1: '17, 5th Block',
-      locality: 'Koramangala',
-      landmark: 'Near Jyoti Nivas College',
-      formattedAddress: '17, 5th Block, Koramangala, Bengaluru, Karnataka 560095',
+      contactName: 'Kavya Joshi',
+      contactPhone: '9876502345',
+      addressLine1: '22, Adarsh Nagar',
+      locality: 'Malviya Nagar',
+      landmark: 'Near Malviya Nagar Metro',
+      formattedAddress: '22, Adarsh Nagar, Malviya Nagar, Jaipur, Rajasthan 302017',
       rooms: [
-        { number: '001', floor: 0, type: 'single' as const, beds: 1, rent: 13200 },
-        { number: '002', floor: 0, type: 'double' as const, beds: 2, rent: 11200 },
-        { number: '101', floor: 1, type: 'triple' as const, beds: 3, rent: 9800 },
+        { number: '001', floor: 0, type: 'single' as const, beds: 1, rent: 8500 },
+        { number: '002', floor: 0, type: 'double' as const, beds: 2, rent: 8000 },
+        { number: '101', floor: 1, type: 'triple' as const, beds: 3, rent: 7200 },
       ],
     },
     {
-      key: 'ind',
-      name: 'Reference - Green View (Indiranagar)',
-      address: '28, 12th Cross, Indiranagar',
-      city: 'Bengaluru',
-      state: 'Karnataka',
-      pincode: '560038',
+      key: 'csc',
+      name: 'Green View Residency (C-Scheme)',
+      address: '8, Pandit Madan Mohan Malviya Marg, C-Scheme',
+      city: 'Jaipur',
+      state: 'Rajasthan',
+      pincode: '302001',
       floors: 2,
-      contactName: 'Siddharth Jain',
-      contactPhone: '9876504455',
-      addressLine1: '28, 12th Cross',
-      locality: 'Indiranagar',
-      landmark: '100 Feet Road',
-      formattedAddress: '28, 12th Cross, Indiranagar, Bengaluru, Karnataka 560038',
+      contactName: 'Priya Agarwal',
+      contactPhone: '9876503456',
+      addressLine1: '8, PMM Marg',
+      locality: 'C-Scheme',
+      landmark: 'Near Polo Victory Cinema',
+      formattedAddress: '8, PMM Marg, C-Scheme, Jaipur, Rajasthan 302001',
       rooms: [
-        { number: 'A1', floor: 1, type: 'single' as const, beds: 1, rent: 15000 },
-        { number: 'A2', floor: 1, type: 'double' as const, beds: 2, rent: 12500 },
+        { number: 'A1', floor: 1, type: 'single' as const, beds: 1, rent: 12000 },
+        { number: 'A2', floor: 1, type: 'double' as const, beds: 2, rent: 10500 },
       ],
     },
   ] as const;
@@ -1984,14 +2384,14 @@ async function ensureOwnerStarterData(ownerId: string, ownerName: string, ownerE
   const referenceTenants = [
     {
       slug: 'meera',
-      propertyKey: 'hsr',
+      propertyKey: 'vai',
       name: 'Meera Sharma',
       phone: '+919988776655',
       floor: 1,
       room: '101',
       bed: '1',
-      monthlyRent: 12500,
-      securityDeposit: 25000,
+      monthlyRent: 9500,
+      securityDeposit: 19000,
       rentDueDate: 5,
       parentName: 'Sanjay Sharma',
       parentPhone: '+919988776601',
@@ -2002,17 +2402,17 @@ async function ensureOwnerStarterData(ownerId: string, ownerName: string, ownerE
     },
     {
       slug: 'karan',
-      propertyKey: 'hsr',
+      propertyKey: 'vai',
       name: 'Karan Malhotra',
-      phone: '+919876501234',
+      phone: '+919876509876',
       floor: 1,
       room: '102',
       bed: '1',
-      monthlyRent: 11800,
-      securityDeposit: 23600,
+      monthlyRent: 10200,
+      securityDeposit: 20400,
       rentDueDate: 7,
       parentName: 'Rakesh Malhotra',
-      parentPhone: '+919876501200',
+      parentPhone: '+919876509800',
       idType: 'PAN',
       idNumber: 'ABCDE1234F',
       joinedDaysAgo: 70,
@@ -2020,14 +2420,14 @@ async function ensureOwnerStarterData(ownerId: string, ownerName: string, ownerE
     },
     {
       slug: 'nisha',
-      propertyKey: 'kor',
+      propertyKey: 'mal',
       name: 'Nisha Verma',
       phone: '+919812304567',
       floor: 0,
       room: '001',
       bed: '1',
-      monthlyRent: 13200,
-      securityDeposit: 26400,
+      monthlyRent: 8500,
+      securityDeposit: 17000,
       rentDueDate: 3,
       parentName: 'Mahesh Verma',
       parentPhone: '+919812304500',
@@ -2038,32 +2438,32 @@ async function ensureOwnerStarterData(ownerId: string, ownerName: string, ownerE
     },
     {
       slug: 'rohan',
-      propertyKey: 'kor',
+      propertyKey: 'mal',
       name: 'Rohan Dsouza',
       phone: '+919765401234',
       floor: 0,
       room: '002',
       bed: '2',
-      monthlyRent: 11200,
-      securityDeposit: 20000,
+      monthlyRent: 8000,
+      securityDeposit: 16000,
       rentDueDate: 10,
       parentName: 'Anthony Dsouza',
       parentPhone: '+919765401200',
       idType: 'Driving License',
-      idNumber: 'KA0520240011234',
+      idNumber: 'RJ0520240011234',
       joinedDaysAgo: 45,
       status: 'active' as const,
     },
     {
       slug: 'diya',
-      propertyKey: 'ind',
+      propertyKey: 'csc',
       name: 'Diya Menon',
       phone: '+918971231234',
       floor: 1,
       room: 'A1',
       bed: '1',
-      monthlyRent: 15000,
-      securityDeposit: 30000,
+      monthlyRent: 12000,
+      securityDeposit: 24000,
       rentDueDate: 4,
       parentName: 'Ritu Menon',
       parentPhone: '+918971231200',
@@ -2074,14 +2474,14 @@ async function ensureOwnerStarterData(ownerId: string, ownerName: string, ownerE
     },
     {
       slug: 'aditya',
-      propertyKey: 'ind',
+      propertyKey: 'csc',
       name: 'Aditya Nair',
       phone: '+919611123456',
       floor: 1,
       room: 'A2',
       bed: '1',
-      monthlyRent: 12500,
-      securityDeposit: 25000,
+      monthlyRent: 10500,
+      securityDeposit: 21000,
       rentDueDate: 8,
       parentName: 'Vikram Nair',
       parentPhone: '+919611123400',
@@ -2737,6 +3137,7 @@ export const supabasePropertyApi = {
       latitude: input.latitude ?? null,
       longitude: input.longitude ?? null,
       formatted_address: input.formattedAddress ?? input.address,
+      occupancy_mode: (input as { occupancyMode?: string }).occupancyMode ?? 'BED_BASED',
     };
 
     let createdRow: PropertyRow | null = null;
@@ -2772,7 +3173,14 @@ export const supabasePropertyApi = {
       throw new Error('Property could not be created.');
     }
 
-    return mapProperty(createdRow, []);
+    const newProperty = mapProperty(createdRow, []);
+
+    void logActivity(context.ownerId, newProperty.id, 'PROPERTY_CREATED',
+      `Property "${newProperty.name}" created in ${newProperty.city}`,
+      { propertyId: newProperty.id, name: newProperty.name },
+    ).catch(() => {});
+
+    return newProperty;
   },
 
   async update(id: string, input: Partial<Property>): Promise<Property> {
@@ -2801,6 +3209,7 @@ export const supabasePropertyApi = {
     if (input.latitude !== undefined) extendedPayload.latitude = input.latitude;
     if (input.longitude !== undefined) extendedPayload.longitude = input.longitude;
     if (input.formattedAddress !== undefined) extendedPayload.formatted_address = input.formattedAddress;
+    if ((input as { occupancyMode?: string }).occupancyMode !== undefined) extendedPayload.occupancy_mode = (input as { occupancyMode?: string }).occupancyMode;
 
     let updatedRow: PropertyRow | null = null;
 
@@ -2882,7 +3291,17 @@ export const supabasePropertyApi = {
     }
 
     await syncPropertyRoomCount(propertyId);
-    return mapRoom(data);
+    const newRoom = mapRoom(data);
+
+    void (async () => {
+      const context = await getCurrentUserContext();
+      await logActivity(context.ownerId, propertyId, 'ROOM_CREATED',
+        `Room ${newRoom.number} (Floor ${newRoom.floor}) added`,
+        { propertyId, roomId: newRoom.id, number: newRoom.number, beds: newRoom.beds },
+      );
+    })().catch(() => {});
+
+    return newRoom;
   },
 
   async updateRoom(propertyId: string, roomId: string, input: Partial<Room>): Promise<Room> {
@@ -2999,6 +3418,50 @@ export const supabaseOwnerDataApi = {
 
     await assertScopeCapability(context, input.propertyId, 'tenants');
 
+    // Resolve email: use provided value or generate a phone-based placeholder.
+    const phoneDigits = input.phone.replace(/\D/g, '').slice(-10);
+    const resolvedEmail = (input.email && input.email.trim())
+      ? input.email.trim().toLowerCase()
+      : `noemail.${phoneDigits}${NO_EMAIL_MARKER}`;
+
+    // Block creation only when a real email conflicts with a privileged account.
+    if (!resolvedEmail.includes(NO_EMAIL_MARKER)) {
+      const { data: emailConflict } = await supabase
+        .from('profiles')
+        .select('role')
+        .ilike('email', resolvedEmail)
+        .not('role', 'eq', 'tenant')
+        .maybeSingle<{ role: string }>();
+
+      if (emailConflict) {
+        const label = emailConflict.role === 'platform_admin' ? 'platform manager'
+          : emailConflict.role === 'owner_manager' ? 'property manager'
+          : emailConflict.role;
+        throw new Error(
+          `This email is already registered as a ${label} account. Tenant accounts must use a different email address.`,
+        );
+      }
+    }
+
+    if (input.phone) {
+      const phoneDigits = input.phone.replace(/\D/g, '').slice(-10);
+      const { data: phoneConflict } = await supabase
+        .from('profiles')
+        .select('role')
+        .or(`phone.eq.${input.phone},phone.ilike.%${phoneDigits}`)
+        .not('role', 'eq', 'tenant')
+        .maybeSingle<{ role: string }>();
+
+      if (phoneConflict) {
+        const label = phoneConflict.role === 'platform_admin' ? 'platform manager'
+          : phoneConflict.role === 'owner_manager' ? 'property manager'
+          : phoneConflict.role;
+        throw new Error(
+          `This phone number is already registered as a ${label} account. Tenant accounts must use a different phone number.`,
+        );
+      }
+    }
+
     let photoUrl: string | null = null;
     let idDocumentUrl: string | null = null;
 
@@ -3017,14 +3480,50 @@ export const supabaseOwnerDataApi = {
       }
     }
 
-    const { data, error } = await supabase
+    const insertPayload: Record<string, unknown> = {
+      owner_id: ownerId,
+      property_id: input.propertyId,
+      name: input.name,
+      phone: input.phone,
+      email: resolvedEmail,
+      photo_url: photoUrl,
+      floor: input.floor,
+      room: input.room,
+      bed: input.bed,
+      monthly_rent: input.monthlyRent,
+      security_deposit: input.securityDeposit,
+      rent_due_date: input.rentDueDate,
+      parent_name: input.parentName,
+      parent_phone: input.parentPhone,
+      id_type: input.idType,
+      id_number: input.idNumber,
+      id_document_url: idDocumentUrl,
+      join_date: input.joinDate,
+      status: input.status,
+      alternate_phone: input.alternatePhone ?? null,
+      dob: input.dob ?? null,
+      gender: input.gender ?? null,
+      guardian_relationship: input.guardianRelationship ?? null,
+      billing_cycle: input.billingCycle ?? 'monthly',
+    };
+
+    let data: TenantRow;
+    let error: unknown;
+
+    const result = await supabase
       .from('tenants')
-      .insert({
+      .insert(insertPayload)
+      .select('*')
+      .single<TenantRow>();
+
+    if (result.error && isMissingColumnError(result.error, ['alternate_phone', 'dob', 'gender', 'guardian_relationship', 'billing_cycle'])) {
+      // Fallback: insert without extended columns
+      const basePayload = {
         owner_id: ownerId,
         property_id: input.propertyId,
         name: input.name,
         phone: input.phone,
-        email: input.email,
+        email: resolvedEmail,
         photo_url: photoUrl,
         floor: input.floor,
         room: input.room,
@@ -3039,9 +3538,14 @@ export const supabaseOwnerDataApi = {
         id_document_url: idDocumentUrl,
         join_date: input.joinDate,
         status: input.status,
-      })
-      .select('*')
-      .single<TenantRow>();
+      };
+      const fallback = await supabase.from('tenants').insert(basePayload).select('*').single<TenantRow>();
+      data = fallback.data!;
+      error = fallback.error;
+    } else {
+      data = result.data!;
+      error = result.error;
+    }
 
     if (error) {
       throw mapTenantSaveError(error);
@@ -3069,6 +3573,51 @@ export const supabaseOwnerDataApi = {
       `${created.name} assigned to Room ${created.room}${created.bed ? `, Bed ${created.bed}` : ''}`,
       { tenantId: created.id, room: created.room, bed: created.bed },
     ).catch(() => {});
+
+    // Initial payment — synchronous with compensating rollback on failure.
+    // Ensures a tenant is never committed without a corresponding first invoice.
+    try {
+      const joinDate = new Date(input.joinDate);
+      const dueDateCandidate = new Date(joinDate.getFullYear(), joinDate.getMonth(), Math.min(input.rentDueDate, 28));
+      if (dueDateCandidate < joinDate) {
+        dueDateCandidate.setMonth(dueDateCandidate.getMonth() + 1);
+      }
+      const dueDateStr = dueDateCandidate.toISOString().split('T')[0];
+      const { data: existing } = await supabase.from('payments').select('id').eq('tenant_id', created.id).limit(1);
+      if (!existing?.length) {
+        const { error: paymentInsertError } = await supabase.from('payments').insert({
+          owner_id: ownerId,
+          tenant_id: created.id,
+          property_id: created.propertyId,
+          tenant_name: created.name,
+          room: created.room,
+          monthly_rent: created.rent,
+          extra_charges: 0,
+          total_amount: created.rent,
+          due_date: dueDateStr,
+          status: 'pending',
+        });
+        if (paymentInsertError) {
+          // Compensating transaction: remove the tenant row so we don't leave orphaned records.
+          await supabase.from('tenants').delete().eq('id', created.id).eq('owner_id', ownerId);
+          throw new Error(`Tenant creation rolled back — initial invoice could not be created: ${paymentInsertError.message}`);
+        }
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith('Tenant creation rolled back')) {
+        throw err;
+      }
+      // Non-fatal: if the check query itself fails, log and continue (payment can be created manually).
+      console.warn('Initial payment setup failed (non-fatal):', err);
+    }
+
+    domainEvents.tenantAssigned({
+      tenantId: created.id,
+      tenantName: created.name,
+      propertyId: created.propertyId,
+      room: created.room,
+      bed: created.bed,
+    });
 
     emitOwnerDataUpdated();
 
@@ -3117,14 +3666,43 @@ export const supabaseOwnerDataApi = {
     if (input.idNumber !== undefined) payload.id_number = input.idNumber;
     if (input.joinDate !== undefined) payload.join_date = input.joinDate;
     if (input.status !== undefined) payload.status = input.status;
+    if (input.alternatePhone !== undefined) payload.alternate_phone = input.alternatePhone ?? null;
+    if (input.dob !== undefined) payload.dob = input.dob ?? null;
+    if (input.gender !== undefined) payload.gender = input.gender ?? null;
+    if (input.guardianRelationship !== undefined) payload.guardian_relationship = input.guardianRelationship ?? null;
+    if (input.billingCycle !== undefined) payload.billing_cycle = input.billingCycle;
 
-    const { data, error } = await supabase
+    let data: TenantRow;
+    let error: unknown;
+
+    const updateResult = await supabase
       .from('tenants')
       .update(payload)
       .eq('id', tenantId)
       .eq('owner_id', ownerId)
       .select('*')
       .single<TenantRow>();
+
+    if (updateResult.error && isMissingColumnError(updateResult.error, ['alternate_phone', 'dob', 'gender', 'guardian_relationship', 'billing_cycle'])) {
+      const basePayload = { ...payload };
+      delete basePayload.alternate_phone;
+      delete basePayload.dob;
+      delete basePayload.gender;
+      delete basePayload.guardian_relationship;
+      delete basePayload.billing_cycle;
+      const fallback = await supabase
+        .from('tenants')
+        .update(basePayload)
+        .eq('id', tenantId)
+        .eq('owner_id', ownerId)
+        .select('*')
+        .single<TenantRow>();
+      data = fallback.data!;
+      error = fallback.error;
+    } else {
+      data = updateResult.data!;
+      error = updateResult.error;
+    }
 
     if (error) {
       throw mapTenantSaveError(error);
@@ -3346,7 +3924,7 @@ export const supabaseOwnerDataApi = {
     return (data ?? []).map(mapPayment);
   },
 
-  async updatePaymentStatus(paymentId: string, status: PaymentStatus): Promise<PaymentRecord> {
+  async updatePaymentStatus(paymentId: string, status: PaymentStatus, meta?: { paymentMode?: string; referenceNumber?: string; paidDate?: string; paymentNotes?: string }): Promise<PaymentRecord> {
     const context = await getCurrentUserContext();
     const ownerId = context.ownerId;
 
@@ -3363,17 +3941,20 @@ export const supabaseOwnerDataApi = {
 
     await assertScopeCapability(context, paymentRow?.property_id ?? null, 'payments');
 
-    const payload: Record<string, unknown> = {
-      status,
-    };
+    const payload: Record<string, unknown> = { status };
 
     if (status === 'paid') {
-      payload.paid_date = new Date().toISOString().split('T')[0];
+      payload.paid_date = meta?.paidDate ?? new Date().toISOString().split('T')[0];
+      if (meta?.paymentMode) payload.payment_mode = meta.paymentMode;
+      if (meta?.referenceNumber) payload.reference_number = meta.referenceNumber;
+      if (meta?.paymentNotes) payload.payment_notes = meta.paymentNotes;
     } else {
       payload.paid_date = null;
     }
 
-    const { data, error } = await supabase
+    let data: PaymentRow;
+
+    const fullResult = await supabase
       .from('payments')
       .update(payload)
       .eq('id', paymentId)
@@ -3381,8 +3962,23 @@ export const supabaseOwnerDataApi = {
       .select('*')
       .single<PaymentRow>();
 
-    if (error) {
-      throw error;
+    if (fullResult.error && isMissingColumnError(fullResult.error, ['payment_mode', 'reference_number', 'payment_notes'])) {
+      const basePayload = { ...payload };
+      delete basePayload.payment_mode;
+      delete basePayload.reference_number;
+      delete basePayload.payment_notes;
+      const fallback = await supabase
+        .from('payments')
+        .update(basePayload)
+        .eq('id', paymentId)
+        .eq('owner_id', ownerId)
+        .select('*')
+        .single<PaymentRow>();
+      if (fallback.error) throw fallback.error;
+      data = fallback.data!;
+    } else {
+      if (fullResult.error) throw fullResult.error;
+      data = fullResult.data!;
     }
 
     const updated = mapPayment(data);
@@ -3399,6 +3995,139 @@ export const supabaseOwnerDataApi = {
         `Payment of ₹${updated.totalAmount.toLocaleString('en-IN')} received from ${updated.tenant} (Room ${updated.room})`,
         { paymentId: updated.id, tenantId: updated.tenantId, amount: updated.totalAmount },
       ).catch(() => {});
+
+      domainEvents.paymentReceived({
+        paymentId: updated.id,
+        tenantId: updated.tenantId,
+        tenantName: updated.tenant,
+        propertyId: updated.propertyId,
+        amount: updated.totalAmount,
+      });
+
+      // Auto-generate next-month payment if it doesn't already exist
+      void (async () => {
+        const existingDue = new Date(updated.dueDate);
+        const nextDue = new Date(existingDue.getFullYear(), existingDue.getMonth() + 1, existingDue.getDate());
+        const nextDueDateStr = nextDue.toISOString().split('T')[0];
+        const { data: existingNext } = await supabase.from('payments').select('id')
+          .eq('tenant_id', updated.tenantId).eq('due_date', nextDueDateStr).limit(1);
+        if (!existingNext?.length) {
+          await supabase.from('payments').insert({
+            owner_id: ownerId,
+            tenant_id: updated.tenantId,
+            property_id: updated.propertyId,
+            tenant_name: updated.tenant,
+            room: updated.room,
+            monthly_rent: updated.monthlyRent,
+            extra_charges: 0,
+            total_amount: updated.monthlyRent,
+            due_date: nextDueDateStr,
+            status: 'pending',
+          });
+        }
+      })().catch((err) => {
+        console.warn('Next-month payment generation failed:', err);
+      });
+
+      // Store receipt as a document in tenant_documents (best-effort).
+      void (async () => {
+        try {
+          const month = new Date(updated.dueDate).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+          const receiptLabel = `Receipt — ${month}`;
+          const receiptNo = `RCP-${updated.id.slice(-8).toUpperCase()}`;
+          const statusColor = '#16a34a';
+          const fmtCur = (n: number) => `₹${n.toLocaleString('en-IN')}`;
+          const fmtDt = (s: string) => s ? new Date(s).toLocaleDateString('en-IN', { day: '2-digit', month: 'long', year: 'numeric' }) : '—';
+          const modeLine = data.payment_mode
+            ? `<p style="margin:4px 0;font-size:13px"><strong>Mode:</strong> ${String(data.payment_mode).replace(/_/g, ' ')}${data.reference_number ? ` &nbsp;|&nbsp; <strong>Ref:</strong> ${String(data.reference_number)}` : ''}</p>`
+            : '';
+          const notesLine = data.payment_notes
+            ? `<p style="margin:4px 0;font-size:13px"><strong>Notes:</strong> ${String(data.payment_notes)}</p>`
+            : '';
+          const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/>
+<title>${receiptLabel}</title>
+<style>body{font-family:'Segoe UI',Arial,sans-serif;padding:24px;background:#f9fafb;color:#111827}
+.card{max-width:560px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,.1)}
+.hdr{background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;padding:24px 28px}
+.hdr h1{margin:0;font-size:20px;font-weight:800}
+.hdr p{margin:4px 0 0;font-size:12px;opacity:.75}
+.body{padding:24px 28px}
+.row{display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f3f4f6;font-size:13px}
+.row:last-child{border:none;font-weight:700;font-size:15px}
+.amt{color:${statusColor};font-weight:800;font-size:18px}
+.ftr{background:#f9fafb;padding:14px 28px;font-size:11px;color:#9ca3af;text-align:center}
+</style></head><body>
+<div class="card">
+  <div class="hdr"><h1>Rent Receipt</h1><p>${receiptNo} &nbsp;·&nbsp; ${fmtDt(new Date().toISOString())}</p></div>
+  <div class="body">
+    <div class="row"><span>Tenant</span><span>${updated.tenant}</span></div>
+    <div class="row"><span>Room</span><span>${updated.room}</span></div>
+    <div class="row"><span>Due Date</span><span>${fmtDt(updated.dueDate)}</span></div>
+    <div class="row"><span>Paid On</span><span>${fmtDt(updated.paidDate ?? new Date().toISOString().split('T')[0])}</span></div>
+    <div class="row"><span>Base Rent</span><span>${fmtCur(updated.monthlyRent)}</span></div>
+    ${updated.extraCharges > 0 ? `<div class="row"><span>Extra Charges</span><span>${fmtCur(updated.extraCharges)}</span></div>` : ''}
+    <div class="row"><span>Total Amount</span><span class="amt">${fmtCur(updated.totalAmount)}</span></div>
+  </div>
+  ${(modeLine || notesLine) ? `<div style="padding:0 28px 16px">${modeLine}${notesLine}</div>` : ''}
+  <div class="ftr"><p>Computer-generated receipt — does not require a physical signature.</p></div>
+</div></body></html>`;
+
+          await supabaseLifecycleApi.storeReceiptAsDocument({
+            tenantId: updated.tenantId,
+            paymentId: updated.id,
+            htmlContent: html,
+            label: receiptLabel,
+          });
+        } catch {
+          // Non-fatal — storage may not be configured
+        }
+      })();
+    }
+
+    // Auto-apply late fee when payment transitions to overdue
+    if (status === 'overdue') {
+      void (async () => {
+        try {
+          const { data: settingsRow } = await supabase
+            .from('owner_settings')
+            .select('whatsapp_settings')
+            .eq('owner_id', ownerId)
+            .maybeSingle<Pick<OwnerSettingsRow, 'whatsapp_settings'>>();
+
+          const ws = (settingsRow?.whatsapp_settings ?? {}) as Record<string, unknown>;
+          const latePaymentFee = Number((ws.paymentSettings as Record<string, unknown> | undefined)?.latePaymentFee ?? 0);
+
+          if (latePaymentFee > 0) {
+            const { error: chargeError } = await supabase
+              .from('payment_charges')
+              .insert({
+                payment_id: paymentId,
+                type: 'late_fee',
+                description: `Late payment fee`,
+                amount: latePaymentFee,
+              });
+
+            if (!chargeError) {
+              const newExtra = toNumber(data.extra_charges) + latePaymentFee;
+              const newTotal = toNumber(data.monthly_rent) + newExtra;
+              await supabase
+                .from('payments')
+                .update({ extra_charges: newExtra, total_amount: newTotal })
+                .eq('id', paymentId)
+                .eq('owner_id', ownerId);
+
+              void createOwnerNotification(ownerId, {
+                type: 'payment',
+                title: `Late fee applied: ₹${latePaymentFee.toLocaleString('en-IN')}`,
+                message: `Auto-applied to ${updated.tenant} (Room ${updated.room}) for overdue payment`,
+                propertyId: updated.propertyId,
+              }).catch(() => {});
+            }
+          }
+        } catch {
+          // Non-fatal: late fee auto-application is best-effort
+        }
+      })();
     }
 
     emitOwnerDataUpdated();
@@ -3440,6 +4169,42 @@ export const supabaseOwnerDataApi = {
 
     if (error) {
       throw error;
+    }
+
+    // Re-compute total from all charges so `payments.extra_charges` and `payments.total_amount` stay consistent.
+    const { data: allCharges, error: chargesError } = await supabase
+      .from('payment_charges')
+      .select('amount')
+      .eq('payment_id', paymentId)
+      .returns<Array<{ amount: number | string }>>();
+
+    if (chargesError) {
+      throw chargesError;
+    }
+
+    const totalExtraCharges = (allCharges ?? []).reduce((sum, c) => sum + toNumber(c.amount), 0);
+
+    const { data: currentPayment, error: currentPaymentError } = await supabase
+      .from('payments')
+      .select('monthly_rent')
+      .eq('id', paymentId)
+      .eq('owner_id', ownerId)
+      .single<Pick<PaymentRow, 'monthly_rent'>>();
+
+    if (currentPaymentError) {
+      throw currentPaymentError;
+    }
+
+    const newTotal = toNumber(currentPayment.monthly_rent) + totalExtraCharges;
+
+    const { error: updateError } = await supabase
+      .from('payments')
+      .update({ extra_charges: totalExtraCharges, total_amount: newTotal })
+      .eq('id', paymentId)
+      .eq('owner_id', ownerId);
+
+    if (updateError) {
+      throw updateError;
     }
 
     const { data, error: paymentError } = await supabase
@@ -3592,6 +4357,7 @@ export const supabaseOwnerDataApi = {
 
   async createMaintenanceTicket(input: {
     tenant: string;
+    tenantId?: string | null;
     propertyId: string;
     room: string;
     issue: string;
@@ -3599,6 +4365,7 @@ export const supabaseOwnerDataApi = {
     priority: MaintenancePriority;
     source?: MaintenanceSource;
     phone?: string;
+    assignedTo?: string | null;
   }): Promise<MaintenanceTicketRecord> {
     const context = await getCurrentUserContext();
     const ownerId = context.ownerId;
@@ -3609,15 +4376,17 @@ export const supabaseOwnerDataApi = {
       .from('maintenance_tickets')
       .insert({
         owner_id: ownerId,
+        tenant_id: input.tenantId ?? null,
         tenant: input.tenant,
         property_id: input.propertyId,
         room: input.room,
         issue: input.issue,
         description: input.description,
         source: input.source ?? 'manual',
-        status: 'open',
+        status: input.assignedTo ? 'assigned' : 'open',
         priority: input.priority,
         phone: input.phone ?? null,
+        assigned_to: input.assignedTo ?? null,
       })
       .select('*')
       .single<MaintenanceTicketRow>();
@@ -3639,6 +4408,14 @@ export const supabaseOwnerDataApi = {
       `Maintenance ticket created: ${created.issue} (Room ${created.room})`,
       { ticketId: created.id, priority: created.priority, tenant: created.tenant },
     ).catch(() => {});
+
+    domainEvents.maintenanceCreated({
+      ticketId: created.id,
+      propertyId: created.propertyId,
+      issue: created.issue,
+      tenant: created.tenant,
+      priority: created.priority,
+    });
 
     return created;
   },
@@ -3686,7 +4463,7 @@ export const supabaseOwnerDataApi = {
     }
 
     const STATUS_LABELS: Record<MaintenanceStatus, string> = {
-      open: 'Open', 'in-progress': 'In Progress', waiting: 'Waiting', resolved: 'Resolved', closed: 'Closed',
+      open: 'Open', assigned: 'Assigned', 'in-progress': 'In Progress', waiting: 'Waiting', resolved: 'Resolved', closed: 'Closed',
     };
 
     const actorRole = context.role === 'owner' || context.role === 'owner_manager'
@@ -3709,6 +4486,42 @@ export const supabaseOwnerDataApi = {
       `Ticket status: ${previousStatus ?? '?'} → ${status} (${ticketRow?.issue ?? ''}, Room ${ticketRow?.room ?? ''})`,
       { ticketId, previousStatus, newStatus: status, tenant: ticketRow?.tenant },
     ).catch(() => {});
+
+    const STATUS_LABELS_NOTIF: Record<MaintenanceStatus, string> = {
+      open: 'Open', assigned: 'Assigned', 'in-progress': 'In Progress', waiting: 'Waiting for Parts',
+      resolved: 'Resolved', closed: 'Closed',
+    };
+
+    if (status === 'resolved' || status === 'closed') {
+      void createOwnerNotification(ownerId, {
+        type: 'maintenance',
+        title: `Ticket ${status === 'resolved' ? 'Resolved' : 'Closed'}: ${ticketRow?.issue ?? ''}`,
+        message: `Room ${ticketRow?.room ?? ''} · ${ticketRow?.tenant ?? ''}`,
+        propertyId: ticketRow?.property_id ?? null,
+      }).catch(() => {});
+
+      domainEvents.maintenanceResolved({
+        ticketId,
+        propertyId: ticketRow?.property_id ?? '',
+        issue: ticketRow?.issue ?? '',
+        tenant: ticketRow?.tenant ?? '',
+      });
+    } else {
+      void createOwnerNotification(ownerId, {
+        type: 'maintenance',
+        title: `Ticket Updated: ${STATUS_LABELS_NOTIF[status]}`,
+        message: `${ticketRow?.issue ?? ''} · Room ${ticketRow?.room ?? ''} · ${ticketRow?.tenant ?? ''}`,
+        propertyId: ticketRow?.property_id ?? null,
+      }).catch(() => {});
+
+      domainEvents.maintenanceUpdated({
+        ticketId,
+        propertyId: ticketRow?.property_id ?? '',
+        issue: ticketRow?.issue ?? '',
+        fromStatus: previousStatus ?? '',
+        toStatus: status,
+      });
+    }
 
     return mapMaintenanceTicket(data, notes ?? []);
   },
@@ -3881,6 +4694,13 @@ export const supabaseOwnerDataApi = {
       `Announcement "${created.title}" published${input.sendViaWhatsApp ? ' · WhatsApp broadcast enabled' : ''}`,
       { announcementId: created.id, category: created.category, whatsapp: input.sendViaWhatsApp },
     ).catch(() => {});
+
+    domainEvents.announcementCreated({
+      announcementId: created.id,
+      propertyId: created.propertyId,
+      title: created.title,
+      whatsappEnabled: input.sendViaWhatsApp,
+    });
 
     return created;
   },
@@ -4093,7 +4913,14 @@ export const supabaseOwnerDataApi = {
       throw error;
     }
 
-    return mapOwnerSubscription(data);
+    const updated = mapOwnerSubscription(data);
+
+    void logActivity(ownerId, null, 'SUBSCRIPTION_UPDATED',
+      `Subscription updated: plan=${updated.planCode}, status=${updated.status}`,
+      { planCode: updated.planCode, status: updated.status, billingCycle: updated.billingCycle },
+    ).catch(() => {});
+
+    return updated;
   },
 
   async listSupportTickets(propertyId: string | 'all' = 'all'): Promise<SupportTicketRecord[]> {
@@ -4458,6 +5285,7 @@ export const supabaseOwnerDataApi = {
       security: settings.security,
       paymentSettings: settings.paymentSettings,
       additionalSettings: settings.additionalSettings,
+      integrations: settings.integrations,
     };
 
     const { error } = await supabase
@@ -4636,7 +5464,10 @@ export const supabaseOwnerDataApi = {
     emitOwnerDataUpdated();
   },
 
-  async getDashboardSnapshot(propertyId: string | 'all'): Promise<DashboardSnapshot> {
+  async getDashboardSnapshot(
+    propertyId: string | 'all',
+    dateRange?: { start: Date; end: Date },
+  ): Promise<DashboardSnapshot> {
     try {
       const [properties, payments, tenants, maintenance] = await Promise.all([
         supabasePropertyApi.list(),
@@ -4650,16 +5481,14 @@ export const supabaseOwnerDataApi = {
       const totalRooms = allRooms.length;
 
       const now = new Date();
-      const currentMonth = now.getMonth();
-      const currentYear = now.getFullYear();
+      const rangeStart = dateRange?.start ?? new Date(now.getFullYear(), now.getMonth(), 1);
+      const rangeEnd = dateRange?.end ?? now;
 
       const monthlyRevenue = payments
         .filter((payment) => {
-          if (payment.status !== 'paid') {
-            return false;
-          }
+          if (payment.status !== 'paid') return false;
           const referenceDate = payment.paidDate ? new Date(payment.paidDate) : new Date(payment.dueDate);
-          return referenceDate.getMonth() === currentMonth && referenceDate.getFullYear() === currentYear;
+          return referenceDate >= rangeStart && referenceDate <= rangeEnd;
         })
         .reduce((sum, payment) => sum + payment.totalAmount, 0);
 
@@ -4670,6 +5499,10 @@ export const supabaseOwnerDataApi = {
       const pendingIssues = maintenance.filter((ticket) => ticket.status === 'open').length;
 
       const recentPayments = [...payments]
+        .filter((p) => {
+          const d = new Date(p.createdAt);
+          return d >= rangeStart && d <= rangeEnd;
+        })
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
         .slice(0, 5);
 
@@ -4690,29 +5523,34 @@ export const supabaseOwnerDataApi = {
       }));
 
       const recentActivity = [...paymentActivity, ...maintenanceActivity]
+        .filter((a) => {
+          const d = new Date(a.createdAt);
+          return d >= rangeStart && d <= rangeEnd;
+        })
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
         .slice(0, 6);
 
+      // Build chart buckets covering the range (capped at 12 months)
       const monthBuckets: Array<{ key: string; name: string; revenue: number }> = [];
-      for (let i = 5; i >= 0; i -= 1) {
-        const date = new Date(currentYear, currentMonth - i, 1);
+      const bucketCursor = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), 1);
+      while (bucketCursor <= rangeEnd && monthBuckets.length < 12) {
         monthBuckets.push({
-          key: `${date.getFullYear()}-${date.getMonth()}`,
-          name: toMonthName(date),
+          key: `${bucketCursor.getFullYear()}-${bucketCursor.getMonth()}`,
+          name: toMonthName(bucketCursor),
           revenue: 0,
         });
+        bucketCursor.setMonth(bucketCursor.getMonth() + 1);
+      }
+      if (monthBuckets.length === 0) {
+        monthBuckets.push({ key: `${rangeEnd.getFullYear()}-${rangeEnd.getMonth()}`, name: toMonthName(rangeEnd), revenue: 0 });
       }
 
       payments.forEach((payment) => {
-        if (payment.status !== 'paid') {
-          return;
-        }
+        if (payment.status !== 'paid') return;
         const referenceDate = payment.paidDate ? new Date(payment.paidDate) : new Date(payment.dueDate);
         const key = `${referenceDate.getFullYear()}-${referenceDate.getMonth()}`;
         const bucket = monthBuckets.find((entry) => entry.key === key);
-        if (bucket) {
-          bucket.revenue += payment.totalAmount;
-        }
+        if (bucket) bucket.revenue += payment.totalAmount;
       });
 
       const averageRevenue = monthBuckets.length > 0
@@ -4793,7 +5631,9 @@ export const supabaseOwnerDataApi = {
     await supabase.from('vacate_requests').insert({
       owner_id: ownerId,
       tenant_id: input.tenantId,
+      tenant_name: tenantRow.name,
       property_id: tenantRow.property_id,
+      room: tenantRow.room,
       notice_date: new Date().toISOString().split('T')[0],
       planned_vacate_date: input.vacateDate,
       reason: input.reason,
@@ -5151,16 +5991,29 @@ export const supabaseTenantDataApi = {
       throw error;
     }
 
+    const created = mapMaintenanceTicket(data, []);
+
     void createOwnerNotification(tenant.ownerId, {
       type: 'maintenance',
       title: 'New Tenant Complaint',
       message: `${tenant.name} reported: ${input.issue}`,
       propertyId: tenant.propertyId,
-    }).catch(() => {
-      // Notification should not block tenant ticket creation.
+    }).catch(() => {});
+
+    void logActivity(tenant.ownerId, tenant.propertyId, 'MAINTENANCE_CREATED',
+      `${tenant.name} reported: ${input.issue} (Room ${tenant.room})`,
+      { ticketId: created.id, priority: input.priority, tenant: tenant.name, source: 'portal' },
+    ).catch(() => {});
+
+    domainEvents.maintenanceCreated({
+      ticketId: created.id,
+      propertyId: tenant.propertyId,
+      issue: input.issue,
+      tenant: tenant.name,
+      priority: input.priority,
     });
 
-    return mapMaintenanceTicket(data, []);
+    return created;
   },
 
   async uploadMaintenanceImage(file: File): Promise<string> {
@@ -5179,6 +6032,12 @@ export const supabaseTenantDataApi = {
   async submitVacateRequest(input: { vacateDate: string; reason: string }): Promise<void> {
     const { tenant } = await resolveTenantContextForCurrentUser();
 
+    const vacateDate = new Date(input.vacateDate);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const isImmediateVacate = vacateDate <= today;
+    const newStatus: TenantStatus = isImmediateVacate ? 'inactive' : 'notice_submitted';
+
     const { error } = await supabase.from('vacate_requests').insert({
       owner_id: tenant.ownerId,
       tenant_id: tenant.id,
@@ -5192,12 +6051,46 @@ export const supabaseTenantDataApi = {
     });
     if (error) throw error;
 
+    await supabase
+      .from('tenants')
+      .update({
+        status: newStatus,
+        vacate_date: input.vacateDate,
+        vacate_reason: input.reason,
+      })
+      .eq('id', tenant.id);
+
+    // Sync room occupancy when tenant vacates immediately so DB room.status matches reality
+    if (isImmediateVacate && tenant.propertyId) {
+      try {
+        await syncRoomOccupancyForProperty(tenant.ownerId, tenant.propertyId);
+      } catch {
+        // Non-fatal: room sync failure should not block vacate flow
+      }
+    }
+
+    // Log to activity (fire-and-forget; non-fatal)
+    void logActivity(tenant.ownerId, tenant.propertyId, 'TENANT_VACATE_NOTICE',
+      `${tenant.name} submitted vacate notice for ${input.vacateDate}`,
+      { tenantId: tenant.id, room: tenant.room, vacateDate: input.vacateDate },
+    ).catch(() => {});
+
     void createOwnerNotification(tenant.ownerId, {
       type: 'tenant',
       title: 'Vacate Notice Submitted',
       message: `${tenant.name} (Room ${tenant.room}) submitted a vacate notice for ${input.vacateDate}`,
       propertyId: tenant.propertyId,
     }).catch(() => {});
+
+    domainEvents.tenantVacated({
+      tenantId: tenant.id,
+      tenantName: tenant.name,
+      propertyId: tenant.propertyId,
+      room: tenant.room,
+      depositRefund: 0,
+      isImmediate: isImmediateVacate,
+      vacateDate: input.vacateDate,
+    });
   },
 };
 
@@ -5562,7 +6455,7 @@ export const supabaseAdminDataApi = {
       throw error;
     }
 
-    await logActivity(context.userId, null, 'ADMIN_OWNER_SUSPENDED', `Owner ${ownerId} suspended. Reason: ${reason}`, { ownerId, reason });
+    await logActivity(ownerId, null, 'ADMIN_OWNER_SUSPENDED', `Owner ${ownerId} suspended by admin. Reason: ${reason}`, { ownerId, adminId: context.userId, reason });
   },
 
   async unsuspendOwner(ownerId: string): Promise<void> {
@@ -5581,7 +6474,7 @@ export const supabaseAdminDataApi = {
       throw error;
     }
 
-    await logActivity(context.userId, null, 'ADMIN_OWNER_UNSUSPENDED', `Owner ${ownerId} unsuspended`, { ownerId });
+    await logActivity(ownerId, null, 'ADMIN_OWNER_UNSUSPENDED', `Owner ${ownerId} unsuspended by admin`, { ownerId, adminId: context.userId });
   },
 
   async verifyOwner(ownerId: string): Promise<void> {
@@ -5603,19 +6496,49 @@ export const supabaseAdminDataApi = {
     await logActivity(context.userId, null, 'ADMIN_OWNER_VERIFIED', `Owner ${ownerId} manually verified`, { ownerId });
   },
 
-  async getMRRHistory(): Promise<Array<{ month: string; mrr: number; paymentCount: number; ownerCount: number }>> {
+  async logImpersonation(targetOwnerId: string, targetOwnerName: string): Promise<void> {
+    const context = await getCurrentUserContext();
+    if (!context.isPlatformAdmin) throw new Error('Platform admin access is required.');
+    await logActivity(
+      context.userId, null,
+      'ADMIN_VIEW_AS_OWNER',
+      `Admin ${context.userId} viewed account for ${targetOwnerName} (${targetOwnerId})`,
+      { targetOwnerId, targetOwnerName, adminId: context.userId },
+    );
+  },
+
+  async logPlanChange(targetOwnerId: string, fromPlan: string, toPlan: string): Promise<void> {
+    const context = await getCurrentUserContext();
+    if (!context.isPlatformAdmin) throw new Error('Platform admin access is required.');
+    await logActivity(
+      context.userId, null,
+      'ADMIN_PLAN_CHANGED',
+      `Plan changed for owner ${targetOwnerId}: ${fromPlan} → ${toPlan}`,
+      { targetOwnerId, fromPlan, toPlan, adminId: context.userId },
+    );
+  },
+
+  async getMRRHistory(
+    dateRange?: { start: Date; end: Date },
+  ): Promise<Array<{ month: string; mrr: number; paymentCount: number; ownerCount: number }>> {
     const context = await getCurrentUserContext();
     if (!context.isPlatformAdmin) throw new Error('Platform admin access is required.');
 
-    const twelveMonthsAgo = new Date();
-    twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 11);
-    twelveMonthsAgo.setDate(1);
+    const now = new Date();
+    const rangeStart = dateRange?.start ?? (() => {
+      const d = new Date();
+      d.setMonth(d.getMonth() - 11);
+      d.setDate(1);
+      return d;
+    })();
+    const rangeEnd = dateRange?.end ?? now;
 
     const { data, error } = await supabase
       .from('payments')
       .select('total_amount, paid_date, owner_id, status')
       .eq('status', 'paid')
-      .gte('paid_date', twelveMonthsAgo.toISOString().split('T')[0])
+      .gte('paid_date', rangeStart.toISOString().split('T')[0])
+      .lte('paid_date', rangeEnd.toISOString().split('T')[0])
       .returns<Array<{ total_amount: string | number; paid_date: string; owner_id: string; status: string }>>();
 
     if (error) throw error;
@@ -5633,14 +6556,15 @@ export const supabaseAdminDataApi = {
       monthMap.set(key, existing);
     });
 
+    // Build monthly buckets for the requested range (cap at 24)
     const months: Array<{ month: string; mrr: number; paymentCount: number; ownerCount: number }> = [];
-    for (let i = 11; i >= 0; i--) {
-      const d = new Date();
-      d.setMonth(d.getMonth() - i);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      const label = d.toLocaleDateString('en-IN', { month: 'short', year: '2-digit' });
+    const cursor = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), 1);
+    while (cursor <= rangeEnd && months.length < 24) {
+      const key = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`;
+      const label = cursor.toLocaleDateString('en-IN', { month: 'short', year: '2-digit' });
       const entry = monthMap.get(key);
       months.push({ month: label, mrr: entry?.mrr ?? 0, paymentCount: entry?.paymentCount ?? 0, ownerCount: entry?.ownerSet.size ?? 0 });
+      cursor.setMonth(cursor.getMonth() + 1);
     }
 
     return months;
@@ -5860,6 +6784,36 @@ export const supabaseAdminDataApi = {
     return { referrals, summary: { total: rows.length, converted, rewarded, totalRewardAmount } };
   },
 
+  async createReferralCode(input: {
+    refereeEmail: string;
+    rewardAmount: number;
+    notes?: string;
+  }): Promise<void> {
+    const context = await getCurrentUserContext();
+    if (!context.isPlatformAdmin) throw new Error('Platform admin access is required.');
+
+    // Generate a short uppercase code: RC-XXXXXXXX
+    const code = `RC-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
+    const { error } = await supabase.from('referrals').insert({
+      referrer_id: null,
+      referee_email: input.refereeEmail.trim().toLowerCase(),
+      referral_code: code,
+      status: 'pending',
+      reward_amount: input.rewardAmount,
+      notes: input.notes ?? null,
+    });
+    if (error) {
+      if (isMissingRelationError(error, 'referrals')) {
+        throw new Error('Referrals table not found. Apply migration 20260530_admin_portal_v2.sql first.');
+      }
+      throw error;
+    }
+    await logActivity(context.userId, null, 'ADMIN_REFERRAL_CREATED',
+      `Referral code ${code} created for ${input.refereeEmail}`,
+      { code, refereeEmail: input.refereeEmail, rewardAmount: input.rewardAmount, adminId: context.userId },
+    );
+  },
+
   async getLeadSourceStats(): Promise<{
     rows: Array<{ id: string; ownerEmail: string; utmSource: string; utmMedium: string; utmCampaign: string; landingPage: string; createdAt: string }>;
     bySource: Array<{ source: string; count: number }>;
@@ -5967,3 +6921,557 @@ function mapAdminCoupon(row: AdminCouponRow): AdminCouponRecord {
     createdAt: row.created_at,
   };
 }
+
+// ─── Lifecycle Foundation API ─────────────────────────────────────────────────
+
+export const supabaseLifecycleApi = {
+  // ── Floors ──────────────────────────────────────────────────────────────────
+  async getFloors(propertyId: string): Promise<FloorRecord[]> {
+    const { data, error } = await supabase
+      .from('property_floors')
+      .select('*')
+      .eq('property_id', propertyId)
+      .order('floor_number')
+      .returns<FloorRow[]>();
+
+    if (error) {
+      if (isMissingRelationError(error, 'property_floors')) return [];
+      throw error;
+    }
+    return (data ?? []).map(mapFloor);
+  },
+
+  async upsertFloor(propertyId: string, floorNumber: number, label: string): Promise<FloorRecord> {
+    const { data, error } = await supabase
+      .from('property_floors')
+      .upsert({ property_id: propertyId, floor_number: floorNumber, label }, { onConflict: 'property_id,floor_number' })
+      .select('*')
+      .single<FloorRow>();
+
+    if (error) throw error;
+    return mapFloor(data);
+  },
+
+  // ── Beds ────────────────────────────────────────────────────────────────────
+  async getBeds(roomId: string): Promise<BedRecord[]> {
+    const { data, error } = await supabase
+      .from('beds')
+      .select('*')
+      .eq('room_id', roomId)
+      .order('position')
+      .returns<BedRow[]>();
+
+    if (error) {
+      if (isMissingRelationError(error, 'beds')) return [];
+      throw error;
+    }
+    return (data ?? []).map(mapBed);
+  },
+
+  async getBedsByProperty(propertyId: string): Promise<BedRecord[]> {
+    const { data, error } = await supabase
+      .from('beds')
+      .select('*')
+      .eq('property_id', propertyId)
+      .order('position')
+      .returns<BedRow[]>();
+
+    if (error) {
+      if (isMissingRelationError(error, 'beds')) return [];
+      throw error;
+    }
+    return (data ?? []).map(mapBed);
+  },
+
+  async createBed(input: BedCreateInput): Promise<BedRecord> {
+    const { data, error } = await supabase
+      .from('beds')
+      .insert({
+        room_id: input.roomId,
+        property_id: input.propertyId,
+        bed_code: input.bedCode.trim(),
+        position: input.position ?? 1,
+        status: 'vacant',
+      })
+      .select('*')
+      .single<BedRow>();
+
+    if (error) throw error;
+    return mapBed(data);
+  },
+
+  async deleteBed(bedId: string): Promise<void> {
+    const { error } = await supabase.from('beds').delete().eq('id', bedId);
+    if (error) throw error;
+  },
+
+  async syncBedsForRoom(roomId: string, propertyId: string, bedCount: number): Promise<BedRecord[]> {
+    const existing = await this.getBeds(roomId);
+    const existingCodes = new Set(existing.map((b) => b.bedCode));
+    const defaultCodes = Array.from({ length: bedCount }, (_, i) => String(i + 1));
+    const toCreate = defaultCodes.filter((code) => !existingCodes.has(code));
+
+    await Promise.all(
+      toCreate.map((code, idx) =>
+        this.createBed({ roomId, propertyId, bedCode: code, position: existing.length + idx + 1 }),
+      ),
+    );
+
+    return this.getBeds(roomId);
+  },
+
+  // ── Tenant Documents ─────────────────────────────────────────────────────────
+  async getTenantDocuments(tenantId: string): Promise<TenantDocument[]> {
+    const { data, error } = await supabase
+      .from('tenant_documents')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .order('created_at')
+      .returns<TenantDocumentRow[]>();
+
+    if (error) {
+      if (isMissingRelationError(error, 'tenant_documents')) return [];
+      throw error;
+    }
+    return (data ?? []).map(mapTenantDocument);
+  },
+
+  async uploadTenantDocument(input: TenantDocumentCreateInput): Promise<TenantDocument> {
+    const context = await getCurrentUserContext();
+    const ext = input.file.name.split('.').pop() ?? 'bin';
+    const path = `tenant-docs/${input.tenantId}/${input.docType}-${Date.now()}.${ext}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from(TENANT_FILES_BUCKET)
+      .upload(path, input.file, { upsert: false });
+
+    if (uploadError) throw uploadError;
+
+    const { data: { publicUrl } } = supabase.storage
+      .from(TENANT_FILES_BUCKET)
+      .getPublicUrl(path);
+
+    const { data, error } = await supabase
+      .from('tenant_documents')
+      .insert({
+        tenant_id: input.tenantId,
+        owner_id: context.ownerId,
+        doc_type: input.docType,
+        label: input.label ?? '',
+        file_url: publicUrl,
+        verified: false,
+      })
+      .select('*')
+      .single<TenantDocumentRow>();
+
+    if (error) throw error;
+    const doc = mapTenantDocument(data);
+
+    // Notify owner that a document was uploaded
+    void createOwnerNotification(context.ownerId, {
+      type: 'tenant',
+      title: 'Document Uploaded',
+      message: `${input.label || input.docType} uploaded for tenant — available in Tenant Detail > Documents.`,
+    }).catch(() => {});
+
+    return doc;
+  },
+
+  async deleteTenantDocument(docId: string): Promise<void> {
+    const { error } = await supabase.from('tenant_documents').delete().eq('id', docId);
+    if (error) throw error;
+  },
+
+  // ── Agreements ───────────────────────────────────────────────────────────────
+  async getAgreements(tenantId: string): Promise<AgreementRecord[]> {
+    const { data, error } = await supabase
+      .from('agreements')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: false })
+      .returns<AgreementRow[]>();
+
+    if (error) {
+      if (isMissingRelationError(error, 'agreements')) return [];
+      throw error;
+    }
+    return (data ?? []).map(mapAgreement);
+  },
+
+  async createAgreement(input: AgreementCreateInput): Promise<AgreementRecord> {
+    const context = await getCurrentUserContext();
+    const hasAutoSign = !!(input.autoOwnerSignatureName);
+    const now = new Date().toISOString();
+
+    const { data, error } = await supabase
+      .from('agreements')
+      .insert({
+        tenant_id: input.tenantId,
+        property_id: input.propertyId,
+        owner_id: context.ownerId,
+        status: hasAutoSign ? 'pending_tenant_signature' : 'draft',
+        agreement_type: input.agreementType ?? 'license',
+        start_date: input.startDate,
+        end_date: input.endDate ?? null,
+        monthly_rent: input.monthlyRent,
+        security_deposit: input.securityDeposit,
+        html_content: input.htmlContent ?? null,
+        template_version: input.templateVersion ?? null,
+        ...(hasAutoSign ? {
+          owner_signature_name: input.autoOwnerSignatureName,
+          owner_signature_image: input.autoOwnerSignatureImage ?? null,
+          owner_signed_at: now,
+        } : {}),
+      })
+      .select('*')
+      .single<AgreementRow>();
+
+    if (error) throw error;
+    const record = mapAgreement(data);
+
+    void createOwnerNotification(context.ownerId, {
+      type: 'tenant',
+      title: hasAutoSign ? 'Agreement Ready for Tenant Signature' : 'Agreement Generated',
+      message: hasAutoSign
+        ? `Rental agreement auto-signed and awaiting tenant signature.`
+        : `Rental agreement drafted for tenant — review and share from Tenant Detail.`,
+      propertyId: input.propertyId,
+    }).catch(() => {});
+
+    void supabase.from('agreement_events').insert({
+      agreement_id: record.id,
+      actor_id: context.userId,
+      actor_role: 'system',
+      event_type: 'created',
+      event_detail: hasAutoSign ? 'Agreement created with vault owner signature applied' : 'Agreement created as draft',
+    }).then(({ error: evtError }) => {
+      if (evtError && !isMissingRelationError(evtError, 'agreement_events')) {
+        console.warn('[agreement_events] created log failed:', evtError.message);
+      }
+    });
+
+    return record;
+  },
+
+  async updateAgreementStatus(agreementId: string, status: AgreementStatus): Promise<AgreementRecord> {
+    const patch: Record<string, unknown> = { status };
+    if (status === 'signed') patch.signed_at = new Date().toISOString();
+    if (status === 'sent') patch.sent_at = new Date().toISOString();
+
+    const { data, error } = await supabase
+      .from('agreements')
+      .update(patch)
+      .eq('id', agreementId)
+      .select('*')
+      .single<AgreementRow>();
+
+    if (error) throw error;
+    return mapAgreement(data);
+  },
+
+  // ── Agreement Signing ────────────────────────────────────────────────────────
+  async signAgreement(input: AgreementSignInput): Promise<AgreementRecord> {
+    const context = await getCurrentUserContext();
+    const now = new Date().toISOString();
+
+    // Fetch current agreement to validate state
+    const { data: current, error: fetchError } = await supabase
+      .from('agreements')
+      .select('*')
+      .eq('id', input.agreementId)
+      .single<AgreementRow>();
+
+    if (fetchError) throw fetchError;
+    if (!current) throw new Error('Agreement not found.');
+    if (current.is_locked) throw new Error('This agreement is locked and cannot be modified.');
+
+    const patch: Record<string, unknown> = {};
+
+    const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+    if (input.role === 'owner') {
+      if (current.owner_id !== context.ownerId) {
+        throw new Error('Only the property owner can sign as owner.');
+      }
+      patch.owner_signature_name = input.signatureName.trim();
+      patch.owner_signed_at = now;
+      if (input.signatureImage) patch.owner_signature_image = input.signatureImage;
+      patch.status = 'pending_tenant_signature';
+
+      // Embed owner signature in HTML (replace slot placeholder)
+      if (current.html_content) {
+        const sigHtml = input.signatureImage
+          ? `<img src="${input.signatureImage}" style="height:54px;max-width:220px;margin-top:6px;display:block;" alt="Owner signature" />`
+          : `<span style="font-family:cursive,serif;font-size:24px;color:#1a1a1a;">${esc(input.signatureName.trim())}</span>`;
+        const dateLine = `<p style="font-size:11px;color:#555;margin-top:4px;">Signed: ${new Date(now).toLocaleDateString('en-IN')}</p>`;
+        patch.html_content = current.html_content.replace('<!-- OWNER_SIGNATURE_SLOT -->', sigHtml + dateLine);
+      }
+
+      void createOwnerNotification(context.ownerId, {
+        type: 'tenant',
+        title: 'Agreement Signed by Owner',
+        message: `You have signed the rental agreement. Tenant signature is now pending.`,
+        propertyId: current.property_id,
+      }).catch(() => {});
+
+    } else {
+      // Tenant signing — may come from tenant auth context
+      patch.tenant_signature_name = input.signatureName.trim();
+      patch.tenant_signed_at = now;
+      patch.status = 'executed';
+      patch.signed_at = now;
+      patch.is_locked = true;
+      if (input.signatureImage) patch.tenant_signature_image = input.signatureImage;
+      if (input.ipAddress) patch.ip_address = input.ipAddress;
+      if (input.deviceMetadata) patch.device_metadata = input.deviceMetadata;
+
+      // Embed tenant signature in HTML (replace slot placeholder)
+      if (current.html_content) {
+        const sigHtml = input.signatureImage
+          ? `<img src="${input.signatureImage}" style="height:54px;max-width:220px;margin-top:6px;display:block;" alt="Tenant signature" />`
+          : `<span style="font-family:cursive,serif;font-size:24px;color:#1a1a1a;">${esc(input.signatureName.trim())}</span>`;
+        const dateLine = `<p style="font-size:11px;color:#555;margin-top:4px;">Signed: ${new Date(now).toLocaleDateString('en-IN')}</p>`;
+        patch.html_content = current.html_content.replace('<!-- TENANT_SIGNATURE_SLOT -->', sigHtml + dateLine);
+      }
+
+      void createOwnerNotification(current.owner_id, {
+        type: 'tenant',
+        title: 'Agreement Fully Executed',
+        message: `Both parties have signed. Agreement is now locked and executed.`,
+        propertyId: current.property_id,
+      }).catch(() => {});
+    }
+
+    const { data, error } = await supabase
+      .from('agreements')
+      .update(patch)
+      .eq('id', input.agreementId)
+      .select('*')
+      .single<AgreementRow>();
+
+    if (error) throw error;
+    const record = mapAgreement(data);
+
+    // Log the signing event (best-effort)
+    void supabase.from('agreement_events').insert({
+      agreement_id: input.agreementId,
+      actor_id: context.userId,
+      actor_role: input.role,
+      event_type: input.role === 'owner' ? 'owner_signed' : 'tenant_signed',
+      event_detail: `Signed as: ${input.signatureName.trim()}`,
+    }).then(({ error: evtError }) => {
+      if (evtError && !isMissingRelationError(evtError, 'agreement_events')) {
+        console.warn('[agreement_events] insert failed:', evtError.message);
+      }
+    });
+
+    void logActivity(
+      current.owner_id,
+      current.property_id,
+      input.role === 'owner' ? 'AGREEMENT_OWNER_SIGNED' : 'AGREEMENT_EXECUTED',
+      input.role === 'owner'
+        ? `Agreement signed by owner — pending tenant signature`
+        : `Agreement fully executed — both parties signed`,
+      { agreementId: input.agreementId, version: current.version ?? 1 },
+    ).catch(() => {});
+
+    emitOwnerDataUpdated();
+    return record;
+  },
+
+  async logAgreementView(agreementId: string, role: 'owner' | 'tenant'): Promise<void> {
+    const context = await getCurrentUserContext().catch(() => null);
+    if (!context) return;
+    void supabase.from('agreement_events').insert({
+      agreement_id: agreementId,
+      actor_id: context.userId,
+      actor_role: role,
+      event_type: 'viewed',
+    }).then(({ error }) => {
+      if (error && !isMissingRelationError(error, 'agreement_events')) {
+        console.warn('[agreement_events] view log failed:', error.message);
+      }
+    });
+  },
+
+  async getAgreementEvents(agreementId: string): Promise<Array<{ id: string; actorRole: string; eventType: string; eventDetail: string | null; createdAt: string }>> {
+    const { data, error } = await supabase
+      .from('agreement_events')
+      .select('id,actor_role,event_type,event_detail,created_at')
+      .eq('agreement_id', agreementId)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      if (isMissingRelationError(error, 'agreement_events')) return [];
+      throw error;
+    }
+
+    return (data ?? []).map((row: Record<string, unknown>) => ({
+      id: String(row.id),
+      actorRole: String(row.actor_role),
+      eventType: String(row.event_type),
+      eventDetail: row.event_detail != null ? String(row.event_detail) : null,
+      createdAt: String(row.created_at),
+    }));
+  },
+
+  // ── Signature Vault ───────────────────────────────────────────────────────────
+  async getActiveSignatureProfile(): Promise<OwnerSignatureProfile | null> {
+    const context = await getCurrentUserContext().catch(() => null);
+    if (!context) return null;
+
+    const { data, error } = await supabase
+      .from('owner_signature_profiles')
+      .select('*')
+      .eq('owner_id', context.ownerId)
+      .eq('is_active', true)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      if (isMissingRelationError(error, 'owner_signature_profiles')) return null;
+      console.warn('[signature_vault] fetch failed:', error.message);
+      return null;
+    }
+    return data ? mapSignatureProfile(data as OwnerSignatureProfileRow) : null;
+  },
+
+  async upsertSignatureProfile(input: {
+    signatureType: 'draw' | 'upload' | 'typed';
+    signatureImage?: string | null;
+    signatureText?: string | null;
+  }): Promise<OwnerSignatureProfile> {
+    const context = await getCurrentUserContext();
+    const now = new Date().toISOString();
+
+    // Deactivate all existing active profiles
+    await supabase
+      .from('owner_signature_profiles')
+      .update({ is_active: false, updated_at: now })
+      .eq('owner_id', context.ownerId)
+      .eq('is_active', true);
+
+    const { data, error } = await supabase
+      .from('owner_signature_profiles')
+      .insert({
+        owner_id: context.ownerId,
+        is_active: true,
+        signature_type: input.signatureType,
+        signature_image: input.signatureImage ?? null,
+        signature_text: input.signatureText ?? null,
+        updated_at: now,
+      })
+      .select('*')
+      .single();
+
+    if (error) throw error;
+    return mapSignatureProfile(data as OwnerSignatureProfileRow);
+  },
+
+  // ── Agreement Templates ──────────────────────────────────────────────────────
+  async getActiveAgreementTemplate(): Promise<AgreementTemplate | null> {
+    const context = await getCurrentUserContext().catch(() => null);
+    if (!context) return null;
+
+    const { data, error } = await supabase
+      .from('agreement_templates')
+      .select('*')
+      .eq('owner_id', context.ownerId)
+      .eq('is_active', true)
+      .order('version', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      if (isMissingRelationError(error, 'agreement_templates')) return null;
+      console.warn('[agreement_templates] fetch failed:', error.message);
+      return null;
+    }
+    return data ? mapAgreementTemplate(data as AgreementTemplateRow) : null;
+  },
+
+  async upsertAgreementTemplate(input: AgreementTemplateUpsertInput): Promise<AgreementTemplate> {
+    const context = await getCurrentUserContext();
+    const now = new Date().toISOString();
+
+    // Get current max version
+    const { data: existing } = await supabase
+      .from('agreement_templates')
+      .select('version')
+      .eq('owner_id', context.ownerId)
+      .order('version', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const nextVersion = ((existing as { version?: number } | null)?.version ?? 0) + 1;
+
+    // Deactivate all current active templates
+    await supabase
+      .from('agreement_templates')
+      .update({ is_active: false, updated_at: now })
+      .eq('owner_id', context.ownerId)
+      .eq('is_active', true);
+
+    const { data, error } = await supabase
+      .from('agreement_templates')
+      .insert({
+        owner_id: context.ownerId,
+        version: nextVersion,
+        is_active: true,
+        house_rules: input.houseRules ?? null,
+        visitor_rules: input.visitorRules ?? null,
+        late_fee_clause: input.lateFeeClause ?? null,
+        notice_period_clause: input.noticePeriodClause ?? null,
+        refund_policy: input.refundPolicy ?? null,
+        security_deposit_terms: input.securityDepositTerms ?? null,
+        property_rules: input.propertyRules ?? null,
+        miscellaneous_terms: input.miscellaneousTerms ?? null,
+        updated_at: now,
+      })
+      .select('*')
+      .single();
+
+    if (error) throw error;
+    return mapAgreementTemplate(data as AgreementTemplateRow);
+  },
+
+  // ── Receipt Storage ───────────────────────────────────────────────────────────
+  async storeReceiptAsDocument(input: {
+    tenantId: string;
+    paymentId: string;
+    htmlContent: string;
+    label: string;
+  }): Promise<void> {
+    const context = await getCurrentUserContext();
+
+    // Store receipt HTML as a blob in tenant_documents table
+    const blob = new Blob([input.htmlContent], { type: 'text/html' });
+    const file = new File([blob], `receipt-${input.paymentId.slice(-8)}.html`, { type: 'text/html' });
+    const path = `tenant-docs/${input.tenantId}/receipts/receipt-${input.paymentId}.html`;
+
+    const { error: uploadError } = await supabase.storage
+      .from(TENANT_FILES_BUCKET)
+      .upload(path, file, { upsert: true, contentType: 'text/html' });
+
+    if (uploadError) {
+      // Storage not configured — skip silently
+      if (String(uploadError.message ?? '').toLowerCase().includes('bucket') || String(uploadError.message ?? '').toLowerCase().includes('not found')) {
+        return;
+      }
+      throw uploadError;
+    }
+
+    const { data: { publicUrl } } = supabase.storage.from(TENANT_FILES_BUCKET).getPublicUrl(path);
+
+    // Upsert — one receipt doc per payment
+    await supabase.from('tenant_documents').upsert({
+      tenant_id: input.tenantId,
+      owner_id: context.ownerId,
+      doc_type: 'receipt',
+      label: input.label,
+      file_url: publicUrl,
+      verified: true,
+    }, { onConflict: 'tenant_id,label' }).throwOnError();
+  },
+};

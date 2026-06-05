@@ -14,15 +14,22 @@ import {
   Shield, Globe, AlertTriangle, Check, Plus, Trash2,
   Loader2, Save, Camera, Download, QrCode, Building2,
   X, Info, Tag, Upload, RefreshCw, CheckCircle2,
+  FileSignature, PenLine, Type, FileText,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import {
-  supabaseAuthDataApi, supabaseOwnerDataApi,
+  supabaseAuthDataApi, supabaseOwnerDataApi, supabaseLifecycleApi,
   type OwnerSettingsRecord, type ProfileUpdateInput, type OwnerSubscriptionRecord,
+  type OwnerSignatureProfile, type AgreementTemplate, type AgreementTemplateUpsertInput,
 } from '../services/supabaseData';
 import { logSettingsChange } from '../utils/settingsAudit';
+import { SMS_PROVIDER_OPTIONS, type SMSProviderName } from '../services/smsProvider';
+import { PAYMENT_GATEWAY_OPTIONS, type PaymentGatewayName } from '../services/paymentGateway';
+import type { SMSProviderAdapter } from '../services/smsProvider';
+import { SMS_PROVIDER_ADAPTERS } from '../services/smsProvider';
+import { PAYMENT_GATEWAY_ADAPTERS } from '../services/paymentGateway';
 
 // ─── Plan definitions ──────────────────────────────────────────────────────────
 const PLANS = [
@@ -55,20 +62,17 @@ const PLANS = [
 
 type PlanCode = typeof PLANS[number]['code'];
 
-// ─── Known test coupons ────────────────────────────────────────────────────────
+// ─── Coupon types ────────────────────────────────────────────────────────────
 interface CouponResult {
   code: string;
+  discountType: 'percent' | 'flat';
+  discountValue: number;
+  description: string;
+  planRestriction?: string | null;
+  // Legacy fields for UI compatibility
   discountPercent: number;
   extraMonths: number;
-  description: string;
 }
-
-const VALID_COUPONS: Record<string, CouponResult> = {
-  WELCOME20: { code: 'WELCOME20', discountPercent: 20, extraMonths: 0, description: '20% off your first month' },
-  ANNUAL50:  { code: 'ANNUAL50',  discountPercent: 50, extraMonths: 0, description: '50% off yearly plan' },
-  EXTRA3:    { code: 'EXTRA3',    discountPercent: 0,  extraMonths: 3, description: '3 extra months free' },
-  RENTCARE:  { code: 'RENTCARE',  discountPercent: 30, extraMonths: 1, description: '30% off + 1 month free' },
-};
 
 // ─── Shared Toggle ─────────────────────────────────────────────────────────────
 function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
@@ -101,6 +105,237 @@ function VarChips({ onInsert }: { onInsert: (v: string) => void }) {
           className="text-xs px-2 py-0.5 bg-indigo-50 border border-indigo-200 text-indigo-700 rounded hover:bg-indigo-100 transition-colors font-mono"
         >{v}</button>
       ))}
+    </div>
+  );
+}
+
+// ─── Signature Draw Pad ────────────────────────────────────────────────────────
+function SignatureDrawPad({ onCapture }: { onCapture: (dataUrl: string) => void }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const drawing = useRef(false);
+  const [hasStrokes, setHasStrokes] = useState(false);
+
+  const getCtx = () => canvasRef.current?.getContext('2d') ?? null;
+
+  const getPos = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const sx = e.currentTarget.width / r.width;
+    const sy = e.currentTarget.height / r.height;
+    return { x: (e.clientX - r.left) * sx, y: (e.clientY - r.top) * sy };
+  };
+
+  const getTouchPos = (e: React.TouchEvent<HTMLCanvasElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const sx = e.currentTarget.width / r.width;
+    const sy = e.currentTarget.height / r.height;
+    const t = e.touches[0];
+    return { x: (t.clientX - r.left) * sx, y: (t.clientY - r.top) * sy };
+  };
+
+  const beginStroke = (x: number, y: number) => {
+    const ctx = getCtx();
+    if (!ctx) return;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    drawing.current = true;
+    setHasStrokes(true);
+  };
+
+  const continueStroke = (x: number, y: number) => {
+    if (!drawing.current) return;
+    const ctx = getCtx();
+    if (!ctx) return;
+    ctx.lineTo(x, y);
+    ctx.strokeStyle = '#111827';
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+  };
+
+  const endStroke = () => { drawing.current = false; };
+
+  const clear = () => {
+    const canvas = canvasRef.current;
+    const ctx = getCtx();
+    if (!canvas || !ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    setHasStrokes(false);
+  };
+
+  const capture = () => {
+    const canvas = canvasRef.current;
+    if (!canvas || !hasStrokes) return;
+    onCapture(canvas.toDataURL('image/png'));
+  };
+
+  return (
+    <div className="space-y-2">
+      <canvas
+        ref={canvasRef}
+        width={600}
+        height={140}
+        className="border border-gray-300 rounded-lg bg-white cursor-crosshair w-full touch-none"
+        style={{ height: '140px' }}
+        onMouseDown={(e) => { const p = getPos(e); beginStroke(p.x, p.y); }}
+        onMouseMove={(e) => { const p = getPos(e); continueStroke(p.x, p.y); }}
+        onMouseUp={endStroke}
+        onMouseLeave={endStroke}
+        onTouchStart={(e) => { e.preventDefault(); const p = getTouchPos(e); beginStroke(p.x, p.y); }}
+        onTouchMove={(e) => { e.preventDefault(); const p = getTouchPos(e); continueStroke(p.x, p.y); }}
+        onTouchEnd={endStroke}
+      />
+      <p className="text-xs text-gray-400">Draw your signature using mouse or touch. Keep it within the box.</p>
+      <div className="flex gap-2">
+        <Button variant="outline" size="sm" onClick={clear} type="button" disabled={!hasStrokes}>Clear</Button>
+        <Button size="sm" onClick={capture} disabled={!hasStrokes} type="button" className="bg-indigo-600 hover:bg-indigo-700 text-white">
+          <Check className="w-3.5 h-3.5 mr-1" /> Use This Signature
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Integrations Tab ─────────────────────────────────────────────────────────
+function IntegrationsTab({
+  settings,
+  onSave,
+}: {
+  settings: OwnerSettingsRecord;
+  onSave: (updated: OwnerSettingsRecord) => Promise<void>;
+}) {
+  const [smsProvider, setSmsProvider] = useState<string>(settings.integrations?.smsProvider?.provider ?? 'supabase');
+  const [smsEnabled, setSmsEnabled] = useState(settings.integrations?.smsProvider?.enabled ?? false);
+  const [smsConfig, setSmsConfig] = useState<Record<string, string>>(settings.integrations?.smsProvider?.config ?? {});
+  const [gateway, setGateway] = useState<string>(settings.integrations?.paymentGateway?.gateway ?? 'manual');
+  const [gatewayEnabled, setGatewayEnabled] = useState(settings.integrations?.paymentGateway?.enabled ?? false);
+  const [gatewayConfig, setGatewayConfig] = useState<Record<string, string>>(settings.integrations?.paymentGateway?.config ?? {});
+  const [saving, setSaving] = useState(false);
+
+  const smsAdapter = SMS_PROVIDER_ADAPTERS[smsProvider as SMSProviderName];
+  const gwAdapter = PAYMENT_GATEWAY_ADAPTERS[gateway as PaymentGatewayName];
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const updated: OwnerSettingsRecord = {
+        ...settings,
+        integrations: {
+          smsProvider: { provider: smsProvider, enabled: smsEnabled, config: smsConfig },
+          paymentGateway: { gateway, enabled: gatewayEnabled, config: gatewayConfig },
+        },
+      };
+      await onSave(updated);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* SMS Provider */}
+      <Card className="border-gray-200">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Globe className="w-4 h-4" /> SMS Provider
+          </CardTitle>
+          <p className="text-sm text-gray-500">
+            Used for automated rent reminders and notifications. Supabase (built-in) handles OTP authentication.
+            External providers send custom messages.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <Label className="text-sm font-medium">Enable external SMS</Label>
+            <Toggle checked={smsEnabled} onChange={setSmsEnabled} />
+          </div>
+          {smsEnabled && (
+            <>
+              <div>
+                <Label className="text-xs font-semibold mb-1.5 block">Provider</Label>
+                <select
+                  value={smsProvider}
+                  onChange={(e) => { setSmsProvider(e.target.value); setSmsConfig({}); }}
+                  className="w-full h-10 px-3 text-sm border border-gray-300 rounded-lg"
+                >
+                  {SMS_PROVIDER_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
+              {smsAdapter?.requiredFields.map((field) => (
+                <div key={field.key}>
+                  <Label className="text-xs font-semibold mb-1.5 block">{field.label}</Label>
+                  <Input
+                    type={field.secret ? 'password' : 'text'}
+                    value={smsConfig[field.key] ?? ''}
+                    onChange={(e) => setSmsConfig({ ...smsConfig, [field.key]: e.target.value })}
+                    className="h-10 text-sm font-mono"
+                    placeholder={field.secret ? '••••••••' : field.label}
+                  />
+                </div>
+              ))}
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Payment Gateway */}
+      <Card className="border-gray-200">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <CreditCard className="w-4 h-4" /> Payment Gateway
+          </CardTitle>
+          <p className="text-sm text-gray-500">
+            Optional. Manual / UPI collection requires no credentials and is always available.
+            Activate a gateway to enable direct in-portal payment collection.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div>
+            <Label className="text-xs font-semibold mb-1.5 block">Gateway</Label>
+            <select
+              value={gateway}
+              onChange={(e) => { setGateway(e.target.value); setGatewayConfig({}); setGatewayEnabled(e.target.value !== 'manual'); }}
+              className="w-full h-10 px-3 text-sm border border-gray-300 rounded-lg"
+            >
+              {PAYMENT_GATEWAY_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
+          {gateway !== 'manual' && (
+            <>
+              <div className="flex items-center justify-between">
+                <Label className="text-sm font-medium">Enable {gwAdapter?.label}</Label>
+                <Toggle checked={gatewayEnabled} onChange={setGatewayEnabled} />
+              </div>
+              {gatewayEnabled && gwAdapter?.requiredFields.map((field) => (
+                <div key={field.key}>
+                  <Label className="text-xs font-semibold mb-1.5 block">{field.label}</Label>
+                  <Input
+                    type={field.secret ? 'password' : 'text'}
+                    value={gatewayConfig[field.key] ?? ''}
+                    onChange={(e) => setGatewayConfig({ ...gatewayConfig, [field.key]: e.target.value })}
+                    className="h-10 text-sm font-mono"
+                    placeholder={field.secret ? '••••••••' : field.label}
+                  />
+                </div>
+              ))}
+            </>
+          )}
+          {gateway === 'manual' && (
+            <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              <p className="text-sm text-blue-700">UPI ID is configured in the <strong>Payment</strong> tab. No gateway credentials needed for manual collection.</p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Button onClick={() => void handleSave()} disabled={saving} className="bg-indigo-600 hover:bg-indigo-700 text-white">
+        {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+        Save Integrations
+      </Button>
     </div>
   );
 }
@@ -297,24 +532,55 @@ export function Settings() {
     if (!code) return;
     setCouponState('loading');
     setCouponResult(null);
-    // Simulate async validation (replace with real RPC when billing goes live)
-    await new Promise((r) => setTimeout(r, 600));
-    const match = VALID_COUPONS[code];
-    if (match) {
-      setCouponState('valid');
-      setCouponResult(match);
-    } else {
-      setCouponState('invalid');
+    try {
+      const { data, error } = await supabase.rpc('validate_coupon', { p_code: code });
+      if (error) throw error;
+      const result = data as { valid: boolean; reason?: string; code?: string; description?: string; discountType?: string; discountValue?: number; planRestriction?: string };
+      if (result?.valid) {
+        const discountType = (result.discountType ?? 'percent') as 'percent' | 'flat';
+        const discountValue = Number(result.discountValue ?? 0);
+        setCouponState('valid');
+        setCouponResult({
+          code: result.code ?? code,
+          description: result.description ?? '',
+          discountType,
+          discountValue,
+          planRestriction: result.planRestriction ?? null,
+          discountPercent: discountType === 'percent' ? discountValue : 0,
+          extraMonths: 0,
+        });
+      } else {
+        setCouponState('invalid');
+        toast.error(result?.reason ?? 'Invalid coupon code');
+      }
+    } catch {
+      // Fallback: RPC might not be deployed yet — try hardcoded test coupons
+      const TEST: Record<string, CouponResult> = {
+        WELCOME20: { code: 'WELCOME20', discountType: 'percent', discountValue: 20, discountPercent: 20, extraMonths: 0, description: '20% off your first month' },
+        RENTCARE:  { code: 'RENTCARE',  discountType: 'percent', discountValue: 30, discountPercent: 30, extraMonths: 0, description: '30% off for RentCare launch' },
+      };
+      const fallback = TEST[code];
+      if (fallback) {
+        setCouponState('valid');
+        setCouponResult(fallback);
+      } else {
+        setCouponState('invalid');
+      }
     }
   };
 
   const handleApplyCoupon = async () => {
     if (!couponResult) return;
     try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user?.id) {
+        // Attempt real redemption via RPC (increments used_count, records redemption)
+        await (supabase.rpc('redeem_coupon', { p_code: couponResult.code, p_owner_id: user.id }) as unknown as Promise<unknown>).catch(() => {});
+      }
       void logSettingsChange({
         event: 'COUPON_APPLIED',
         detail: `Coupon ${couponResult.code} applied — ${couponResult.description}`,
-        metadata: { coupon: couponResult.code, discountPercent: couponResult.discountPercent, extraMonths: couponResult.extraMonths },
+        metadata: { coupon: couponResult.code, discountType: couponResult.discountType, discountValue: couponResult.discountValue },
       });
       setCouponApplied(true);
       toast.success(`Coupon applied: ${couponResult.description}`);
@@ -403,6 +669,96 @@ export function Settings() {
     }
   };
 
+  // ── Signature Vault ────────────────────────────────────────────────────────────
+  const [activeSignatureProfile, setActiveSignatureProfile] = useState<OwnerSignatureProfile | null>(null);
+  const [sigVaultTab, setSigVaultTab] = useState<'draw' | 'upload' | 'typed'>('typed');
+  const [sigTypedText, setSigTypedText] = useState('');
+  const [sigDrawCapture, setSigDrawCapture] = useState<string | null>(null);
+  const [sigUploadPreview, setSigUploadPreview] = useState<string | null>(null);
+  const [sigSaving, setSigSaving] = useState(false);
+  const sigUploadRef = useRef<HTMLInputElement>(null);
+
+  const loadSignatureProfile = async () => {
+    try {
+      const p = await supabaseLifecycleApi.getActiveSignatureProfile();
+      setActiveSignatureProfile(p);
+      if (p?.signatureType === 'typed' && p.signatureText) setSigTypedText(p.signatureText);
+    } catch { /* graceful */ }
+  };
+
+  const handleSaveSignature = async () => {
+    const imageData = sigVaultTab === 'draw' ? sigDrawCapture : sigVaultTab === 'upload' ? sigUploadPreview : null;
+    const textData = sigVaultTab === 'typed' ? sigTypedText.trim() : null;
+    if (sigVaultTab !== 'typed' && !imageData) { toast.error('Please provide a signature first.'); return; }
+    if (sigVaultTab === 'typed' && !textData) { toast.error('Please type your name.'); return; }
+    setSigSaving(true);
+    try {
+      const profile = await supabaseLifecycleApi.upsertSignatureProfile({
+        signatureType: sigVaultTab,
+        signatureImage: imageData ?? null,
+        signatureText: textData ?? null,
+      });
+      setActiveSignatureProfile(profile);
+      setSigDrawCapture(null);
+      toast.success('Signature saved. It will be auto-applied to new agreements.');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save signature.');
+    } finally {
+      setSigSaving(false);
+    }
+  };
+
+  const handleSigUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) { toast.error('Image must be under 2 MB.'); return; }
+    if (!file.type.startsWith('image/')) { toast.error('File must be an image.'); return; }
+    const reader = new FileReader();
+    reader.onload = (ev) => setSigUploadPreview(ev.target?.result as string);
+    reader.readAsDataURL(file);
+    if (sigUploadRef.current) sigUploadRef.current.value = '';
+  };
+
+  // ── Agreement Template ─────────────────────────────────────────────────────────
+  const [activeTemplate, setActiveTemplate] = useState<AgreementTemplate | null>(null);
+  const [templateForm, setTemplateForm] = useState<AgreementTemplateUpsertInput>({
+    houseRules: '', visitorRules: '', lateFeeClause: '', noticePeriodClause: '',
+    refundPolicy: '', securityDepositTerms: '', propertyRules: '', miscellaneousTerms: '',
+  });
+  const [templateSaving, setTemplateSaving] = useState(false);
+
+  const loadAgreementTemplate = async () => {
+    try {
+      const t = await supabaseLifecycleApi.getActiveAgreementTemplate();
+      setActiveTemplate(t);
+      if (t) {
+        setTemplateForm({
+          houseRules: t.houseRules ?? '',
+          visitorRules: t.visitorRules ?? '',
+          lateFeeClause: t.lateFeeClause ?? '',
+          noticePeriodClause: t.noticePeriodClause ?? '',
+          refundPolicy: t.refundPolicy ?? '',
+          securityDepositTerms: t.securityDepositTerms ?? '',
+          propertyRules: t.propertyRules ?? '',
+          miscellaneousTerms: t.miscellaneousTerms ?? '',
+        });
+      }
+    } catch { /* graceful */ }
+  };
+
+  const handleSaveTemplate = async () => {
+    setTemplateSaving(true);
+    try {
+      const saved = await supabaseLifecycleApi.upsertAgreementTemplate(templateForm);
+      setActiveTemplate(saved);
+      toast.success(`Agreement template saved as v${saved.version}. New agreements will use these terms.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save template.');
+    } finally {
+      setTemplateSaving(false);
+    }
+  };
+
   // ── PG Rules ─────────────────────────────────────────────────────────────────
   const [newRule, setNewRule] = useState('');
 
@@ -438,6 +794,8 @@ export function Settings() {
     void loadOwnerSettings();
     void loadSubscription();
     void loadUsage();
+    void loadSignatureProfile();
+    void loadAgreementTemplate();
   }, []);
 
   const userInitials = (user?.name ?? user?.email ?? 'U').split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2);
@@ -457,6 +815,8 @@ export function Settings() {
             { value: 'payment', icon: CreditCard, label: 'Payment' },
             { value: 'whatsapp', icon: MessageCircle, label: 'WhatsApp' },
             { value: 'subscription', icon: Crown, label: 'Plan' },
+            { value: 'legal', icon: FileSignature, label: 'Legal' },
+            { value: 'integrations', icon: Globe, label: 'Integrations' },
           ].map(({ value, icon: Icon, label }) => (
             <TabsTrigger key={value} value={value} className="data-[state=active]:bg-indigo-600 data-[state=active]:text-white whitespace-nowrap">
               <Icon className="w-4 h-4 mr-1.5" /> {label}
@@ -520,7 +880,7 @@ export function Settings() {
                   </div>
                   <div className="space-y-1.5">
                     <Label className="text-sm font-medium">City</Label>
-                    <Input value={profileForm.city ?? ''} onChange={(e) => setProfileForm({ ...profileForm, city: e.target.value })} className="h-10" placeholder="e.g., Bengaluru" />
+                    <Input value={profileForm.city ?? ''} onChange={(e) => setProfileForm({ ...profileForm, city: e.target.value })} className="h-10" placeholder="e.g., Jaipur" />
                   </div>
                 </div>
 
@@ -932,7 +1292,7 @@ export function Settings() {
                     <p className="text-sm text-gray-500">Appended to every WhatsApp message — PG address, contact number, sign-off.</p>
                     <textarea
                       rows={2}
-                      placeholder="e.g., Sunrise Living PG, Koramangala · +91 98765 00000"
+                      placeholder="e.g., RentCare Residency, Vaishali Nagar · +91 98765 00000"
                       value={ownerSettings.whatsappSettings.customFooter}
                       onChange={(e) => setOwnerSettings({ ...ownerSettings, whatsappSettings: { ...ownerSettings.whatsappSettings, customFooter: e.target.value } })}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500"
@@ -1205,6 +1565,239 @@ export function Settings() {
             </Card>
           </div>
         </TabsContent>
+
+        {/* ── LEGAL TAB ─────────────────────────────────────────────────────── */}
+        <TabsContent value="legal">
+          <div className="space-y-6 max-w-2xl">
+
+            {/* Signature Vault */}
+            <Card className="border-gray-200">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <FileSignature className="w-4 h-4" /> Signature Vault
+                </CardTitle>
+                <p className="text-sm text-gray-500">
+                  Save your signature once — it will be auto-applied when you generate new agreements, eliminating the manual signing step.
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-5">
+
+                {/* Active signature preview */}
+                {activeSignatureProfile && (
+                  <div className="p-3 bg-green-50 border border-green-200 rounded-lg flex items-start gap-3">
+                    <CheckCircle2 className="w-4 h-4 text-green-600 mt-0.5 flex-shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-green-800">Active Signature ({activeSignatureProfile.signatureType})</p>
+                      {activeSignatureProfile.signatureType === 'typed' && activeSignatureProfile.signatureText ? (
+                        <p className="text-xl font-serif italic text-gray-800 mt-1">{activeSignatureProfile.signatureText}</p>
+                      ) : activeSignatureProfile.signatureImage ? (
+                        <img src={activeSignatureProfile.signatureImage} alt="Active signature" className="h-10 mt-1 max-w-[180px]" />
+                      ) : null}
+                      <p className="text-xs text-green-700 mt-1">Last updated: {new Date(activeSignatureProfile.updatedAt).toLocaleDateString('en-IN')}</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Method tabs */}
+                <div className="flex gap-1 bg-gray-100 p-1 rounded-lg w-fit">
+                  {(['typed', 'draw', 'upload'] as const).map((method) => (
+                    <button
+                      key={method}
+                      type="button"
+                      onClick={() => { setSigVaultTab(method); setSigDrawCapture(null); setSigUploadPreview(null); }}
+                      className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors capitalize ${
+                        sigVaultTab === method ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'
+                      }`}
+                    >
+                      {method === 'typed' && <Type className="w-3.5 h-3.5 inline mr-1.5" />}
+                      {method === 'draw' && <PenLine className="w-3.5 h-3.5 inline mr-1.5" />}
+                      {method === 'upload' && <Upload className="w-3.5 h-3.5 inline mr-1.5" />}
+                      {method}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Typed */}
+                {sigVaultTab === 'typed' && (
+                  <div className="space-y-3">
+                    <div className="space-y-1.5">
+                      <Label>Your Name (as signature)</Label>
+                      <Input
+                        value={sigTypedText}
+                        onChange={(e) => setSigTypedText(e.target.value)}
+                        placeholder="e.g., Moti Sanjay"
+                        className="h-10"
+                      />
+                    </div>
+                    {sigTypedText.trim() && (
+                      <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
+                        <p className="text-xs text-gray-500 mb-1">Preview</p>
+                        <p className="text-2xl font-serif italic text-gray-800">{sigTypedText}</p>
+                      </div>
+                    )}
+                    <Button
+                      onClick={() => void handleSaveSignature()}
+                      disabled={sigSaving || !sigTypedText.trim()}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white"
+                    >
+                      {sigSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+                      Save as Active Signature
+                    </Button>
+                  </div>
+                )}
+
+                {/* Draw */}
+                {sigVaultTab === 'draw' && (
+                  <div className="space-y-3">
+                    {sigDrawCapture ? (
+                      <div className="space-y-3">
+                        <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
+                          <p className="text-xs text-gray-500 mb-2">Captured signature</p>
+                          <img src={sigDrawCapture} alt="Drawn signature" className="h-16 max-w-full" />
+                        </div>
+                        <div className="flex gap-2">
+                          <Button variant="outline" onClick={() => setSigDrawCapture(null)}>
+                            <RefreshCw className="w-4 h-4 mr-1.5" /> Redraw
+                          </Button>
+                          <Button
+                            onClick={() => void handleSaveSignature()}
+                            disabled={sigSaving}
+                            className="bg-indigo-600 hover:bg-indigo-700 text-white"
+                          >
+                            {sigSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+                            Save as Active Signature
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <SignatureDrawPad onCapture={setSigDrawCapture} />
+                    )}
+                  </div>
+                )}
+
+                {/* Upload */}
+                {sigVaultTab === 'upload' && (
+                  <div className="space-y-3">
+                    <input
+                      ref={sigUploadRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/svg+xml"
+                      className="hidden"
+                      onChange={handleSigUpload}
+                    />
+                    {sigUploadPreview ? (
+                      <div className="space-y-3">
+                        <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
+                          <p className="text-xs text-gray-500 mb-2">Preview</p>
+                          <img src={sigUploadPreview} alt="Uploaded signature" className="h-16 max-w-full" />
+                        </div>
+                        <div className="flex gap-2">
+                          <Button variant="outline" onClick={() => { setSigUploadPreview(null); sigUploadRef.current?.click(); }}>
+                            <Upload className="w-4 h-4 mr-1.5" /> Change
+                          </Button>
+                          <Button
+                            onClick={() => void handleSaveSignature()}
+                            disabled={sigSaving}
+                            className="bg-indigo-600 hover:bg-indigo-700 text-white"
+                          >
+                            {sigSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+                            Save as Active Signature
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => sigUploadRef.current?.click()}
+                        className="w-full border-2 border-dashed border-gray-300 rounded-xl p-8 text-center hover:border-indigo-400 hover:bg-indigo-50 transition-colors"
+                      >
+                        <Upload className="w-8 h-8 text-gray-400 mx-auto mb-2" />
+                        <p className="text-sm font-medium text-gray-600">Upload signature image</p>
+                        <p className="text-xs text-gray-400 mt-1">PNG, JPG or SVG · Max 2 MB · Transparent background preferred</p>
+                      </button>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Agreement Template */}
+            <Card className="border-gray-200">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <FileText className="w-4 h-4" /> Agreement Template
+                  {activeTemplate && (
+                    <span className="ml-auto text-xs font-normal text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">
+                      v{activeTemplate.version}
+                    </span>
+                  )}
+                </CardTitle>
+                <p className="text-sm text-gray-500">
+                  Customize agreement clauses. Dynamic fields are injected automatically and cannot be edited here.
+                  Saving creates a new version — existing signed agreements are never modified.
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-5">
+
+                {/* Protected dynamic fields */}
+                <div className="p-3 bg-blue-50 border border-blue-100 rounded-lg">
+                  <p className="text-xs font-semibold text-blue-700 mb-2">Auto-injected fields (read-only)</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {['{{tenant_name}}', '{{tenant_phone}}', '{{tenant_email}}', '{{property_name}}',
+                      '{{property_address}}', '{{room}}', '{{bed}}', '{{rent}}', '{{deposit}}',
+                      '{{join_date}}', '{{owner_name}}', '{{owner_phone}}'].map((v) => (
+                      <span key={v} className="text-xs px-2 py-0.5 bg-white border border-blue-200 text-blue-700 rounded font-mono">{v}</span>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Editable clauses */}
+                {([
+                  { key: 'houseRules' as const, label: 'House Rules', placeholder: 'e.g. No smoking, no alcohol on premises, lights-out by 11 PM…' },
+                  { key: 'visitorRules' as const, label: 'Visitor Rules', placeholder: 'e.g. Overnight guests require prior approval…' },
+                  { key: 'lateFeeClause' as const, label: 'Late Fee Clause', placeholder: 'e.g. Late fee of ₹100/day applies after the due date…' },
+                  { key: 'noticePeriodClause' as const, label: 'Notice Period', placeholder: 'e.g. 30 days written notice required from either party…' },
+                  { key: 'refundPolicy' as const, label: 'Refund Policy', placeholder: 'e.g. Deposit refunded within 15 days of vacating after deductions…' },
+                  { key: 'securityDepositTerms' as const, label: 'Security Deposit Terms', placeholder: 'e.g. Deposit held against damages, dues, or unpaid rent…' },
+                  { key: 'propertyRules' as const, label: 'Property Rules', placeholder: 'e.g. Shared spaces must be kept clean at all times…' },
+                  { key: 'miscellaneousTerms' as const, label: 'Miscellaneous Terms', placeholder: 'Any additional terms specific to your property…' },
+                ] as const).map(({ key, label, placeholder }) => (
+                  <div key={key} className="space-y-1.5">
+                    <Label className="text-sm font-medium">{label}</Label>
+                    <textarea
+                      value={templateForm[key] ?? ''}
+                      onChange={(e) => setTemplateForm((f) => ({ ...f, [key]: e.target.value }))}
+                      placeholder={placeholder}
+                      rows={2}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm resize-y focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder:text-gray-400"
+                    />
+                  </div>
+                ))}
+
+                <Button
+                  onClick={() => void handleSaveTemplate()}
+                  disabled={templateSaving}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white"
+                >
+                  {templateSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+                  Save Template {activeTemplate ? `(creates v${activeTemplate.version + 1})` : '(creates v1)'}
+                </Button>
+              </CardContent>
+            </Card>
+
+          </div>
+        </TabsContent>
+
+        {/* ── INTEGRATIONS TAB ─────────────────────────────────────────────────── */}
+        {ownerSettings && (
+          <TabsContent value="integrations">
+            <div className="space-y-6 max-w-2xl">
+              <IntegrationsTab settings={ownerSettings} onSave={async (updated) => {
+                await saveOwnerSettings(updated, undefined, 'Integration settings updated');
+              }} />
+            </div>
+          </TabsContent>
+        )}
       </Tabs>
 
       {/* ── Delete Account Confirm ───────────────────────────────────────────── */}

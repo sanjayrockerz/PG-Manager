@@ -2,6 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 
+// Fallback polling interval (ms) — triggers a refresh if realtime has been silent too long.
+const STALE_FALLBACK_MS = 90_000;
+
 type TableName =
   | 'profiles'
   | 'properties'
@@ -22,7 +25,11 @@ type TableName =
   | 'admin_coupons'
   | 'referrals'
   | 'lead_sources'
-  | 'maintenance_threads';
+  | 'maintenance_threads'
+  | 'tenant_documents'
+  | 'agreements'
+  | 'property_floors'
+  | 'beds';
 
 interface UseRealtimeRefreshOptions {
   key: string;
@@ -45,6 +52,8 @@ export function useRealtimeRefresh({
 
   const debounceRef = useRef<number | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
+  const lastRefreshRef = useRef<number>(Date.now());
+  const fallbackTimerRef = useRef<number | null>(null);
 
   const uniqueTables = useMemo(() => Array.from(new Set(tables)), [tables]);
 
@@ -65,12 +74,25 @@ export function useRealtimeRefresh({
         setIsSyncing(true);
         Promise.resolve(onChange())
           .finally(() => {
+            lastRefreshRef.current = Date.now();
             setIsSyncing(false);
             setLastUpdatedAt(new Date());
             setRefreshCount((value) => value + 1);
           });
       }, debounceMs);
     };
+
+    // Fallback: if no realtime event arrives within STALE_FALLBACK_MS, poll once.
+    const scheduleFallback = () => {
+      if (fallbackTimerRef.current) window.clearTimeout(fallbackTimerRef.current);
+      fallbackTimerRef.current = window.setTimeout(() => {
+        if (Date.now() - lastRefreshRef.current >= STALE_FALLBACK_MS - 1000) {
+          runRefresh();
+        }
+        scheduleFallback();
+      }, STALE_FALLBACK_MS);
+    };
+    scheduleFallback();
 
     uniqueTables.forEach((table) => {
       channel.on(
@@ -93,9 +115,8 @@ export function useRealtimeRefresh({
     channel.subscribe();
 
     return () => {
-      if (debounceRef.current) {
-        window.clearTimeout(debounceRef.current);
-      }
+      if (debounceRef.current) window.clearTimeout(debounceRef.current);
+      if (fallbackTimerRef.current) window.clearTimeout(fallbackTimerRef.current);
 
       window.removeEventListener('owner-data-updated', handleManualRefresh);
 

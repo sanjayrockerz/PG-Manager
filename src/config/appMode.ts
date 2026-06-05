@@ -2,11 +2,12 @@ export type AppMode = 'demo' | 'live';
 
 const APP_MODE_KEY = 'app_mode';
 
+// Demo must be explicitly opted-in. Absent/unknown → live.
 const normalizeMode = (value: string | null): AppMode => {
-  if (value === 'live') {
-    return 'live';
+  if (value === 'demo') {
+    return 'demo';
   }
-  return 'demo';
+  return 'live';
 };
 
 export const getAppMode = (): AppMode => {

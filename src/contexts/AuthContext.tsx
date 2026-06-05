@@ -1,7 +1,8 @@
-import { createContext, useContext, useEffect, useRef, useState, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { AppUser, UserRole, supabaseAuthDataApi } from '../services/supabaseData';
 import { isSupportedUserRole } from '../utils/roles';
+import { setAppMode } from '../config/appMode';
 
 interface User {
   id: string;
@@ -21,15 +22,18 @@ interface SignupDraft {
   phone: string;
 }
 
+export type DemoPersona = 'owner' | 'tenant' | 'admin';
+
 interface AuthContextType {
   user: User | null;
   authError: string;
+  isSuspended: boolean;
   sendLoginMagicLink: (email: string) => Promise<boolean>;
   signInWithGoogle: () => Promise<boolean>;
   sendSignupMagicLink: (draft: SignupDraft) => Promise<boolean>;
   sendPhoneOtp: (phone: string) => Promise<boolean>;
   verifyPhoneOtp: (phone: string, token: string) => Promise<boolean>;
-  signInAsDemo: () => void;
+  signInAsDemo: (persona?: DemoPersona) => void;
   refreshProfile: () => Promise<void>;
   logout: () => Promise<void>;
   isLoading: boolean;
@@ -37,48 +41,43 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const DEMO_LOGIN_METADATA: Record<string, {
-  name: string;
-  phone: string;
-  role: UserRole;
-  pgName: string;
-  city: string;
-}> = {
-  'owner.demo@pgmanager.app': {
-    name: 'Demo Owner',
-    phone: '+919876500001',
-    role: 'owner',
-    pgName: 'Khush Living',
-    city: 'Bengaluru',
-  },
-  'admin.demo@pgmanager.app': {
-    name: 'Demo Admin',
-    phone: '+919876500301',
-    role: 'platform_admin',
-    pgName: 'Platform Admin Console',
-    city: 'Bengaluru',
-  },
-  'tenant.demo@pgmanager.app': {
-    name: 'Aarav Singh',
-    phone: '+919876500101',
-    role: 'tenant',
-    pgName: 'Khush Living',
-    city: 'Bengaluru',
-  },
-};
-
 const DEMO_USER_KEY = 'pg-manager:demo-session';
+const DEMO_PERSONA_KEY = 'pg-manager:demo-persona';
 
-const DEMO_USER: User = {
-  id: 'demo-owner-001',
-  name: 'Demo Owner',
-  email: 'owner.demo@pgmanager.app',
-  phone: '+919876500001',
-  role: 'owner',
-  ownerScopeId: null,
-  pgName: 'Khush Living',
-  city: 'Bengaluru',
-  photoUrl: null,
+const DEMO_USERS: Record<string, User> = {
+  owner: {
+    id: 'demo-owner-1',
+    name: 'Vikram Singhania',
+    email: 'owner.demo@rentcare.demo',
+    phone: '+919887654321',
+    role: 'owner',
+    ownerScopeId: null,
+    pgName: 'Singhania PG Network',
+    city: 'Jaipur',
+    photoUrl: null,
+  },
+  tenant: {
+    id: 'demo-tenant-1',
+    name: 'Arjun Sharma',
+    email: 'tenant.demo@rentcare.demo',
+    phone: '+919812345678',
+    role: 'tenant',
+    ownerScopeId: null,
+    pgName: 'Shree Niwas PG',
+    city: 'Jaipur',
+    photoUrl: null,
+  },
+  admin: {
+    id: 'demo-admin-1',
+    name: 'Platform Admin',
+    email: 'admin.demo@rentcare.demo',
+    phone: '+919800000001',
+    role: 'platform_admin',
+    ownerScopeId: null,
+    pgName: 'RentCare Platform',
+    city: 'Jaipur',
+    photoUrl: null,
+  },
 };
 
 const normalizeEmail = (email: string): string => email.trim().toLowerCase();
@@ -103,6 +102,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [authError, setAuthError] = useState('');
+  const [isSuspended, setIsSuspended] = useState(false);
 
   const resolveEmailRedirectTo = (): string | undefined => {
     const configuredSiteUrl = String((import.meta as any).env?.VITE_SITE_URL ?? '').trim();
@@ -172,6 +172,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
 
   const resolveSessionUser = async (authUserId: string): Promise<User | null> => {
+    // Check suspension before mapping — suspended owners get signed out on session load
+    const { data: rawProfile } = await supabase
+      .from('profiles')
+      .select('id,is_suspended,role')
+      .eq('id', authUserId)
+      .maybeSingle<{ id: string; is_suspended?: boolean; role: string }>();
+
+    if (rawProfile?.is_suspended && (rawProfile.role === 'owner' || rawProfile.role === 'owner_manager')) {
+      setIsSuspended(true);
+      await supabase.auth.signOut();
+      return null;
+    }
+
+    setIsSuspended(false);
     const profile = await supabaseAuthDataApi.getProfileById(authUserId);
     if (!profile) {
       return null;
@@ -208,6 +222,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       role: metadataRole,
     });
 
+    // Best-effort: write lead source / UTM data captured during signup
+    void (async () => {
+      try {
+        const raw = localStorage.getItem('rentcare:signup_utm');
+        if (!raw) return;
+        const utm = JSON.parse(raw) as Record<string, string>;
+        await supabase.from('lead_sources').insert({
+          owner_id: authUser.id,
+          utm_source: utm.utm_source || null,
+          utm_medium: utm.utm_medium || null,
+          utm_campaign: utm.utm_campaign || null,
+          utm_term: utm.utm_term || null,
+          utm_content: utm.utm_content || null,
+          referrer_url: utm.referrer_url || null,
+          landing_page: utm.landing_page || null,
+        });
+        localStorage.removeItem('rentcare:signup_utm');
+      } catch { /* non-blocking */ }
+    })();
+
     return resolveSessionUser(authUser.id);
   };
 
@@ -216,22 +250,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const loadSession = async () => {
       try {
-        // Check for demo session first
+        // Check for demo session first — only honor it if NO real Supabase session exists
         const demoFlag = localStorage.getItem(DEMO_USER_KEY);
-        if (demoFlag === 'true') {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const hasRealSession = Boolean(sessionData.session?.user?.id);
+
+        if (demoFlag === 'true' && !hasRealSession) {
+          const persona = (localStorage.getItem(DEMO_PERSONA_KEY) ?? 'owner') as DemoPersona;
+          const demoUser = DEMO_USERS[persona] ?? DEMO_USERS.owner;
           if (!cancelled) {
-            setUser(DEMO_USER);
+            setUser(demoUser);
             setIsLoading(false);
           }
           return;
         }
 
-        const { data, error } = await supabase.auth.getSession();
-        if (error) {
-          throw error;
+        // Real session found — always force live mode regardless of any stale localStorage flag
+        if (hasRealSession) {
+          setAppMode('live', { reload: false });
+          localStorage.removeItem(DEMO_USER_KEY);
         }
 
-        const authUser = data.session?.user;
+        const authUser = sessionData.session?.user;
         if (!authUser?.id) {
           if (!cancelled) {
             setUser(null);
@@ -269,6 +309,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
           return;
         }
+
+        // Real Supabase session — always enforce live mode and clear any demo flag
+        setAppMode('live', { reload: false });
+        localStorage.removeItem(DEMO_USER_KEY);
 
         try {
           const sessionUser = await ensureProfileFromAuthUser({
@@ -383,11 +427,49 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (error) throw error;
       const authUser = data.user;
       if (!authUser?.id) throw new Error('Verification succeeded but user is missing.');
-      const sessionUser = await ensureProfileFromAuthUser({
+
+      let sessionUser = await ensureProfileFromAuthUser({
         id: authUser.id,
         email: authUser.email,
         user_metadata: authUser.user_metadata as Record<string, unknown> | undefined,
       });
+
+      // Phone OTP users default to role='owner' from the DB trigger.
+      // If a matching tenant record exists for this phone, correct the role to 'tenant'.
+      // Only correct roles that are default/non-privileged (owner, owner_manager, staff).
+      // Never correct platform_admin or admin — those are intentionally privileged accounts.
+      const correctable: string[] = ['owner', 'owner_manager', 'staff'];
+      if (sessionUser && correctable.includes(sessionUser.role)) {
+        const normalizedPhone = phone.trim();
+        const last10 = normalizedPhone.replace(/\D/g, '').slice(-10);
+        const { data: tenantRow } = await supabase
+          .from('tenants')
+          .select('id, status')
+          .or(`phone.eq.${normalizedPhone},phone.ilike.%${last10}`)
+          .not('status', 'eq', 'archived')
+          .limit(1)
+          .maybeSingle<{ id: string; status: string }>();
+
+        if (tenantRow?.id) {
+          await supabase
+            .from('profiles')
+            .update({ role: 'tenant' })
+            .eq('id', sessionUser.id);
+
+          sessionUser = { ...sessionUser, role: 'tenant' };
+
+          // Auto-activate tenant if still in pending_onboarding state
+          if (tenantRow.status === 'pending_onboarding') {
+            void (async () => {
+              await supabase
+                .from('tenants')
+                .update({ status: 'active' })
+                .eq('id', tenantRow.id);
+            })().catch(() => {});
+          }
+        }
+      }
+
       setUser(sessionUser);
       return true;
     } catch (error) {
@@ -436,19 +518,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const signInAsDemo = () => {
+  const signInAsDemo = (persona: DemoPersona = 'owner') => {
+    const demoUser = DEMO_USERS[persona] ?? DEMO_USERS.owner;
     localStorage.setItem('app_mode', 'demo');
     localStorage.setItem(DEMO_USER_KEY, 'true');
-    setUser(DEMO_USER);
+    localStorage.setItem(DEMO_PERSONA_KEY, persona);
+    setUser(demoUser);
   };
 
   const logout = async () => {
     setIsLoading(true);
     try {
       const isDemo = localStorage.getItem(DEMO_USER_KEY) === 'true';
+      // Always clear demo flags regardless of session type
+      localStorage.removeItem(DEMO_USER_KEY);
+      localStorage.removeItem(DEMO_PERSONA_KEY);
+      localStorage.removeItem('app_mode');
       if (isDemo) {
-        localStorage.removeItem(DEMO_USER_KEY);
-        localStorage.removeItem('app_mode');
         setUser(null);
         return;
       }
@@ -478,7 +564,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, authError, sendLoginMagicLink, signInWithGoogle, sendSignupMagicLink, sendPhoneOtp, verifyPhoneOtp, signInAsDemo, refreshProfile, logout, isLoading }}>
+    <AuthContext.Provider value={{ user, authError, isSuspended, sendLoginMagicLink, signInWithGoogle, sendSignupMagicLink, sendPhoneOtp, verifyPhoneOtp, signInAsDemo, refreshProfile, logout, isLoading }}>
       {children}
     </AuthContext.Provider>
   );

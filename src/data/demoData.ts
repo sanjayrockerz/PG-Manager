@@ -26,642 +26,658 @@ const shiftDays = (days: number, hour = 10): Date => {
   return date;
 };
 
-const toCreatedAt = (monthOffset: number, day: number, hour = 10): string => atMonthOffset(monthOffset, day, hour).toISOString();
-const toDueDate = (monthOffset: number, day: number): string => toDateOnly(atMonthOffset(monthOffset, day, 8));
-const toJoinDate = (monthOffset: number, day: number): string => toDateOnly(atMonthOffset(monthOffset, day, 9));
+const toCreatedAt = (monthOffset: number, day: number, hour = 10): string =>
+  atMonthOffset(monthOffset, day, hour).toISOString();
+const toDueDate = (monthOffset: number, day: number): string =>
+  toDateOnly(atMonthOffset(monthOffset, day, 8));
+const toJoinDate = (monthOffset: number, day: number): string =>
+  toDateOnly(atMonthOffset(monthOffset, day, 9));
 
-const monthLabel = (monthOffset: number): string => atMonthOffset(monthOffset, 1).toLocaleDateString('en-US', { month: 'short' });
+const monthLabel = (monthOffset: number): string =>
+  atMonthOffset(monthOffset, 1).toLocaleDateString('en-US', { month: 'short' });
 
+// ─── Demo owner ID must match AuthContext DEMO_USERS.owner.id ─────────────────
+const DEMO_OWNER_ID = 'demo-owner-1';
+
+// ─── Properties ───────────────────────────────────────────────────────────────
 export const demoProperties: Property[] = [
   {
     id: 'demo-property-1',
-    name: 'Sunrise Residency',
-    address: '42 Residency Lane, Indiranagar',
-    city: 'Bengaluru',
-    state: 'Karnataka',
-    pincode: '560038',
+    name: 'Shree Niwas PG',
+    address: '14-B, Gopalbari Lane, C-Scheme',
+    addressLine1: '14-B, Gopalbari Lane',
+    locality: 'C-Scheme',
+    city: 'Jaipur',
+    state: 'Rajasthan',
+    pincode: '302001',
     floors: 3,
     totalRooms: 6,
-    contactName: 'Neha Reddy',
-    contactPhone: '+919845001111',
-    contactEmail: 'sunrise.manager@demo.app',
+    contactName: 'Kavya Singhania',
+    contactPhone: '+919887654322',
+    contactEmail: 'shreeniwaas.pg@demo.app',
+    formattedAddress: '14-B, Gopalbari Lane, C-Scheme, Jaipur, Rajasthan 302001',
     occupancyMode: 'BED_BASED',
-    createdAt: toCreatedAt(-10, 6),
+    createdAt: toCreatedAt(-14, 5),
     rooms: [
-      { id: 'demo-room-1', number: '101', floor: 1, type: 'double', beds: 2, rent: 10500, status: 'occupied', occupiedBeds: 2 },
-      { id: 'demo-room-2', number: '102', floor: 1, type: 'single', beds: 1, rent: 11200, status: 'occupied', occupiedBeds: 1 },
-      { id: 'demo-room-3', number: '201', floor: 2, type: 'double', beds: 2, rent: 9800, status: 'occupied', occupiedBeds: 1 },
-      { id: 'demo-room-4', number: '202', floor: 2, type: 'single', beds: 1, rent: 8600, status: 'vacant', occupiedBeds: 0 },
-      { id: 'demo-room-8', number: '301', floor: 3, type: 'triple', beds: 3, rent: 8000, status: 'occupied', occupiedBeds: 2 },
-      { id: 'demo-room-9', number: '302', floor: 3, type: 'double', beds: 2, rent: 9200, status: 'maintenance', occupiedBeds: 0 },
+      { id: 'demo-room-101', number: '101', floor: 1, type: 'double', beds: 2, rent: 9500, status: 'occupied', occupiedBeds: 2 },
+      { id: 'demo-room-102', number: '102', floor: 1, type: 'single', beds: 1, rent: 10200, status: 'occupied', occupiedBeds: 1 },
+      { id: 'demo-room-201', number: '201', floor: 2, type: 'double', beds: 2, rent: 9000, status: 'occupied', occupiedBeds: 1 },
+      { id: 'demo-room-202', number: '202', floor: 2, type: 'single', beds: 1, rent: 8500, status: 'vacant', occupiedBeds: 0 },
+      { id: 'demo-room-301', number: '301', floor: 3, type: 'triple', beds: 3, rent: 7500, status: 'occupied', occupiedBeds: 2 },
+      { id: 'demo-room-302', number: '302', floor: 3, type: 'double', beds: 2, rent: 8800, status: 'maintenance', occupiedBeds: 0 },
     ],
   },
   {
     id: 'demo-property-2',
-    name: 'Lakeview PG',
-    address: '17 Outer Ring Road, HSR Layout',
-    city: 'Bengaluru',
-    state: 'Karnataka',
-    pincode: '560102',
+    name: 'Rajputana Boys PG',
+    address: '22, Durga Marg, Malviya Nagar',
+    addressLine1: '22, Durga Marg',
+    locality: 'Malviya Nagar',
+    city: 'Jaipur',
+    state: 'Rajasthan',
+    pincode: '302017',
     floors: 2,
     totalRooms: 4,
-    contactName: 'Arjun Mehta',
-    contactPhone: '+919900112233',
-    contactEmail: 'lakeview.manager@demo.app',
-    occupancyMode: 'ROOM_BASED',
-    createdAt: toCreatedAt(-8, 12),
+    contactName: 'Vikram Singhania',
+    contactPhone: '+919887654321',
+    contactEmail: 'rajputana.pg@demo.app',
+    formattedAddress: '22, Durga Marg, Malviya Nagar, Jaipur, Rajasthan 302017',
+    occupancyMode: 'BED_BASED',
+    createdAt: toCreatedAt(-10, 12),
     rooms: [
-      { id: 'demo-room-5', number: 'A1', floor: 1, type: 'single', beds: 1, rent: 8900, status: 'occupied', occupiedBeds: 1 },
-      { id: 'demo-room-6', number: 'A2', floor: 1, type: 'double', beds: 2, rent: 9300, status: 'maintenance', occupiedBeds: 0 },
-      { id: 'demo-room-7', number: 'B1', floor: 2, type: 'single', beds: 1, rent: 9200, status: 'vacant', occupiedBeds: 0 },
-      { id: 'demo-room-10', number: 'B2', floor: 2, type: 'double', beds: 2, rent: 10200, status: 'occupied', occupiedBeds: 1 },
+      { id: 'demo-room-a1', number: 'A1', floor: 1, type: 'single', beds: 1, rent: 8200, status: 'occupied', occupiedBeds: 1 },
+      { id: 'demo-room-a2', number: 'A2', floor: 1, type: 'double', beds: 2, rent: 8700, status: 'maintenance', occupiedBeds: 0 },
+      { id: 'demo-room-b1', number: 'B1', floor: 2, type: 'single', beds: 1, rent: 8400, status: 'vacant', occupiedBeds: 0 },
+      { id: 'demo-room-b2', number: 'B2', floor: 2, type: 'double', beds: 2, rent: 9600, status: 'occupied', occupiedBeds: 1 },
     ],
   },
 ];
 
+// ─── Tenants ──────────────────────────────────────────────────────────────────
+// demo-tenant-1 must match AuthContext DEMO_USERS.tenant (Arjun Sharma, room 101 bed 1)
 export const demoTenants: TenantRecord[] = [
-  // --- Sunrise Residency tenants ---
+  // --- Shree Niwas PG ---
   {
     id: 'demo-tenant-1',
-    ownerId: 'demo-owner-1',
-    name: 'Rohan Dsouza',
-    phone: '+919876500001',
-    email: 'rohan.dsouza@demo.app',
+    ownerId: DEMO_OWNER_ID,
+    name: 'Arjun Sharma',
+    phone: '+919812345678',
+    email: 'tenant.demo@rentcare.demo',
     photoUrl: '',
     propertyId: 'demo-property-1',
     floor: 1,
     room: '101',
     bed: '1',
-    rent: 10500,
-    securityDeposit: 21000,
+    rent: 9500,
+    securityDeposit: 19000,
     rentDueDate: 5,
-    parentName: 'Anthony Dsouza',
-    parentPhone: '+919876500099',
+    parentName: 'Ramesh Sharma',
+    parentPhone: '+919812345600',
     idType: 'Aadhaar',
-    idNumber: '111122223333',
+    idNumber: '123456789012',
     idDocumentUrl: '',
-    joinDate: toJoinDate(-9, 10),
+    joinDate: toJoinDate(-8, 10),
     status: 'active',
-    createdAt: toCreatedAt(-9, 10),
+    createdAt: toCreatedAt(-8, 10),
   },
   {
     id: 'demo-tenant-1b',
-    ownerId: 'demo-owner-1',
-    name: 'Priya Kapoor',
-    phone: '+919876500011',
-    email: 'priya.kapoor@demo.app',
+    ownerId: DEMO_OWNER_ID,
+    name: 'Rohit Meena',
+    phone: '+919812345679',
+    email: 'rohit.meena@demo.app',
     photoUrl: '',
     propertyId: 'demo-property-1',
     floor: 1,
     room: '101',
     bed: '2',
-    rent: 10500,
-    securityDeposit: 21000,
+    rent: 9500,
+    securityDeposit: 19000,
     rentDueDate: 5,
-    parentName: 'Suresh Kapoor',
-    parentPhone: '+919876500012',
+    parentName: 'Suresh Meena',
+    parentPhone: '+919812345601',
     idType: 'PAN',
-    idNumber: 'BCDFE4321G',
+    idNumber: 'ABCPM1234R',
     idDocumentUrl: '',
-    joinDate: toJoinDate(-6, 15),
+    joinDate: toJoinDate(-5, 15),
     status: 'active',
-    createdAt: toCreatedAt(-6, 15),
+    createdAt: toCreatedAt(-5, 15),
   },
   {
     id: 'demo-tenant-2',
-    ownerId: 'demo-owner-1',
-    name: 'Karan Malhotra',
-    phone: '+919876500002',
-    email: 'karan.malhotra@demo.app',
+    ownerId: DEMO_OWNER_ID,
+    name: 'Priya Agarwal',
+    phone: '+919887001122',
+    email: 'priya.agarwal@demo.app',
     photoUrl: '',
     propertyId: 'demo-property-1',
     floor: 1,
     room: '102',
     bed: '1',
-    rent: 11200,
-    securityDeposit: 22400,
+    rent: 10200,
+    securityDeposit: 20400,
     rentDueDate: 7,
-    parentName: 'Rakesh Malhotra',
-    parentPhone: '+919876500088',
-    idType: 'PAN',
-    idNumber: 'ABCDE4321F',
+    parentName: 'Deepak Agarwal',
+    parentPhone: '+919887001100',
+    idType: 'Aadhaar',
+    idNumber: '234567890123',
     idDocumentUrl: '',
-    joinDate: toJoinDate(-7, 8),
+    joinDate: toJoinDate(-6, 8),
     status: 'payment_overdue',
-    createdAt: toCreatedAt(-7, 8),
+    createdAt: toCreatedAt(-6, 8),
   },
   {
     id: 'demo-tenant-3',
-    ownerId: 'demo-owner-1',
-    name: 'Nisha Verma',
-    phone: '+919876500003',
-    email: 'nisha.verma@demo.app',
+    ownerId: DEMO_OWNER_ID,
+    name: 'Kavita Gupta',
+    phone: '+919887002233',
+    email: 'kavita.gupta@demo.app',
     photoUrl: '',
     propertyId: 'demo-property-1',
     floor: 2,
     room: '201',
     bed: '1',
-    rent: 9800,
-    securityDeposit: 19600,
+    rent: 9000,
+    securityDeposit: 18000,
     rentDueDate: 4,
-    parentName: 'Mahesh Verma',
-    parentPhone: '+919876500077',
+    parentName: 'Mohan Gupta',
+    parentPhone: '+919887002200',
     idType: 'Passport',
-    idNumber: 'Z1234567',
+    idNumber: 'J1234567',
     idDocumentUrl: '',
-    joinDate: toJoinDate(-6, 14),
+    joinDate: toJoinDate(-5, 14),
     status: 'notice_submitted',
-    vacateDate: toDateOnly(shiftDays(15)),
-    vacateReason: 'Relocating to another city for job.',
-    createdAt: toCreatedAt(-6, 14),
+    vacateDate: toDateOnly(shiftDays(12)),
+    vacateReason: 'Shifting to company-provided accommodation.',
+    createdAt: toCreatedAt(-5, 14),
   },
   {
     id: 'demo-tenant-6',
-    ownerId: 'demo-owner-1',
-    name: 'Ravi Shankar',
-    phone: '+919876500016',
-    email: 'ravi.shankar@demo.app',
+    ownerId: DEMO_OWNER_ID,
+    name: 'Sandeep Rajput',
+    phone: '+919887003344',
+    email: 'sandeep.rajput@demo.app',
     photoUrl: '',
     propertyId: 'demo-property-1',
     floor: 3,
     room: '301',
     bed: '1',
-    rent: 8000,
-    securityDeposit: 16000,
+    rent: 7500,
+    securityDeposit: 15000,
     rentDueDate: 10,
-    parentName: 'Gopal Shankar',
-    parentPhone: '+919876500017',
+    parentName: 'Bharat Rajput',
+    parentPhone: '+919887003300',
     idType: 'Aadhaar',
-    idNumber: '444455556666',
+    idNumber: '345678901234',
     idDocumentUrl: '',
-    joinDate: toJoinDate(-5, 1),
+    joinDate: toJoinDate(-4, 1),
     status: 'active',
-    createdAt: toCreatedAt(-5, 1),
+    createdAt: toCreatedAt(-4, 1),
   },
   {
     id: 'demo-tenant-7',
-    ownerId: 'demo-owner-1',
-    name: 'Anjali Singh',
-    phone: '+919876500017',
-    email: 'anjali.singh@demo.app',
+    ownerId: DEMO_OWNER_ID,
+    name: 'Suman Joshi',
+    phone: '+919887004455',
+    email: 'suman.joshi@demo.app',
     photoUrl: '',
     propertyId: 'demo-property-1',
     floor: 3,
     room: '301',
     bed: '2',
-    rent: 8000,
-    securityDeposit: 16000,
+    rent: 7500,
+    securityDeposit: 15000,
     rentDueDate: 10,
-    parentName: 'Ramesh Singh',
-    parentPhone: '+919876500018',
+    parentName: 'Girish Joshi',
+    parentPhone: '+919887004400',
     idType: 'Driving License',
-    idNumber: 'KA0420210054321',
+    idNumber: 'RJ1420210055001',
     idDocumentUrl: '',
-    joinDate: toJoinDate(-3, 5),
+    joinDate: toJoinDate(-2, 5),
     status: 'vacating',
-    vacateDate: toDateOnly(shiftDays(5)),
-    vacateReason: 'Course completed, returning home.',
-    createdAt: toCreatedAt(-3, 5),
+    vacateDate: toDateOnly(shiftDays(7)),
+    vacateReason: 'Studies complete, returning to native place.',
+    createdAt: toCreatedAt(-2, 5),
   },
-  // Archived former tenant at Sunrise
+  // Archived
   {
     id: 'demo-tenant-8',
-    ownerId: 'demo-owner-1',
-    name: 'Deepak Joshi',
-    phone: '+919876500018',
-    email: 'deepak.joshi@demo.app',
+    ownerId: DEMO_OWNER_ID,
+    name: 'Ankit Sharma',
+    phone: '+919887005566',
+    email: 'ankit.sharma@demo.app',
     photoUrl: '',
     propertyId: 'demo-property-1',
     floor: 2,
     room: '202',
     bed: '1',
-    rent: 8600,
-    securityDeposit: 17200,
+    rent: 8500,
+    securityDeposit: 17000,
     rentDueDate: 3,
-    parentName: 'Narayan Joshi',
-    parentPhone: '+919876500019',
+    parentName: 'Dinesh Sharma',
+    parentPhone: '+919887005500',
     idType: 'Aadhaar',
-    idNumber: '777788889999',
+    idNumber: '456789012345',
     idDocumentUrl: '',
     joinDate: toJoinDate(-12, 1),
     status: 'archived',
     vacateDate: toDateOnly(atMonthOffset(-2, 28)),
-    vacateReason: 'Bought own flat.',
+    vacateReason: 'Purchased own flat in Vaishali Nagar.',
     createdAt: toCreatedAt(-12, 1),
   },
-  // --- Lakeview PG tenants ---
+  // --- Rajputana Boys PG ---
   {
     id: 'demo-tenant-4',
-    ownerId: 'demo-owner-1',
-    name: 'Aditya Nair',
-    phone: '+919876500004',
-    email: 'aditya.nair@demo.app',
+    ownerId: DEMO_OWNER_ID,
+    name: 'Yash Choudhary',
+    phone: '+919887006677',
+    email: 'yash.choudhary@demo.app',
     photoUrl: '',
     propertyId: 'demo-property-2',
     floor: 1,
     room: 'A1',
     bed: '1',
-    rent: 8900,
-    securityDeposit: 17800,
+    rent: 8200,
+    securityDeposit: 16400,
     rentDueDate: 8,
-    parentName: 'Vikram Nair',
-    parentPhone: '+919876500066',
+    parentName: 'Mahesh Choudhary',
+    parentPhone: '+919887006600',
     idType: 'Driving License',
-    idNumber: 'KA0520241234567',
+    idNumber: 'RJ2020201234567',
     idDocumentUrl: '',
-    joinDate: toJoinDate(-4, 3),
+    joinDate: toJoinDate(-3, 3),
     status: 'active',
-    createdAt: toCreatedAt(-4, 3),
+    createdAt: toCreatedAt(-3, 3),
   },
   {
     id: 'demo-tenant-5',
-    ownerId: 'demo-owner-1',
-    name: 'Meera Iyer',
-    phone: '+919876500005',
-    email: 'meera.iyer@demo.app',
+    ownerId: DEMO_OWNER_ID,
+    name: 'Neha Banswal',
+    phone: '+919887007788',
+    email: 'neha.banswal@demo.app',
     photoUrl: '',
     propertyId: 'demo-property-2',
     floor: 2,
     room: 'B2',
     bed: '1',
-    rent: 10200,
-    securityDeposit: 20400,
+    rent: 9600,
+    securityDeposit: 19200,
     rentDueDate: 6,
-    parentName: 'Suresh Iyer',
-    parentPhone: '+919876500055',
+    parentName: 'Rajesh Banswal',
+    parentPhone: '+919887007700',
     idType: 'Aadhaar',
-    idNumber: '999988887777',
+    idNumber: '567890123456',
     idDocumentUrl: '',
-    joinDate: toJoinDate(-3, 18),
+    joinDate: toJoinDate(-2, 18),
     status: 'active',
-    createdAt: toCreatedAt(-3, 18),
+    createdAt: toCreatedAt(-2, 18),
   },
-  // Inactive (recently vacated) at Lakeview
+  // Inactive (recently vacated)
   {
     id: 'demo-tenant-9',
-    ownerId: 'demo-owner-1',
-    name: 'Siddharth Rao',
-    phone: '+919876500019',
-    email: 'siddharth.rao@demo.app',
+    ownerId: DEMO_OWNER_ID,
+    name: 'Pankaj Verma',
+    phone: '+919887008899',
+    email: 'pankaj.verma@demo.app',
     photoUrl: '',
     propertyId: 'demo-property-2',
     floor: 2,
     room: 'B1',
     bed: '1',
-    rent: 9200,
-    securityDeposit: 18400,
+    rent: 8400,
+    securityDeposit: 16800,
     rentDueDate: 12,
-    parentName: 'Krishna Rao',
-    parentPhone: '+919876500020',
+    parentName: 'Vinod Verma',
+    parentPhone: '+919887008800',
     idType: 'PAN',
-    idNumber: 'CDEFG5432H',
+    idNumber: 'DELPV5678K',
     idDocumentUrl: '',
-    joinDate: toJoinDate(-5, 10),
+    joinDate: toJoinDate(-4, 10),
     status: 'inactive',
-    vacateDate: toDateOnly(shiftDays(-10)),
-    vacateReason: 'Transferred to Pune office.',
-    createdAt: toCreatedAt(-5, 10),
+    vacateDate: toDateOnly(atMonthOffset(-1, 25)),
+    vacateReason: 'Transfer to Delhi office.',
+    createdAt: toCreatedAt(-4, 10),
   },
 ];
 
+// ─── Payments ─────────────────────────────────────────────────────────────────
+const activeTenants = demoTenants.filter((t) => isTenantCurrentlyInRoom(t.status));
+
+const buildPaymentsForTenant = (tenant: TenantRecord): PaymentRecord[] => {
+  const records: PaymentRecord[] = [];
+  for (let offset = -2; offset <= 0; offset++) {
+    const due = atMonthOffset(offset, tenant.rentDueDate);
+    const isCurrent = offset === 0;
+    const isFirst = offset === -2;
+    const status: PaymentRecord['status'] =
+      isCurrent && tenant.status === 'payment_overdue'
+        ? 'overdue'
+        : isCurrent
+        ? 'pending'
+        : 'paid';
+    const paidDate =
+      status === 'paid' ? toDateOnly(new Date(due.getTime() + 2 * 86400000)) : '';
+    const extraCharges = isFirst ? 300 : 0;
+    records.push({
+      id: `demo-pay-${tenant.id}-${offset + 3}`,
+      tenantId: tenant.id,
+      tenant: tenant.name,
+      propertyId: tenant.propertyId,
+      room: tenant.room,
+      monthlyRent: tenant.rent,
+      extraCharges,
+      totalAmount: tenant.rent + extraCharges,
+      dueDate: toDateOnly(due),
+      paidDate,
+      status,
+      createdAt: new Date(due.getTime() - 2 * 86400000).toISOString(),
+    });
+  }
+  return records;
+};
+
+export const demoPayments: PaymentRecord[] = activeTenants.flatMap(buildPaymentsForTenant);
+
+// ─── Maintenance tickets ───────────────────────────────────────────────────────
+export const demoMaintenanceTickets: MaintenanceTicketRecord[] = [
+  {
+    id: 'demo-ticket-1',
+    ticketId: 'TKT-001',
+    tenant: 'Arjun Sharma',
+    propertyId: 'demo-property-1',
+    room: '101',
+    issue: 'Water leakage from bathroom tap',
+    description: 'The bathroom cold water tap drips continuously and causes water wastage.',
+    source: 'portal',
+    status: 'open',
+    priority: 'high',
+    date: toDateOnly(shiftDays(-3)),
+    phone: '+919812345678',
+    notes: [],
+    threads: [],
+  },
+  {
+    id: 'demo-ticket-2',
+    ticketId: 'TKT-002',
+    tenant: 'Priya Agarwal',
+    propertyId: 'demo-property-1',
+    room: '102',
+    issue: 'Ceiling fan not working',
+    description: 'The ceiling fan in my room has stopped working since two days.',
+    source: 'portal',
+    status: 'in-progress',
+    priority: 'medium',
+    date: toDateOnly(shiftDays(-5)),
+    phone: '+919887001122',
+    notes: ['Electrician scheduled for tomorrow 10 AM.'],
+    threads: [],
+    assignedTo: 'Electrician - Rajesh',
+  },
+  {
+    id: 'demo-ticket-3',
+    ticketId: 'TKT-003',
+    tenant: 'Sandeep Rajput',
+    propertyId: 'demo-property-1',
+    room: '301',
+    issue: 'Wi-Fi router keeps disconnecting',
+    description: 'Internet disconnects every 30–40 minutes. Affects online work.',
+    source: 'manual',
+    status: 'resolved',
+    priority: 'medium',
+    date: toDateOnly(shiftDays(-10)),
+    phone: '+919887003344',
+    notes: ['ISP issue resolved. Router firmware updated.'],
+    threads: [],
+    resolvedAt: shiftDays(-7).toISOString(),
+  },
+  {
+    id: 'demo-ticket-4',
+    ticketId: 'TKT-004',
+    tenant: 'Yash Choudhary',
+    propertyId: 'demo-property-2',
+    room: 'A1',
+    issue: 'Geyser not heating water',
+    description: 'The geyser in the bathroom does not heat water above lukewarm.',
+    source: 'portal',
+    status: 'open',
+    priority: 'high',
+    date: toDateOnly(shiftDays(-1)),
+    phone: '+919887006677',
+    notes: [],
+    threads: [],
+  },
+  {
+    id: 'demo-ticket-5',
+    ticketId: 'TKT-005',
+    tenant: 'Kavita Gupta',
+    propertyId: 'demo-property-1',
+    room: '201',
+    issue: 'Door lock is stiff and hard to open',
+    description: 'The room door lock requires too much force to open from outside.',
+    source: 'portal',
+    status: 'waiting',
+    priority: 'low',
+    date: toDateOnly(shiftDays(-7)),
+    phone: '+919887002233',
+    notes: ['Locksmith visit pending — part to be ordered.'],
+    threads: [],
+  },
+];
+
+// ─── Announcements ─────────────────────────────────────────────────────────────
+export const demoAnnouncements: AnnouncementRecord[] = [
+  {
+    id: 'demo-ann-1',
+    title: 'Monthly Deep Cleaning — This Sunday',
+    content:
+      'Common areas (kitchen, bathrooms, corridors) will be deep-cleaned this Sunday, 9 AM to 12 PM. Please cooperate with the housekeeping staff.',
+    category: 'general',
+    date: toDateOnly(shiftDays(-1)),
+    isPinned: true,
+    views: 14,
+    sentViaWhatsApp: true,
+    propertyId: null,
+  },
+  {
+    id: 'demo-ann-2',
+    title: 'Rent Reminder — Due by 7th',
+    content:
+      'This is a reminder that rent for this month is due by the 7th. Payments received after the 10th attract a late fee of ₹250. Please pay via UPI to avoid delays.',
+    category: 'payment',
+    date: toDateOnly(shiftDays(-3)),
+    isPinned: false,
+    views: 22,
+    sentViaWhatsApp: true,
+    propertyId: null,
+  },
+  {
+    id: 'demo-ann-3',
+    title: 'Water Supply Interruption — 2 Hours Tomorrow',
+    content:
+      'Jaipur Nagar Nigam has scheduled maintenance work. Water supply will be interrupted from 8 AM to 10 AM tomorrow. Please store water in advance.',
+    category: 'maintenance',
+    date: toDateOnly(shiftDays(-5)),
+    isPinned: false,
+    views: 18,
+    sentViaWhatsApp: false,
+    propertyId: 'demo-property-1',
+  },
+  {
+    id: 'demo-ann-4',
+    title: 'New PG Rules — Effective from Next Month',
+    content:
+      'Updated house rules have been published: (1) Guests allowed till 9 PM only. (2) No cooking in rooms. (3) Noise curfew after 11 PM. Please read the full rulebook.',
+    category: 'rules',
+    date: toDateOnly(shiftDays(-8)),
+    isPinned: false,
+    views: 29,
+    sentViaWhatsApp: true,
+    propertyId: null,
+  },
+];
+
+// ─── Vacate Requests ──────────────────────────────────────────────────────────
 export const demoVacateRequests: VacateRequest[] = [
   {
     id: 'demo-vacate-1',
     tenantId: 'demo-tenant-3',
-    tenantName: 'Nisha Verma',
+    tenantName: 'Kavita Gupta',
     propertyId: 'demo-property-1',
     room: '201',
-    noticeDate: toDateOnly(shiftDays(-7)),
-    plannedVacateDate: toDateOnly(shiftDays(15)),
-    reason: 'Relocating to another city for job.',
-    finalSettlementAmount: 9800,
-    depositRefund: 18100,
-    depositDeduction: 1500,
-    deductionReason: 'Minor wall damage repair.',
+    noticeDate: toDateOnly(shiftDays(-4)),
+    plannedVacateDate: toDateOnly(shiftDays(12)),
+    reason: 'Shifting to company-provided accommodation.',
+    finalSettlementAmount: 9000,
+    depositRefund: 15000,
+    depositDeduction: 3000,
+    deductionReason: 'Minor wall damage in room.',
     status: 'confirmed',
-    createdAt: shiftDays(-7).toISOString(),
-  },
-  {
-    id: 'demo-vacate-2',
-    tenantId: 'demo-tenant-7',
-    tenantName: 'Anjali Singh',
-    propertyId: 'demo-property-1',
-    room: '301',
-    noticeDate: toDateOnly(shiftDays(-3)),
-    plannedVacateDate: toDateOnly(shiftDays(5)),
-    reason: 'Course completed, returning home.',
-    finalSettlementAmount: 8000,
-    depositRefund: 16000,
-    depositDeduction: 0,
-    deductionReason: '',
-    status: 'pending',
-    createdAt: shiftDays(-3).toISOString(),
+    createdAt: shiftDays(-4).toISOString(),
   },
 ];
 
+// ─── Activity Log ─────────────────────────────────────────────────────────────
 export const demoActivityLog: ActivityLogEntry[] = [
   {
     id: 'demo-log-1',
-    ownerId: 'demo-owner-1',
+    ownerId: DEMO_OWNER_ID,
     propertyId: 'demo-property-1',
-    event: 'TENANT_ASSIGNED',
-    detail: 'Priya Kapoor assigned to Room 101, Bed 2 at Sunrise Residency',
-    metadata: { tenantId: 'demo-tenant-1b', room: '101', bed: '2' },
-    createdAt: toCreatedAt(-6, 15),
+    event: 'PAYMENT_RECEIVED',
+    detail: 'Payment of ₹9,500 received from Arjun Sharma (Room 101)',
+    metadata: { tenantId: 'demo-tenant-1', amount: 9500 },
+    createdAt: shiftDays(-1).toISOString(),
   },
   {
     id: 'demo-log-2',
-    ownerId: 'demo-owner-1',
+    ownerId: DEMO_OWNER_ID,
     propertyId: 'demo-property-1',
-    event: 'TENANT_STATUS_CHANGED',
-    detail: 'Karan Malhotra status changed from active to payment_overdue',
-    metadata: { tenantId: 'demo-tenant-2', previousStatus: 'active', newStatus: 'payment_overdue' },
-    createdAt: shiftDays(-5).toISOString(),
+    event: 'MAINTENANCE_CREATED',
+    detail: 'Ticket TKT-001 created: Water leakage from bathroom tap (Room 101)',
+    metadata: { ticketId: 'demo-ticket-1', priority: 'high' },
+    createdAt: shiftDays(-3).toISOString(),
   },
   {
     id: 'demo-log-3',
-    ownerId: 'demo-owner-1',
+    ownerId: DEMO_OWNER_ID,
     propertyId: 'demo-property-1',
     event: 'TENANT_VACATED',
-    detail: 'Nisha Verma submitted vacate notice, planned exit in 15 days',
-    metadata: { tenantId: 'demo-tenant-3', vacateDate: toDateOnly(shiftDays(15)) },
-    createdAt: shiftDays(-7).toISOString(),
+    detail: 'Kavita Gupta submitted vacate notice — planned move-out in 12 days',
+    metadata: { tenantId: 'demo-tenant-3', room: '201' },
+    createdAt: shiftDays(-4).toISOString(),
   },
   {
     id: 'demo-log-4',
-    ownerId: 'demo-owner-1',
+    ownerId: DEMO_OWNER_ID,
     propertyId: 'demo-property-2',
-    event: 'ROOM_VACATED',
-    detail: 'Room B1 vacated — Siddharth Rao checked out',
-    metadata: { room: 'B1', floor: 2, tenantId: 'demo-tenant-9' },
-    createdAt: shiftDays(-10).toISOString(),
+    event: 'TENANT_ASSIGNED',
+    detail: 'Neha Banswal assigned to Room B2, Bed 1',
+    metadata: { tenantId: 'demo-tenant-5', room: 'B2' },
+    createdAt: toCreatedAt(-2, 18),
   },
   {
     id: 'demo-log-5',
-    ownerId: 'demo-owner-1',
+    ownerId: DEMO_OWNER_ID,
     propertyId: 'demo-property-1',
-    event: 'PAYMENT_RECORDED',
-    detail: 'Rent received from Rohan Dsouza — ₹10,500',
-    metadata: { tenantId: 'demo-tenant-1', amount: 10500 },
-    createdAt: toCreatedAt(0, 4, 11),
-  },
-  {
-    id: 'demo-log-6',
-    ownerId: 'demo-owner-1',
-    propertyId: 'demo-property-1',
-    event: 'ROOM_MAINTENANCE',
-    detail: 'Room 302 placed under maintenance — plumbing repair',
-    metadata: { room: '302', floor: 3 },
-    createdAt: shiftDays(-2).toISOString(),
-  },
-];
-
-export const demoPayments: PaymentRecord[] = [
-  {
-    id: 'demo-payment-1',
-    tenantId: 'demo-tenant-1',
-    tenant: 'Rohan Dsouza',
-    propertyId: 'demo-property-1',
-    room: '101',
-    monthlyRent: 10500,
-    extraCharges: 0,
-    totalAmount: 10500,
-    dueDate: toDueDate(0, 5),
-    paidDate: toDueDate(0, 4),
-    status: 'paid',
-    createdAt: toCreatedAt(0, 4, 11),
-  },
-  {
-    id: 'demo-payment-1b',
-    tenantId: 'demo-tenant-1b',
-    tenant: 'Priya Kapoor',
-    propertyId: 'demo-property-1',
-    room: '101',
-    monthlyRent: 10500,
-    extraCharges: 0,
-    totalAmount: 10500,
-    dueDate: toDueDate(0, 5),
-    paidDate: '',
-    status: 'pending',
-    createdAt: toCreatedAt(0, 5, 9),
-  },
-  {
-    id: 'demo-payment-2',
-    tenantId: 'demo-tenant-2',
-    tenant: 'Karan Malhotra',
-    propertyId: 'demo-property-1',
-    room: '102',
-    monthlyRent: 11200,
-    extraCharges: 500,
-    totalAmount: 11700,
-    dueDate: toDueDate(-1, 7),
-    paidDate: '',
-    status: 'overdue',
-    createdAt: toCreatedAt(-1, 7, 10),
-  },
-  {
-    id: 'demo-payment-3',
-    tenantId: 'demo-tenant-3',
-    tenant: 'Nisha Verma',
-    propertyId: 'demo-property-1',
-    room: '201',
-    monthlyRent: 9800,
-    extraCharges: 0,
-    totalAmount: 9800,
-    dueDate: toDueDate(0, 4),
-    paidDate: toDueDate(0, 3),
-    status: 'paid',
-    createdAt: toCreatedAt(0, 3, 9),
-  },
-  {
-    id: 'demo-payment-4',
-    tenantId: 'demo-tenant-4',
-    tenant: 'Aditya Nair',
-    propertyId: 'demo-property-2',
-    room: 'A1',
-    monthlyRent: 8900,
-    extraCharges: 0,
-    totalAmount: 8900,
-    dueDate: toDueDate(0, 8),
-    paidDate: toDueDate(0, 8),
-    status: 'paid',
-    createdAt: toCreatedAt(0, 8, 10),
-  },
-  {
-    id: 'demo-payment-5',
-    tenantId: 'demo-tenant-5',
-    tenant: 'Meera Iyer',
-    propertyId: 'demo-property-2',
-    room: 'B2',
-    monthlyRent: 10200,
-    extraCharges: 0,
-    totalAmount: 10200,
-    dueDate: toDueDate(0, 6),
-    paidDate: '',
-    status: 'pending',
-    createdAt: toCreatedAt(0, 6, 10),
-  },
-  {
-    id: 'demo-payment-6',
-    tenantId: 'demo-tenant-6',
-    tenant: 'Ravi Shankar',
-    propertyId: 'demo-property-1',
-    room: '301',
-    monthlyRent: 8000,
-    extraCharges: 0,
-    totalAmount: 8000,
-    dueDate: toDueDate(0, 10),
-    paidDate: toDueDate(0, 10),
-    status: 'paid',
-    createdAt: toCreatedAt(0, 10, 10),
-  },
-  // Previous month payments
-  {
-    id: 'demo-payment-7',
-    tenantId: 'demo-tenant-1',
-    tenant: 'Rohan Dsouza',
-    propertyId: 'demo-property-1',
-    room: '101',
-    monthlyRent: 10500,
-    extraCharges: 0,
-    totalAmount: 10500,
-    dueDate: toDueDate(-1, 5),
-    paidDate: toDueDate(-1, 4),
-    status: 'paid',
-    createdAt: toCreatedAt(-1, 4, 11),
-  },
-  {
-    id: 'demo-payment-8',
-    tenantId: 'demo-tenant-2',
-    tenant: 'Karan Malhotra',
-    propertyId: 'demo-property-1',
-    room: '102',
-    monthlyRent: 11200,
-    extraCharges: 0,
-    totalAmount: 11200,
-    dueDate: toDueDate(-2, 7),
-    paidDate: toDueDate(-2, 6),
-    status: 'paid',
-    createdAt: toCreatedAt(-2, 6, 11),
-  },
-];
-
-export const demoRecentActivity: DashboardSnapshot['recentActivity'] = [
-  {
-    id: 'demo-activity-1',
-    action: 'Payment received',
-    detail: 'Rohan Dsouza — Room 101 — ₹10,500',
-    propertyId: 'demo-property-1',
-    createdAt: toCreatedAt(0, 4, 11),
-  },
-  {
-    id: 'demo-activity-2',
-    action: 'Vacate notice submitted',
-    detail: 'Nisha Verma — Room 201 — moving out in 15 days',
-    propertyId: 'demo-property-1',
+    event: 'MAINTENANCE_UPDATED',
+    detail: 'Ticket TKT-003 status: open → resolved (Wi-Fi router, Room 301)',
+    metadata: { ticketId: 'demo-ticket-3', previousStatus: 'open', newStatus: 'resolved' },
     createdAt: shiftDays(-7).toISOString(),
   },
   {
-    id: 'demo-activity-3',
-    action: 'Payment overdue',
-    detail: 'Karan Malhotra — Room 102 — ₹11,700 overdue',
+    id: 'demo-log-6',
+    ownerId: DEMO_OWNER_ID,
+    propertyId: null,
+    event: 'ANNOUNCEMENT_CREATED',
+    detail: 'Announcement "Monthly Deep Cleaning — This Sunday" published · WhatsApp broadcast queued',
+    metadata: { announcementId: 'demo-ann-1' },
+    createdAt: shiftDays(-1).toISOString(),
+  },
+  {
+    id: 'demo-log-7',
+    ownerId: DEMO_OWNER_ID,
     propertyId: 'demo-property-1',
-    createdAt: toCreatedAt(-1, 7, 10),
-  },
-  {
-    id: 'demo-activity-4',
-    action: 'Tenant vacated',
-    detail: 'Siddharth Rao — Room B1 — Lakeview PG',
-    propertyId: 'demo-property-2',
-    createdAt: shiftDays(-10).toISOString(),
-  },
-  {
-    id: 'demo-activity-5',
-    action: 'Payment received',
-    detail: 'Aditya Nair — Room A1 — ₹8,900',
-    propertyId: 'demo-property-2',
-    createdAt: toCreatedAt(0, 8, 10),
+    event: 'PAYMENT_RECEIVED',
+    detail: 'Payment of ₹10,200 received from Priya Agarwal (Room 102) — previous cycle',
+    metadata: { tenantId: 'demo-tenant-2', amount: 10200 },
+    createdAt: atMonthOffset(-1, 9).toISOString(),
   },
 ];
 
-const filterByPropertyId = <T extends { propertyId: string }>(rows: T[], propertyId: string | 'all'): T[] => {
-  if (propertyId === 'all') return rows;
-  return rows.filter((row) => row.propertyId === propertyId);
-};
-
-const buildRevenueChartData = (payments: PaymentRecord[]): DashboardSnapshot['revenueChartData'] => {
-  const monthBuckets: Array<{ key: string; name: string; revenue: number }> = [];
-
-  for (let i = 5; i >= 0; i -= 1) {
-    const date = atMonthOffset(-i, 1);
-    monthBuckets.push({
-      key: `${date.getFullYear()}-${date.getMonth()}`,
-      name: monthLabel(-i),
-      revenue: 0,
-    });
-  }
-
-  payments.forEach((payment) => {
-    if (payment.status !== 'paid') return;
-    const referenceDate = new Date(payment.paidDate || payment.dueDate);
-    const key = `${referenceDate.getFullYear()}-${referenceDate.getMonth()}`;
-    const bucket = monthBuckets.find((entry) => entry.key === key);
-    if (bucket) {
-      bucket.revenue += payment.totalAmount;
-    }
-  });
-
-  const averageRevenue = monthBuckets.length > 0
-    ? monthBuckets.reduce((sum, bucket) => sum + bucket.revenue, 0) / monthBuckets.length
-    : 0;
-
-  return monthBuckets.map((bucket) => ({
-    name: bucket.name,
-    revenue: bucket.revenue,
-    target: Math.round(averageRevenue),
-  }));
-};
-
+// ─── Dashboard Snapshot ────────────────────────────────────────────────────────
 export const buildDemoDashboardSnapshot = (propertyId: string | 'all'): DashboardSnapshot => {
   const properties = propertyId === 'all'
     ? demoProperties
-    : demoProperties.filter((property) => property.id === propertyId);
+    : demoProperties.filter((p) => p.id === propertyId);
 
-  const tenants = filterByPropertyId(demoTenants, propertyId);
-  const payments = filterByPropertyId(demoPayments, propertyId);
-  const recentActivity = propertyId === 'all'
-    ? demoRecentActivity
-    : demoRecentActivity.filter((entry) => entry.propertyId === propertyId || entry.propertyId === null);
+  const tenants = demoTenants.filter(
+    (t) => isTenantCurrentlyInRoom(t.status) && (propertyId === 'all' || t.propertyId === propertyId),
+  );
 
-  const allRooms = properties.flatMap((property) => property.rooms);
-  const occupiedRooms = allRooms.filter((room) => room.status === 'occupied').length;
-  const totalRooms = allRooms.length;
+  const payments = demoPayments.filter(
+    (p) => propertyId === 'all' || p.propertyId === propertyId,
+  );
+
+  const rooms = properties.flatMap((p) => p.rooms);
+  const occupiedRooms = rooms.filter((r) => r.status === 'occupied').length;
+  const totalRooms = rooms.length;
 
   const currentMonth = now.getMonth();
   const currentYear = now.getFullYear();
 
   const monthlyRevenue = payments
-    .filter((payment) => {
-      if (payment.status !== 'paid') return false;
-      const referenceDate = new Date(payment.paidDate || payment.dueDate);
-      return referenceDate.getMonth() === currentMonth && referenceDate.getFullYear() === currentYear;
+    .filter((p) => {
+      if (p.status !== 'paid') return false;
+      const ref = p.paidDate ? new Date(p.paidDate) : new Date(p.dueDate);
+      return ref.getMonth() === currentMonth && ref.getFullYear() === currentYear;
     })
-    .reduce((sum, payment) => sum + payment.totalAmount, 0);
+    .reduce((sum, p) => sum + p.totalAmount, 0);
 
   const pendingAmount = payments
-    .filter((payment) => payment.status === 'pending' || payment.status === 'overdue')
-    .reduce((sum, payment) => sum + payment.totalAmount, 0);
+    .filter((p) => p.status === 'pending' || p.status === 'overdue')
+    .reduce((sum, p) => sum + p.totalAmount, 0);
 
-  // Count all tenants currently occupying a room (not just 'active')
-  const activeTenants = tenants.filter((tenant) => isTenantCurrentlyInRoom(tenant.status));
-  const pendingIssues = recentActivity.filter((activity) => activity.action.toLowerCase().includes('maintenance')).length;
+  const pendingIssues = demoMaintenanceTickets.filter(
+    (t) =>
+      t.status === 'open' && (propertyId === 'all' || t.propertyId === propertyId),
+  ).length;
 
   const recentPayments = [...payments]
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
     .slice(0, 5);
 
+  const recentActivity = demoActivityLog
+    .filter((e) => propertyId === 'all' || e.propertyId === propertyId || e.propertyId === null)
+    .slice(0, 6)
+    .map((e) => ({
+      id: e.id,
+      action: e.event.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase()),
+      detail: e.detail,
+      propertyId: e.propertyId,
+      createdAt: e.createdAt,
+    }));
+
+  const monthBuckets: Array<{ key: string; name: string; revenue: number }> = [];
+  for (let i = 5; i >= 0; i--) {
+    const d = new Date(currentYear, currentMonth - i, 1);
+    monthBuckets.push({
+      key: `${d.getFullYear()}-${d.getMonth()}`,
+      name: d.toLocaleDateString('en-US', { month: 'short' }),
+      revenue: 0,
+    });
+  }
+
+  payments.forEach((p) => {
+    if (p.status !== 'paid') return;
+    const ref = p.paidDate ? new Date(p.paidDate) : new Date(p.dueDate);
+    const key = `${ref.getFullYear()}-${ref.getMonth()}`;
+    const bucket = monthBuckets.find((b) => b.key === key);
+    if (bucket) bucket.revenue += p.totalAmount;
+  });
+
+  const avgRevenue = monthBuckets.reduce((s, b) => s + b.revenue, 0) / (monthBuckets.length || 1);
+
   return {
-    totalTenants: activeTenants.length,
+    totalTenants: tenants.length,
     occupiedRooms,
     totalRooms,
     monthlyRevenue,
@@ -669,140 +685,10 @@ export const buildDemoDashboardSnapshot = (propertyId: string | 'all'): Dashboar
     pendingIssues,
     recentPayments,
     recentActivity,
-    revenueChartData: buildRevenueChartData(payments),
+    revenueChartData: monthBuckets.map((b) => ({
+      name: b.name,
+      revenue: b.revenue,
+      target: Math.round(avgRevenue),
+    })),
   };
 };
-
-export const demoDashboardSnapshot: DashboardSnapshot = buildDemoDashboardSnapshot('all');
-
-export const demoMaintenanceTickets: MaintenanceTicketRecord[] = [
-  {
-    id: 'demo-ticket-1',
-    ticketId: 'TKT-001',
-    tenant: 'Aditya Nair',
-    propertyId: 'demo-property-2',
-    room: 'A2',
-    issue: 'Water leakage',
-    description: 'Severe water leakage from the bathroom ceiling. Floor is wet and slippery.',
-    source: 'manual',
-    status: 'open',
-    priority: 'high',
-    date: toDateOnly(atMonthOffset(0, 6)),
-    phone: '+919876500004',
-    notes: [],
-  },
-  {
-    id: 'demo-ticket-2',
-    ticketId: 'TKT-002',
-    tenant: 'Nisha Verma',
-    propertyId: 'demo-property-1',
-    room: '201',
-    issue: 'Ceiling fan not working',
-    description: 'Ceiling fan stopped spinning. May need motor replacement.',
-    source: 'manual',
-    status: 'in-progress',
-    priority: 'medium',
-    date: toDateOnly(atMonthOffset(0, 5)),
-    phone: '+919876500003',
-    notes: ['Electrician visit scheduled for tomorrow.'],
-  },
-  {
-    id: 'demo-ticket-3',
-    ticketId: 'TKT-003',
-    tenant: 'Rohan Dsouza',
-    propertyId: 'demo-property-1',
-    room: '101',
-    issue: 'AC not cooling',
-    description: 'Air conditioner is running but not cooling the room.',
-    source: 'whatsapp',
-    status: 'resolved',
-    priority: 'high',
-    date: toDateOnly(atMonthOffset(-1, 20)),
-    phone: '+919876500001',
-    notes: ['Gas refilled and serviced.', 'Tenant confirmed issue resolved.'],
-  },
-  {
-    id: 'demo-ticket-4',
-    ticketId: 'TKT-004',
-    tenant: 'Karan Malhotra',
-    propertyId: 'demo-property-1',
-    room: '102',
-    issue: 'WiFi connectivity issue',
-    description: 'WiFi signal is very weak in the room. Drops frequently.',
-    source: 'manual',
-    status: 'open',
-    priority: 'low',
-    date: toDateOnly(atMonthOffset(0, 8)),
-    phone: '+919876500002',
-    notes: [],
-  },
-  {
-    id: 'demo-ticket-5',
-    ticketId: 'TKT-005',
-    tenant: 'Anjali Singh',
-    propertyId: 'demo-property-1',
-    room: '301',
-    issue: 'Room lock needs replacement',
-    description: 'Door lock is loose and sometimes gets stuck.',
-    source: 'manual',
-    status: 'open',
-    priority: 'medium',
-    date: toDateOnly(shiftDays(-1)),
-    phone: '+919876500017',
-    notes: [],
-  },
-];
-
-export const demoAnnouncements: AnnouncementRecord[] = [
-  {
-    id: 'demo-announcement-1',
-    title: 'Monthly Rent Due — Please Pay by 10th',
-    content: 'Dear residents, this is a reminder that monthly rent is due by the 10th of every month. Kindly ensure timely payment to avoid late fees. You can pay via UPI or bank transfer. Contact management for any payment issues.',
-    category: 'payment',
-    date: toDateOnly(atMonthOffset(0, 1)),
-    isPinned: true,
-    views: 12,
-    sentViaWhatsApp: true,
-    propertyId: null,
-  },
-  {
-    id: 'demo-announcement-2',
-    title: 'Scheduled Water Supply Maintenance',
-    content: 'Water supply will be interrupted on Sunday from 9 AM to 1 PM for routine pipeline maintenance. Please store sufficient water in advance. We apologise for the inconvenience.',
-    category: 'maintenance',
-    date: toDateOnly(atMonthOffset(0, 5)),
-    isPinned: false,
-    views: 8,
-    sentViaWhatsApp: false,
-    propertyId: 'demo-property-1',
-  },
-  {
-    id: 'demo-announcement-3',
-    title: 'Updated House Rules — Please Read',
-    content: 'We have updated our house rules to improve the living experience for all residents. Key changes: (1) Quiet hours are now 10 PM to 7 AM. (2) Guests must be registered at reception. (3) Common areas must be kept clean. Full rules available at reception.',
-    category: 'rules',
-    date: toDateOnly(atMonthOffset(-1, 15)),
-    isPinned: false,
-    views: 15,
-    sentViaWhatsApp: true,
-    propertyId: null,
-  },
-  {
-    id: 'demo-announcement-4',
-    title: 'Common Area Deep Cleaning This Weekend',
-    content: 'Our housekeeping team will perform a deep cleaning of all common areas (corridors, kitchen, bathrooms) this Saturday. Please cooperate by keeping your belongings out of the common areas.',
-    category: 'general',
-    date: toDateOnly(atMonthOffset(0, 3)),
-    isPinned: false,
-    views: 5,
-    sentViaWhatsApp: false,
-    propertyId: null,
-  },
-];
-
-// Alias exports for data-service contracts.
-export const dashboardStats = demoDashboardSnapshot;
-export const tenants = demoTenants;
-export const properties = demoProperties;
-export const payments = demoPayments;
-export const activities = demoRecentActivity;

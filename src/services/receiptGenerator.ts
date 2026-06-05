@@ -140,6 +140,15 @@ export function generateReceiptHTML(data: ReceiptData): string {
         </div>` : ''}
       </div>
 
+      ${(payment.paymentMode || payment.referenceNumber || payment.paymentNotes) ? `
+      <div class="divider"></div>
+      <div class="section-label">Payment Details</div>
+      <div class="info-grid">
+        ${payment.paymentMode ? `<div class="info-item"><label>Payment Mode</label><span style="text-transform:capitalize">${payment.paymentMode.replace('_', ' ')}</span></div>` : ''}
+        ${payment.referenceNumber ? `<div class="info-item"><label>Reference / TXN ID</label><span style="font-family:monospace">${payment.referenceNumber}</span></div>` : ''}
+        ${payment.paymentNotes ? `<div class="info-item" style="grid-column:1/-1"><label>Notes</label><span>${payment.paymentNotes}</span></div>` : ''}
+      </div>` : ''}
+
       <div class="divider"></div>
 
       <div style="display:flex;justify-content:space-between;font-size:13px;color:#6b7280;">

@@ -4,6 +4,7 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from './ui/dialog';
+import { Sheet, SheetContent } from './ui/sheet';
 import { toast } from 'sonner';
 import {
   Wrench, AlertCircle, Clock, CheckCircle, Plus, MessageSquare,
@@ -19,7 +20,9 @@ import {
   updateMaintenanceStatusRecord,
   addMaintenanceThreadEntry,
   getMaintenanceThreads,
+  getTeamMembers,
 } from '../services/dataService';
+import type { TeamMemberRecord } from '../services/supabaseData';
 import type {
   MaintenanceTicketRecord, MaintenancePriority,
   MaintenanceStatus, MaintenanceSource, MaintenanceThreadEntry,
@@ -28,11 +31,12 @@ import type {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const STATUS_CONFIG: Record<MaintenanceStatus, { label: string; color: string; dot: string; border: string }> = {
-  open:         { label: 'Open',        color: 'bg-red-50 text-red-700',    dot: 'bg-red-500',    border: 'border-l-red-500' },
-  'in-progress':{ label: 'In Progress', color: 'bg-amber-50 text-amber-700',dot: 'bg-amber-500',  border: 'border-l-amber-500' },
-  waiting:      { label: 'Waiting',     color: 'bg-blue-50 text-blue-700',  dot: 'bg-blue-400',   border: 'border-l-blue-400' },
-  resolved:     { label: 'Resolved',    color: 'bg-green-50 text-green-700',dot: 'bg-green-500',  border: 'border-l-green-500' },
-  closed:       { label: 'Closed',      color: 'bg-gray-100 text-gray-500', dot: 'bg-gray-400',   border: 'border-l-gray-400' },
+  open:         { label: 'Open',        color: 'bg-red-50 text-red-700',     dot: 'bg-red-500',     border: 'border-l-red-500' },
+  assigned:     { label: 'Assigned',    color: 'bg-indigo-50 text-indigo-700',dot: 'bg-indigo-500', border: 'border-l-indigo-500' },
+  'in-progress':{ label: 'In Progress', color: 'bg-amber-50 text-amber-700', dot: 'bg-amber-500',   border: 'border-l-amber-500' },
+  waiting:      { label: 'Waiting',     color: 'bg-blue-50 text-blue-700',   dot: 'bg-blue-400',    border: 'border-l-blue-400' },
+  resolved:     { label: 'Resolved',    color: 'bg-green-50 text-green-700', dot: 'bg-green-500',   border: 'border-l-green-500' },
+  closed:       { label: 'Closed',      color: 'bg-gray-100 text-gray-500',  dot: 'bg-gray-400',    border: 'border-l-gray-400' },
 };
 
 const PRIORITY_CONFIG: Record<MaintenancePriority, { label: string; color: string }> = {
@@ -224,8 +228,9 @@ function ThreadTimeline({ ticketId }: { ticketId: string }) {
 // ─── Status Transition Dropdown ───────────────────────────────────────────────
 
 const VALID_TRANSITIONS: Record<MaintenanceStatus, MaintenanceStatus[]> = {
-  open:          ['in-progress', 'waiting', 'resolved', 'closed'],
-  'in-progress': ['waiting', 'resolved', 'closed', 'open'],
+  open:          ['assigned', 'in-progress', 'waiting', 'resolved', 'closed'],
+  assigned:      ['in-progress', 'waiting', 'resolved', 'closed', 'open'],
+  'in-progress': ['waiting', 'resolved', 'closed', 'assigned', 'open'],
   waiting:       ['in-progress', 'resolved', 'closed'],
   resolved:      ['closed', 'open'],
   closed:        ['open'],
@@ -309,28 +314,23 @@ function StatusDropdown({ current, ticketId, onUpdate }: StatusDropdownProps) {
   );
 }
 
-// ─── Ticket Row (collapsible) ─────────────────────────────────────────────────
+// ─── Ticket Row ───────────────────────────────────────────────────────────────
 
 interface TicketRowProps {
   ticket: MaintenanceTicketRecord;
   propertyName: string;
   onStatusUpdate: (id: string, status: MaintenanceStatus) => void;
+  onView: (id: string) => void;
 }
 
-function TicketRow({ ticket, propertyName, onStatusUpdate, highlight }: TicketRowProps & { highlight?: boolean }) {
-  const [expanded, setExpanded] = useState(false);
+function TicketRow({ ticket, propertyName, onStatusUpdate, onView, highlight }: TicketRowProps & { highlight?: boolean }) {
   const pCfg = PRIORITY_CONFIG[ticket.priority];
   const sCfg = STATUS_CONFIG[ticket.status];
-  const score = urgencyScore(ticket);
-  const ub = urgencyBadge(score);
+  const ub = urgencyBadge(urgencyScore(ticket));
 
   return (
-    <div className={`border rounded-xl overflow-hidden transition-shadow hover:shadow-sm border-l-4 ${sCfg.border} ${highlight ? 'border border-amber-200' : 'border border-zinc-200'}`}>
-      {/* Summary row */}
-      <button
-        onClick={() => setExpanded((v) => !v)}
-        className={`w-full text-left flex items-center gap-3 px-4 py-3 transition-colors ${highlight ? 'bg-amber-50/50 hover:bg-amber-50' : 'bg-white hover:bg-zinc-50'}`}
-      >
+    <div className={`border rounded-xl overflow-hidden transition-shadow hover:shadow-sm border-l-4 ${sCfg.border} ${highlight ? 'border border-amber-200 bg-amber-50/30' : 'border border-zinc-200 bg-white'}`}>
+      <div className="flex items-center gap-3 px-4 py-3">
         {/* Urgency badge */}
         <span style={{ flexShrink: 0, fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4, background: ub.bg, color: ub.color }}>
           {ub.label.toUpperCase()}
@@ -346,84 +346,116 @@ function TicketRow({ ticket, propertyName, onStatusUpdate, highlight }: TicketRo
             </span>
           </div>
           <div className="flex items-center gap-3 mt-0.5 text-xs text-zinc-500 flex-wrap">
-            <span className="flex items-center gap-1">
-              <User className="w-3 h-3" />{ticket.tenant}
-            </span>
-            <span className="flex items-center gap-1">
-              <MapPin className="w-3 h-3" />{propertyName} · Room {ticket.room}
-            </span>
+            <span className="flex items-center gap-1"><User className="w-3 h-3" />{ticket.tenant}</span>
+            <span className="flex items-center gap-1"><MapPin className="w-3 h-3" />{propertyName} · Room {ticket.room}</span>
             <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${pCfg.color}`}>{pCfg.label}</span>
           </div>
         </div>
 
-        {/* Status pill */}
-        <div onClick={(e) => e.stopPropagation()} className="flex-shrink-0">
-          <StatusDropdown
-            current={ticket.status}
-            ticketId={ticket.id}
-            onUpdate={(s) => onStatusUpdate(ticket.id, s)}
-          />
+        {/* Status */}
+        <div className="flex-shrink-0">
+          <StatusDropdown current={ticket.status} ticketId={ticket.id} onUpdate={(s) => onStatusUpdate(ticket.id, s)} />
         </div>
 
-        {/* Expand chevron */}
-        <ChevronDown
-          className={`w-4 h-4 text-zinc-400 flex-shrink-0 transition-transform ${expanded ? 'rotate-180' : ''}`}
-        />
-      </button>
+        {/* View */}
+        <button
+          onClick={() => onView(ticket.id)}
+          className="ds-btn ds-btn-secondary flex-shrink-0"
+          style={{ fontSize: 11, padding: '4px 8px', gap: 4 }}
+          title="View ticket detail"
+        >
+          <Eye style={{ width: 12, height: 12 }} /> View
+        </button>
+      </div>
+    </div>
+  );
+}
 
-      {/* Expanded detail */}
-      {expanded && (
-        <div className="border-t border-zinc-100 bg-zinc-50 px-4 py-4 space-y-4">
-          {/* Description */}
-          {ticket.description && (
-            <div>
-              <p className="text-xs font-semibold text-zinc-500 mb-1">Description</p>
-              <p className="text-sm text-zinc-700 leading-relaxed">{ticket.description}</p>
-            </div>
-          )}
+// ─── Ticket Detail Sheet ──────────────────────────────────────────────────────
 
-          {/* Meta grid */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-            <div>
-              <p className="text-zinc-400 mb-0.5">Tenant</p>
-              <p className="font-semibold text-zinc-800">{ticket.tenant}</p>
-            </div>
-            <div>
-              <p className="text-zinc-400 mb-0.5">Room</p>
-              <p className="font-semibold text-zinc-800">{ticket.room}</p>
-            </div>
-            {ticket.phone && (
-              <div>
-                <p className="text-zinc-400 mb-0.5">Phone</p>
-                <p className="font-semibold text-zinc-800">{ticket.phone}</p>
+function TicketDetailSheet({
+  ticket,
+  propertyName,
+  open,
+  onClose,
+  onStatusUpdate,
+}: {
+  ticket: MaintenanceTicketRecord | null;
+  propertyName: string;
+  open: boolean;
+  onClose: () => void;
+  onStatusUpdate: (id: string, status: MaintenanceStatus) => void;
+}) {
+  if (!ticket) return null;
+
+  const sCfg = STATUS_CONFIG[ticket.status];
+  const pCfg = PRIORITY_CONFIG[ticket.priority];
+  const ub = urgencyBadge(urgencyScore(ticket));
+
+  return (
+    <Sheet open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
+      <SheetContent side="right" className="sm:max-w-xl w-full overflow-y-auto p-0">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+          {/* Header */}
+          <div style={{ padding: '20px 24px 16px', borderBottom: '1px solid #F1F1F3' }}>
+            <div className="flex items-start gap-3 mb-3">
+              <span style={{ flexShrink: 0, fontSize: 9, fontWeight: 700, padding: '3px 7px', borderRadius: 4, background: ub.bg, color: ub.color, marginTop: 3 }}>
+                {ub.label.toUpperCase()}
+              </span>
+              <div className="flex-1 min-w-0">
+                <h2 style={{ fontSize: 16, fontWeight: 700, color: '#0A0A0B', lineHeight: 1.3 }}>{ticket.issue}</h2>
+                <p style={{ fontSize: 12, color: '#A1A1AA', marginTop: 2 }}>{ticket.ticketId} · {ageLabel(ticket.date)}</p>
               </div>
-            )}
-            {ticket.assignedTo && (
-              <div>
-                <p className="text-zinc-400 mb-0.5">Assigned To</p>
-                <p className="font-semibold text-zinc-800">{ticket.assignedTo}</p>
-              </div>
-            )}
-            {ticket.resolvedAt && (
-              <div>
-                <p className="text-zinc-400 mb-0.5">Resolved</p>
-                <p className="font-semibold text-green-700">
-                  {new Date(ticket.resolvedAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}
+            </div>
+            <div className="flex items-center gap-3 flex-wrap">
+              <StatusDropdown current={ticket.status} ticketId={ticket.id} onUpdate={(s) => onStatusUpdate(ticket.id, s)} />
+              <span className={`px-2 py-0.5 rounded text-xs font-bold ${pCfg.color}`}>{pCfg.label} priority</span>
+              <span style={{ fontSize: 11, color: '#71717A' }}>{propertyName} · Room {ticket.room}</span>
+            </div>
+          </div>
+
+          {/* Detail grid */}
+          <div style={{ padding: '16px 24px', borderBottom: '1px solid #F1F1F3' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              {[
+                ['Tenant', ticket.tenant],
+                ['Room', ticket.room],
+                ticket.phone ? ['Phone', ticket.phone] : null,
+                ticket.assignedTo ? ['Assigned To', ticket.assignedTo] : null,
+                ['Source', ticket.source],
+                ['Reported', new Date(ticket.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })],
+                ticket.resolvedAt ? ['Resolved', new Date(ticket.resolvedAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })] : null,
+              ].filter(Boolean).map((entry) => {
+                const [label, value] = entry as [string, string];
+                return (
+                  <div key={label} style={{ padding: '8px 10px', background: '#F8FAFC', borderRadius: 8 }}>
+                    <p style={{ fontSize: 10, color: '#A1A1AA', marginBottom: 3 }}>{label}</p>
+                    <p style={{ fontSize: 13, fontWeight: 600, color: '#0A0A0B' }}>{value}</p>
+                  </div>
+                );
+              })}
+            </div>
+
+            {ticket.description && (
+              <div style={{ marginTop: 12 }}>
+                <p style={{ fontSize: 11, fontWeight: 600, color: '#71717A', marginBottom: 6 }}>Description</p>
+                <p style={{ fontSize: 13, color: '#374151', lineHeight: 1.6, background: '#F8FAFC', borderRadius: 8, padding: '10px 12px' }}>
+                  {ticket.description}
                 </p>
               </div>
             )}
           </div>
 
           {/* Thread */}
-          <div>
-            <p className="text-xs font-semibold text-zinc-500 mb-2 flex items-center gap-1.5">
-              <MessageSquare className="w-3.5 h-3.5" /> Thread
+          <div style={{ padding: '16px 24px' }}>
+            <p style={{ fontSize: 11, fontWeight: 600, color: '#71717A', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <MessageSquare style={{ width: 13, height: 13 }} /> Thread
             </p>
             <ThreadTimeline ticketId={ticket.id} />
           </div>
         </div>
-      )}
-    </div>
+      </SheetContent>
+    </Sheet>
   );
 }
 
@@ -432,8 +464,10 @@ function TicketRow({ ticket, propertyName, onStatusUpdate, highlight }: TicketRo
 export function Maintenance() {
   const { properties, selectedProperty } = useProperty();
   const [tickets, setTickets] = useState<MaintenanceTicketRecord[]>([]);
+  const [teamMembers, setTeamMembers] = useState<TeamMemberRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
+  const [drawerTicketId, setDrawerTicketId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [createForm, setCreateForm] = useState({
     tenant: '',
@@ -454,8 +488,12 @@ export function Maintenance() {
   const load = async () => {
     setLoading(true);
     try {
-      const data = await getMaintenanceTickets(selectedProperty);
+      const [data, members] = await Promise.all([
+        getMaintenanceTickets(selectedProperty),
+        getTeamMembers(),
+      ]);
       setTickets(data);
+      setTeamMembers(members);
     } catch {
       toast.error('Failed to load maintenance tickets');
     } finally {
@@ -647,6 +685,7 @@ export function Maintenance() {
                 ticket={ticket}
                 propertyName={getPropertyName(ticket.propertyId)}
                 onStatusUpdate={handleStatusUpdate}
+                onView={setDrawerTicketId}
                 highlight={isHighAttention && filterStatus === 'all'}
               />
             );
@@ -721,7 +760,20 @@ export function Maintenance() {
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold text-zinc-700">Assign To</Label>
-                <Input placeholder="Staff name or team" value={createForm.assignedTo} onChange={(e) => setCreateForm({ ...createForm, assignedTo: e.target.value })} className="h-9 text-sm" />
+                {teamMembers.length > 0 ? (
+                  <select
+                    value={createForm.assignedTo}
+                    onChange={(e) => setCreateForm({ ...createForm, assignedTo: e.target.value })}
+                    className="w-full h-9 px-3 border border-zinc-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                  >
+                    <option value="">Unassigned</option>
+                    {teamMembers.map((m) => (
+                      <option key={m.id} value={m.name}>{m.name} ({m.role})</option>
+                    ))}
+                  </select>
+                ) : (
+                  <Input placeholder="Staff name" value={createForm.assignedTo} onChange={(e) => setCreateForm({ ...createForm, assignedTo: e.target.value })} className="h-9 text-sm" />
+                )}
               </div>
             </div>
             <DialogFooter className="gap-2 pt-2">
@@ -734,6 +786,15 @@ export function Maintenance() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Ticket detail sheet */}
+      <TicketDetailSheet
+        ticket={tickets.find((t) => t.id === drawerTicketId) ?? null}
+        propertyName={drawerTicketId ? getPropertyName(tickets.find((t) => t.id === drawerTicketId)?.propertyId ?? '') : ''}
+        open={!!drawerTicketId}
+        onClose={() => setDrawerTicketId(null)}
+        onStatusUpdate={handleStatusUpdate}
+      />
     </div>
   );
 }

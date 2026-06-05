@@ -1,19 +1,25 @@
-import { useCallback, useEffect, useMemo, useState, lazy, Suspense } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react';
 
 const QuickStartGuide = lazy(() => import('./QuickStartGuide').then((m) => ({ default: m.QuickStartGuide })));
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, Cell,
+  ResponsiveContainer,
 } from 'recharts';
 import {
   ArrowUpRight, ArrowDownRight, Bed, Calendar, CheckCircle2,
-  Clock, CreditCard, IndianRupee, TrendingUp, Users, Wrench,
-  UserPlus, AlertCircle, ChevronRight, Building2, Plus,
+  Clock, CreditCard, TrendingUp, Users, Wrench,
+  UserPlus, AlertCircle, ChevronRight, Building2, Plus, ChevronDown,
 } from 'lucide-react';
 import { useProperty } from '../contexts/PropertyContext';
 import type { DashboardSnapshot } from '../services/supabaseData';
 import { getDashboardData, isDemoModeEnabled } from '../services/dataService';
 import { useRealtimeRefresh } from '../hooks/useRealtimeRefresh';
+import {
+  useDateRange,
+  DATE_PRESET_LABELS,
+  PRESETS_ORDERED,
+  type DatePreset,
+} from '../contexts/DateRangeContext';
 
 /* ─── Types ──────────────────────────────── */
 const empty: DashboardSnapshot = {
@@ -67,13 +73,13 @@ function StatCard({
   return (
     <div
       className="ds-card flex items-start justify-between"
-      style={{ padding: '16px 18px', gap: 12 }}
+      style={{ padding: '10px 14px', gap: 10 }}
     >
       <div className="flex-1 min-w-0">
-        <p style={{ fontSize: 11, fontWeight: 600, color: '#71717A', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 8 }}>
+        <p style={{ fontSize: 10, fontWeight: 600, color: '#71717A', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 5 }}>
           {label}
         </p>
-        <p style={{ fontSize: 26, fontWeight: 700, color: '#0A0A0B', letterSpacing: '-0.04em', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
+        <p style={{ fontSize: 20, fontWeight: 700, color: '#0A0A0B', letterSpacing: '-0.03em', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
           {prefix && <span style={{ fontSize: 16, fontWeight: 600, color: '#71717A', marginRight: 1 }}>{prefix}</span>}
           {value}
           {suffix && <span style={{ fontSize: 16, fontWeight: 600, color: '#71717A', marginLeft: 1 }}>{suffix}</span>}
@@ -115,15 +121,15 @@ function StatCard({
         </div>
 
         {meta && (
-          <p style={{ fontSize: 12, color: '#A1A1AA', marginTop: 6 }}>{meta}</p>
+          <p style={{ fontSize: 11, color: '#A1A1AA', marginTop: 4 }}>{meta}</p>
         )}
       </div>
 
       <div
-        className="flex-shrink-0 flex items-center justify-center rounded-xl"
-        style={{ width: 40, height: 40, background: iconBg }}
+        className="flex-shrink-0 flex items-center justify-center rounded-lg"
+        style={{ width: 32, height: 32, background: iconBg }}
       >
-        <Icon style={{ width: 18, height: 18, color: iconColor, strokeWidth: 1.75 }} />
+        <Icon style={{ width: 14, height: 14, color: iconColor, strokeWidth: 1.75 }} />
       </div>
     </div>
   );
@@ -180,9 +186,111 @@ interface DashboardProps {
   onNavigate?: (tab: string) => void;
 }
 
+/* ─── Date Range Picker ─────────────────── */
+function DateRangePicker() {
+  const { preset, label, setPreset, setCustomRange, customStart, customEnd } = useDateRange();
+  const [open, setOpen] = useState(false);
+  const [localStart, setLocalStart] = useState(customStart);
+  const [localEnd, setLocalEnd] = useState(customEnd);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const handlePreset = (p: Exclude<DatePreset, 'custom'>) => {
+    setPreset(p);
+    setOpen(false);
+  };
+
+  const handleCustomApply = () => {
+    if (localStart && localEnd && localStart <= localEnd) {
+      setCustomRange(localStart, localEnd);
+      setOpen(false);
+    }
+  };
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="ds-btn ds-btn-secondary"
+        style={{ fontSize: 12, padding: '6px 10px', gap: 5, minWidth: 140 }}
+      >
+        <Calendar style={{ width: 12, height: 12, color: '#6366F1' }} />
+        <span style={{ flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 120 }}>{label}</span>
+        <ChevronDown style={{ width: 11, height: 11, color: '#A1A1AA', flexShrink: 0 }} />
+      </button>
+
+      {open && (
+        <div
+          style={{
+            position: 'absolute', right: 0, top: '100%', marginTop: 4, zIndex: 50,
+            background: '#fff', border: '1px solid #E4E4E7', borderRadius: 10,
+            boxShadow: '0 8px 24px rgba(0,0,0,0.1)', padding: '6px 0', minWidth: 200,
+          }}
+        >
+          {PRESETS_ORDERED.filter((p) => p !== 'custom').map((p) => (
+            <button
+              key={p}
+              onClick={() => handlePreset(p as Exclude<DatePreset, 'custom'>)}
+              style={{
+                display: 'block', width: '100%', textAlign: 'left',
+                padding: '7px 14px', fontSize: 13, cursor: 'pointer',
+                background: preset === p ? '#EEF2FF' : 'transparent',
+                color: preset === p ? '#4F46E5' : '#374151',
+                fontWeight: preset === p ? 600 : 400,
+                border: 'none',
+              }}
+            >
+              {DATE_PRESET_LABELS[p]}
+            </button>
+          ))}
+          <div style={{ margin: '6px 14px 0', paddingTop: 6, borderTop: '1px solid #F4F4F6' }}>
+            <p style={{ fontSize: 11, color: '#A1A1AA', marginBottom: 6 }}>Custom range</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <input
+                type="date"
+                value={localStart}
+                onChange={(e) => setLocalStart(e.target.value)}
+                style={{ fontSize: 12, border: '1px solid #E4E4E7', borderRadius: 6, padding: '4px 8px', width: '100%' }}
+              />
+              <input
+                type="date"
+                value={localEnd}
+                min={localStart}
+                onChange={(e) => setLocalEnd(e.target.value)}
+                style={{ fontSize: 12, border: '1px solid #E4E4E7', borderRadius: 6, padding: '4px 8px', width: '100%' }}
+              />
+              <button
+                onClick={handleCustomApply}
+                disabled={!localStart || !localEnd || localStart > localEnd}
+                style={{
+                  fontSize: 12, fontWeight: 600, padding: '5px 10px', borderRadius: 6,
+                  background: '#6366F1', color: '#fff', border: 'none', cursor: 'pointer',
+                  opacity: (!localStart || !localEnd || localStart > localEnd) ? 0.5 : 1,
+                  marginTop: 2,
+                }}
+              >
+                Apply
+              </button>
+            </div>
+          </div>
+          <div style={{ height: 8 }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function Dashboard({ onNavigate }: DashboardProps) {
   const { selectedProperty, properties } = useProperty();
   const isDemoMode = isDemoModeEnabled();
+  const { range, label: rangeLabel } = useDateRange();
   const [data, setData] = useState<DashboardSnapshot>(empty);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -191,7 +299,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
     if (showLoader) setLoading(true);
     setError('');
     try {
-      const d = await getDashboardData(selectedProperty);
+      const d = await getDashboardData(selectedProperty, range);
       setData(d);
       writeCache(selectedProperty, d);
     } catch {
@@ -199,7 +307,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
     } finally {
       if (showLoader) setLoading(false);
     }
-  }, [selectedProperty]);
+  }, [selectedProperty, range]);
 
   useEffect(() => {
     const cached = readCache(selectedProperty);
@@ -281,8 +389,8 @@ export function Dashboard({ onNavigate }: DashboardProps) {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          {/* Building View — primary shortcut */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <DateRangePicker />
           <button
             onClick={() => onNavigate?.('building-view')}
             className="ds-btn ds-btn-secondary"
@@ -291,7 +399,6 @@ export function Dashboard({ onNavigate }: DashboardProps) {
             <Building2 style={{ width: 13, height: 13, color: '#6366F1' }} />
             Building View
           </button>
-
           <button
             onClick={() => onNavigate?.('tenants')}
             className="ds-btn ds-btn-primary"
@@ -309,6 +416,77 @@ export function Dashboard({ onNavigate }: DashboardProps) {
         </div>
       )}
 
+      {/* ── Today's Priorities ──────────────── */}
+      {(overdueCt > 0 || data.pendingIssues > 0) && (
+        <div className="ds-card" style={{ padding: '14px 18px' }}>
+          <div className="flex items-center justify-between" style={{ marginBottom: 10 }}>
+            <h2 style={{ fontSize: 13, fontWeight: 700, color: '#0A0A0B', letterSpacing: '-0.01em' }}>Today's Priorities</h2>
+            <span style={{ fontSize: 11, color: '#A1A1AA' }}>
+              {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}
+            </span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {overdueCt > 0 && (
+              <button
+                onClick={() => onNavigate?.('payments')}
+                className="flex items-center justify-between w-full rounded-lg"
+                style={{ padding: '9px 12px', background: '#FEF2F2', border: '1px solid #FECACA', cursor: 'pointer', textAlign: 'left' }}
+              >
+                <div className="flex items-center gap-2.5">
+                  <div className="flex-shrink-0 flex items-center justify-center rounded-md" style={{ width: 28, height: 28, background: '#FEE2E2' }}>
+                    <AlertCircle style={{ width: 14, height: 14, color: '#DC2626' }} />
+                  </div>
+                  <div>
+                    <p style={{ fontSize: 12, fontWeight: 600, color: '#991B1B' }}>{overdueCt} overdue payment{overdueCt > 1 ? 's' : ''} need collection</p>
+                    <p style={{ fontSize: 11, color: '#B91C1C', marginTop: 1 }}>
+                      {data.recentPayments.filter(p => p.status === 'overdue').slice(0, 2).map(p => p.tenant).join(', ')}
+                      {overdueCt > 2 ? ` +${overdueCt - 2} more` : ''}
+                    </p>
+                  </div>
+                </div>
+                <ChevronRight style={{ width: 12, height: 12, color: '#991B1B', flexShrink: 0 }} />
+              </button>
+            )}
+            {data.pendingIssues > 0 && (
+              <button
+                onClick={() => onNavigate?.('maintenance')}
+                className="flex items-center justify-between w-full rounded-lg"
+                style={{ padding: '9px 12px', background: '#FFFBEB', border: '1px solid #FDE68A', cursor: 'pointer', textAlign: 'left' }}
+              >
+                <div className="flex items-center gap-2.5">
+                  <div className="flex-shrink-0 flex items-center justify-center rounded-md" style={{ width: 28, height: 28, background: '#FEF3C7' }}>
+                    <Wrench style={{ width: 14, height: 14, color: '#D97706' }} />
+                  </div>
+                  <div>
+                    <p style={{ fontSize: 12, fontWeight: 600, color: '#92400E' }}>{data.pendingIssues} open maintenance ticket{data.pendingIssues > 1 ? 's' : ''}</p>
+                    <p style={{ fontSize: 11, color: '#B45309', marginTop: 1 }}>Click to view and assign tickets</p>
+                  </div>
+                </div>
+                <ChevronRight style={{ width: 12, height: 12, color: '#92400E', flexShrink: 0 }} />
+              </button>
+            )}
+            {data.pendingAmount > 0 && overdueCt === 0 && (
+              <button
+                onClick={() => onNavigate?.('payments')}
+                className="flex items-center justify-between w-full rounded-lg"
+                style={{ padding: '9px 12px', background: '#F8FAFC', border: '1px solid #E4E4E7', cursor: 'pointer', textAlign: 'left' }}
+              >
+                <div className="flex items-center gap-2.5">
+                  <div className="flex-shrink-0 flex items-center justify-center rounded-md" style={{ width: 28, height: 28, background: '#EEF2FF' }}>
+                    <Clock style={{ width: 14, height: 14, color: '#6366F1' }} />
+                  </div>
+                  <div>
+                    <p style={{ fontSize: 12, fontWeight: 600, color: '#3730A3' }}>₹{data.pendingAmount.toLocaleString('en-IN')} pending collection</p>
+                    <p style={{ fontSize: 11, color: '#6366F1', marginTop: 1 }}>Review upcoming payments</p>
+                  </div>
+                </div>
+                <ChevronRight style={{ width: 12, height: 12, color: '#6366F1', flexShrink: 0 }} />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* ── KPI Cards ───────────────────────── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
         <StatCard
@@ -319,8 +497,8 @@ export function Dashboard({ onNavigate }: DashboardProps) {
           iconBg="#EEF2FF"
           iconColor="#6366F1"
           trend={prevRev > 0 ? revDelta : undefined}
-          trendLabel={prevRev > 0 ? 'vs last month' : undefined}
-          meta={prevRev > 0 ? undefined : 'First month recorded'}
+          trendLabel={prevRev > 0 ? `vs prior period` : undefined}
+          meta={`${rangeLabel}`}
         />
         <StatCard
           label="Pending Payments"
@@ -374,10 +552,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
                 <div style={{ width: 8, height: 8, borderRadius: 2, background: '#E4E4E7' }} />
                 <span style={{ fontSize: 11, color: '#71717A' }}>Expected</span>
               </div>
-              <button className="ds-btn ds-btn-secondary" style={{ fontSize: 11, padding: '4px 9px', gap: 4 }}>
-                <Calendar style={{ width: 11, height: 11 }} />
-                Last {chartSeries.length || 6} months
-              </button>
+              <span style={{ fontSize: 11, color: '#A1A1AA' }}>{rangeLabel}</span>
             </div>
           </div>
 
@@ -606,37 +781,6 @@ export function Dashboard({ onNavigate }: DashboardProps) {
         </div>
       </div>
 
-      {/* ── Maintenance alert banner ─────────── */}
-      {data.pendingIssues > 0 && (
-        <div
-          className="flex items-center justify-between rounded-xl"
-          style={{
-            padding: '12px 18px',
-            background: '#FEF2F2',
-            border: '1px solid #FECACA',
-            gap: 12,
-          }}
-        >
-          <div className="flex items-center gap-3">
-            <AlertCircle style={{ width: 16, height: 16, color: '#DC2626', flexShrink: 0 }} />
-            <div>
-              <p style={{ fontSize: 13, fontWeight: 600, color: '#991B1B' }}>
-                {data.pendingIssues} active maintenance {data.pendingIssues === 1 ? 'ticket' : 'tickets'}
-              </p>
-              <p style={{ fontSize: 12, color: '#B91C1C', marginTop: 1 }}>
-                Unresolved requests need your attention
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={() => onNavigate?.('maintenance')}
-            className="ds-btn ds-btn-secondary flex-shrink-0"
-            style={{ fontSize: 12, padding: '6px 12px', borderColor: '#FECACA', color: '#991B1B' }}
-          >
-            View Tickets
-          </button>
-        </div>
-      )}
     </div>
   );
 }

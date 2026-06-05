@@ -14,30 +14,38 @@ import { useRealtimeRefresh } from '../hooks/useRealtimeRefresh';
 import { isDemoModeEnabled, getPayments, updatePaymentStatusRecord, addPaymentChargeRecord, getTenantById } from '../services/dataService';
 import type { PaymentRecord, PaymentStatus } from '../services/supabaseData';
 import { openReceiptWindow } from '../services/receiptGenerator';
+import { useDateRange } from '../contexts/DateRangeContext';
 
 // ── Period helpers ──────────────────────────────────────────────────────────
-type PeriodMode = 'this-month' | 'last-month' | 'all';
+type PeriodMode = 'all' | 'last-month' | 'this-month' | 'next-month';
 
 function getPeriodRange(mode: PeriodMode): { start: Date; end: Date } | null {
   if (mode === 'all') return null;
   const now = new Date();
+  if (mode === 'last-month') {
+    return {
+      start: new Date(now.getFullYear(), now.getMonth() - 1, 1),
+      end:   new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59),
+    };
+  }
   if (mode === 'this-month') {
     return {
       start: new Date(now.getFullYear(), now.getMonth(), 1),
       end:   new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59),
     };
   }
-  // last-month
+  // next-month
   return {
-    start: new Date(now.getFullYear(), now.getMonth() - 1, 1),
-    end:   new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59),
+    start: new Date(now.getFullYear(), now.getMonth() + 1, 1),
+    end:   new Date(now.getFullYear(), now.getMonth() + 2, 0, 23, 59, 59),
   };
 }
 
 function periodLabel(mode: PeriodMode): string {
   if (mode === 'all') return 'All Time';
   const now = new Date();
-  const target = mode === 'this-month' ? now : new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const offsets: Record<PeriodMode, number> = { 'all': 0, 'last-month': -1, 'this-month': 0, 'next-month': 1 };
+  const target = new Date(now.getFullYear(), now.getMonth() + offsets[mode], 1);
   return target.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
 }
 
@@ -71,33 +79,6 @@ function StatusBadge({ status }: { status: PaymentStatus }) {
   );
 }
 
-function KpiCard({
-  label, value, meta, icon: Icon, iconBg, iconColor, highlight,
-}: {
-  label: string; value: string; meta?: string;
-  icon: typeof IndianRupee; iconBg: string; iconColor: string;
-  highlight?: boolean;
-}) {
-  return (
-    <div
-      className="ds-card flex items-start justify-between"
-      style={{ padding: '14px 16px', gap: 12, ...(highlight ? { borderColor: '#FECACA', background: '#FFF5F5' } : {}) }}
-    >
-      <div className="flex-1 min-w-0">
-        <p style={{ fontSize: 11, fontWeight: 600, color: '#71717A', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 6 }}>
-          {label}
-        </p>
-        <p style={{ fontSize: 22, fontWeight: 700, color: '#0A0A0B', letterSpacing: '-0.03em', fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>
-          {value}
-        </p>
-        {meta && <p style={{ fontSize: 11, color: '#A1A1AA', marginTop: 4 }}>{meta}</p>}
-      </div>
-      <div className="flex-shrink-0 flex items-center justify-center rounded-xl" style={{ width: 36, height: 36, background: iconBg }}>
-        <Icon style={{ width: 16, height: 16, color: iconColor, strokeWidth: 1.75 }} />
-      </div>
-    </div>
-  );
-}
 
 interface PaymentsProps {
   onNavigate?: (tab: string) => void;
@@ -105,16 +86,30 @@ interface PaymentsProps {
 
 export function Payments({ onNavigate }: PaymentsProps) {
   const { properties, selectedProperty } = useProperty();
+  const { range, label: rangeLabel } = useDateRange();
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterStatus, setFilterStatus] = useState<'all' | PaymentStatus>('all');
+  // period state kept for backward compat with local aging bucket picker; removed global period conflict
   const [period, setPeriod] = useState<PeriodMode>('this-month');
+
+  // Mark paid modal
+  const [markPaidOpen, setMarkPaidOpen] = useState(false);
+  const [markPaidPayment, setMarkPaidPayment] = useState<PaymentRecord | null>(null);
+  const [markPaidForm, setMarkPaidForm] = useState({ paymentMode: 'upi', referenceNumber: '', paidDate: new Date().toISOString().split('T')[0], paymentNotes: '' });
+  const [markPaidSaving, setMarkPaidSaving] = useState(false);
 
   // Extra charge modal
   const [addChargeOpen, setAddChargeOpen] = useState(false);
   const [selectedPayment, setSelectedPayment] = useState<PaymentRecord | null>(null);
   const [chargeForm, setChargeForm] = useState({ amount: 0, description: '', type: 'other' });
   const [chargeSaving, setChargeSaving] = useState(false);
+
+  // Bulk select
+  const [selectedPaymentIds, setSelectedPaymentIds] = useState<Set<string>>(new Set());
+  const [bulkMarkPaidOpen, setBulkMarkPaidOpen] = useState(false);
+  const [bulkMarkPaidForm, setBulkMarkPaidForm] = useState({ paymentMode: 'upi', referenceNumber: '', paidDate: new Date().toISOString().split('T')[0], paymentNotes: '' });
+  const [bulkMarkPaidSaving, setBulkMarkPaidSaving] = useState(false);
 
   const getPropertyName = (propertyId: string) =>
     properties.find((p) => p.id === propertyId)?.name ?? propertyId;
@@ -143,15 +138,13 @@ export function Payments({ onNavigate }: PaymentsProps) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  // Period-filtered payment set (used for stats + KPIs)
+  // Period-filtered payment set — driven by global DateRangeContext
   const periodPayments = useMemo(() => {
-    const range = getPeriodRange(period);
-    if (!range) return payments;
     return payments.filter((p) => {
       const d = new Date(p.dueDate);
       return d >= range.start && d <= range.end;
     });
-  }, [payments, period]);
+  }, [payments, range]);
 
   const unstampedOverdue = periodPayments.filter(
     (p) => p.status === 'pending' && new Date(p.dueDate) < today,
@@ -198,6 +191,15 @@ export function Payments({ onNavigate }: PaymentsProps) {
   };
 
   const handleStatusChange = async (paymentId: string, newStatus: PaymentStatus) => {
+    if (newStatus === 'paid') {
+      const payment = payments.find((p) => p.id === paymentId);
+      if (payment) {
+        setMarkPaidPayment(payment);
+        setMarkPaidForm({ paymentMode: 'upi', referenceNumber: '', paidDate: new Date().toISOString().split('T')[0], paymentNotes: '' });
+        setMarkPaidOpen(true);
+        return;
+      }
+    }
     const prev = payments;
     setPayments((ps) => ps.map((p) => p.id === paymentId ? { ...p, status: newStatus } : p));
     try {
@@ -207,6 +209,30 @@ export function Payments({ onNavigate }: PaymentsProps) {
     } catch (err) {
       setPayments(prev);
       toast.error(err instanceof Error ? err.message : 'Failed to update status');
+    }
+  };
+
+  const handleConfirmMarkPaid = async () => {
+    if (!markPaidPayment) return;
+    setMarkPaidSaving(true);
+    const prev = payments;
+    setPayments((ps) => ps.map((p) => p.id === markPaidPayment.id ? { ...p, status: 'paid' as PaymentStatus } : p));
+    try {
+      const updated = await updatePaymentStatusRecord(markPaidPayment.id, 'paid', {
+        paymentMode: markPaidForm.paymentMode,
+        referenceNumber: markPaidForm.referenceNumber || undefined,
+        paidDate: markPaidForm.paidDate,
+        paymentNotes: markPaidForm.paymentNotes || undefined,
+      });
+      setPayments((ps) => ps.map((p) => p.id === markPaidPayment.id ? updated : p));
+      setMarkPaidOpen(false);
+      setMarkPaidPayment(null);
+      toast.success('Payment marked as paid');
+    } catch (err) {
+      setPayments(prev);
+      toast.error(err instanceof Error ? err.message : 'Failed to mark payment as paid');
+    } finally {
+      setMarkPaidSaving(false);
     }
   };
 
@@ -247,8 +273,37 @@ export function Payments({ onNavigate }: PaymentsProps) {
     }
   };
 
+  const handleBulkMarkPaid = () => {
+    if (selectedPaymentIds.size === 0) return;
+    setBulkMarkPaidForm({ paymentMode: 'upi', referenceNumber: '', paidDate: new Date().toISOString().split('T')[0], paymentNotes: '' });
+    setBulkMarkPaidOpen(true);
+  };
+
+  const handleConfirmBulkMarkPaid = async () => {
+    const toUpdate = [...selectedPaymentIds];
+    setBulkMarkPaidSaving(true);
+    try {
+      await Promise.all(toUpdate.map((id) => updatePaymentStatusRecord(id, 'paid', {
+        paymentMode: bulkMarkPaidForm.paymentMode,
+        referenceNumber: bulkMarkPaidForm.referenceNumber || undefined,
+        paidDate: bulkMarkPaidForm.paidDate,
+        paymentNotes: bulkMarkPaidForm.paymentNotes || undefined,
+      })));
+      setSelectedPaymentIds(new Set());
+      setBulkMarkPaidOpen(false);
+      await load();
+      toast.success(`${toUpdate.length} payment${toUpdate.length > 1 ? 's' : ''} marked as paid`);
+    } catch {
+      toast.error('Some updates failed — please retry');
+      await load();
+    } finally {
+      setBulkMarkPaidSaving(false);
+    }
+  };
+
   const handleAddCharge = async () => {
     if (!selectedPayment || chargeForm.amount <= 0) { toast.error('Please enter a valid amount'); return; }
+    if (selectedPayment.status === 'paid') { toast.error('Invoice is paid and locked. Select a pending invoice to add charges.'); return; }
     setChargeSaving(true);
     try {
       const updated = await addPaymentChargeRecord(selectedPayment.id, {
@@ -293,46 +348,32 @@ export function Payments({ onNavigate }: PaymentsProps) {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Period selector */}
+          {/* Period selector — operational order: All → Last → This → Next */}
           <div
             className="flex items-center rounded-lg overflow-hidden"
             style={{ border: '1px solid #E4E4E7', background: '#fff' }}
           >
-            <button
-              onClick={() => setPeriod('this-month')}
-              style={{
-                fontSize: 12, fontWeight: 500, padding: '5px 12px', cursor: 'pointer',
-                background: period === 'this-month' ? '#6366F1' : 'transparent',
-                color: period === 'this-month' ? '#fff' : '#52525B',
-                border: 'none', transition: 'all 0.15s',
-              }}
-            >
-              This Month
-            </button>
-            <button
-              onClick={() => setPeriod('last-month')}
-              style={{
-                fontSize: 12, fontWeight: 500, padding: '5px 12px', cursor: 'pointer',
-                background: period === 'last-month' ? '#6366F1' : 'transparent',
-                color: period === 'last-month' ? '#fff' : '#52525B',
-                borderTop: 'none', borderBottom: 'none',
-                borderLeft: '1px solid #E4E4E7', borderRight: '1px solid #E4E4E7',
-                transition: 'all 0.15s',
-              }}
-            >
-              Last Month
-            </button>
-            <button
-              onClick={() => setPeriod('all')}
-              style={{
-                fontSize: 12, fontWeight: 500, padding: '5px 12px', cursor: 'pointer',
-                background: period === 'all' ? '#6366F1' : 'transparent',
-                color: period === 'all' ? '#fff' : '#52525B',
-                border: 'none', transition: 'all 0.15s',
-              }}
-            >
-              All
-            </button>
+            {([
+              { key: 'all',        label: 'All' },
+              { key: 'last-month', label: 'Last Month' },
+              { key: 'this-month', label: 'This Month' },
+              { key: 'next-month', label: 'Next Month' },
+            ] as const).map(({ key, label }, i, arr) => (
+              <button
+                key={key}
+                onClick={() => setPeriod(key)}
+                style={{
+                  fontSize: 12, fontWeight: 500, padding: '5px 12px', cursor: 'pointer',
+                  background: period === key ? '#6366F1' : 'transparent',
+                  color: period === key ? '#fff' : '#52525B',
+                  border: 'none',
+                  borderLeft: i > 0 ? '1px solid #E4E4E7' : 'none',
+                  transition: 'all 0.15s',
+                }}
+              >
+                {label}
+              </button>
+            ))}
           </div>
           <button
             onClick={handleExportCSV}
@@ -345,184 +386,52 @@ export function Payments({ onNavigate }: PaymentsProps) {
         </div>
       </div>
 
-      {/* ── Period label ─────────────────────── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <Calendar style={{ width: 13, height: 13, color: '#A1A1AA' }} />
-        <span style={{ fontSize: 12, color: '#71717A', fontWeight: 500 }}>{periodLabel(period)}</span>
-        {period !== 'all' && (
-          <span style={{ fontSize: 11, color: '#A1A1AA' }}>· {periodPayments.length} invoices</span>
-        )}
-      </div>
-
-      {/* ── KPI Cards ───────────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
-        <KpiCard
-          label="Expected"
-          value={fmt(stats.expected)}
-          meta={`${payments.length} invoices`}
-          icon={IndianRupee}
-          iconBg="#EEF2FF"
-          iconColor="#6366F1"
-        />
-        <KpiCard
-          label="Collected"
-          value={fmt(stats.paid)}
-          meta={`${filterCounts.paid} paid`}
-          icon={CheckCircle2}
-          iconBg="#ECFDF5"
-          iconColor="#059669"
-        />
-        <KpiCard
-          label="Pending"
-          value={fmt(stats.pending)}
-          meta={`${filterCounts.pending} open`}
-          icon={Clock}
-          iconBg="#FFFBEB"
-          iconColor="#D97706"
-        />
-        <KpiCard
-          label="Overdue"
-          value={fmt(stats.overdue)}
-          meta={`${filterCounts.overdue} tenants`}
-          icon={AlertCircle}
-          iconBg="#FEF2F2"
-          iconColor="#DC2626"
-          highlight={stats.overdue > 0}
-        />
-        <KpiCard
-          label="Recovery Rate"
-          value={`${stats.recoveryRate}%`}
-          meta={stats.recoveryRate >= 80 ? 'On track' : stats.recoveryRate >= 50 ? 'Below target' : 'Action needed'}
-          icon={TrendingUp}
-          iconBg={stats.recoveryRate >= 80 ? '#ECFDF5' : stats.recoveryRate >= 50 ? '#FFFBEB' : '#FEF2F2'}
-          iconColor={stats.recoveryRate >= 80 ? '#059669' : stats.recoveryRate >= 50 ? '#D97706' : '#DC2626'}
-        />
-      </div>
-
-      {/* ── Overdue action banner ────────────── */}
-      {unstampedOverdue.length > 0 && (
-        <div
-          className="flex items-center justify-between rounded-xl"
-          style={{ padding: '12px 16px', background: '#FEF2F2', border: '1px solid #FECACA', gap: 12 }}
-        >
-          <div className="flex items-center gap-3">
-            <AlertCircle style={{ width: 16, height: 16, color: '#DC2626', flexShrink: 0 }} />
-            <div>
-              <p style={{ fontSize: 13, fontWeight: 600, color: '#991B1B' }}>
-                {unstampedOverdue.length} pending payment{unstampedOverdue.length > 1 ? 's are' : ' is'} past due date
-              </p>
-              <p style={{ fontSize: 12, color: '#B91C1C', marginTop: 1 }}>
-                These have not been collected and their due date has passed
-              </p>
+      {/* ── Compact stats strip (replaces 5 KPI cards) ───── */}
+      <div className="ds-card flex items-center flex-wrap" style={{ padding: 0, overflow: 'hidden' }}>
+        {([
+          { label: 'Expected',  value: fmt(stats.expected),         color: '#0A0A0B' },
+          { label: 'Collected', value: fmt(stats.paid),             color: '#059669' },
+          { label: 'Pending',   value: fmt(stats.pending),          color: stats.pending > 0 ? '#D97706' : '#71717A' },
+          { label: 'Overdue',   value: fmt(stats.overdue),          color: stats.overdue > 0 ? '#DC2626' : '#71717A' },
+          { label: 'Recovery',  value: `${stats.recoveryRate}%`,    color: stats.recoveryRate >= 80 ? '#059669' : stats.recoveryRate >= 50 ? '#D97706' : '#DC2626' },
+        ] as const).map(({ label, value, color }, i, arr) => (
+          <div key={label} className="flex items-center" style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ padding: '10px 16px', flex: 1 }}>
+              <p style={{ fontSize: 10, color: '#A1A1AA', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>{label}</p>
+              <p style={{ fontSize: 15, fontWeight: 700, color, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{value}</p>
             </div>
+            {i < arr.length - 1 && <div style={{ width: 1, height: 32, background: '#F1F1F3', flexShrink: 0 }} />}
+          </div>
+        ))}
+        <div style={{ width: 1, height: 32, background: '#F1F1F3', flexShrink: 0 }} />
+        <div style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 5 }}>
+          <Calendar style={{ width: 12, height: 12, color: '#A1A1AA' }} />
+          <span style={{ fontSize: 11, color: '#71717A', fontWeight: 500, whiteSpace: 'nowrap' }}>{periodLabel(period)}</span>
+          {period !== 'all' && <span style={{ fontSize: 10, color: '#A1A1AA' }}>· {periodPayments.length}</span>}
+        </div>
+      </div>
+
+      {/* ── Compact overdue / mark-overdue banner ──── */}
+      {unstampedOverdue.length > 0 && (
+        <div className="flex items-center justify-between rounded-lg"
+          style={{ padding: '7px 12px', background: '#FEF2F2', border: '1px solid #FECACA', gap: 10 }}>
+          <div className="flex items-center gap-2">
+            <AlertCircle style={{ width: 13, height: 13, color: '#DC2626', flexShrink: 0 }} />
+            <p style={{ fontSize: 12, fontWeight: 500, color: '#991B1B' }}>
+              <strong>{unstampedOverdue.length}</strong> pending past due — not yet stamped overdue
+            </p>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
             {onNavigate && (
-              <button
-                onClick={() => onNavigate('tenants')}
-                className="ds-btn ds-btn-secondary"
-                style={{ fontSize: 12, padding: '5px 10px', borderColor: '#FECACA', color: '#991B1B' }}
-              >
-                View Tenants
+              <button onClick={() => onNavigate('tenants')} className="ds-btn ds-btn-secondary"
+                style={{ fontSize: 11, padding: '3px 8px', borderColor: '#FECACA', color: '#991B1B' }}>
+                Tenants
               </button>
             )}
-            <button
-              onClick={() => void markAllOverdue()}
-              className="ds-btn"
-              style={{ fontSize: 12, padding: '5px 10px', background: '#DC2626', color: '#fff', border: 'none' }}
-            >
+            <button onClick={() => void markAllOverdue()} className="ds-btn"
+              style={{ fontSize: 11, padding: '3px 9px', background: '#DC2626', color: '#fff', border: 'none' }}>
               Mark Overdue
             </button>
-          </div>
-        </div>
-      )}
-
-      {/* ── Collection Risk Action Queue ──────── */}
-      {overdueQueue.length > 0 && (
-        <div className="ds-card" style={{ padding: '14px 16px' }}>
-          {/* Aging buckets header */}
-          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-            <p style={{ fontSize: 12, fontWeight: 600, color: '#71717A', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
-              Collection Risk · {overdueQueue.length} Overdue
-            </p>
-            <div className="flex items-center gap-2">
-              {[
-                { label: '>30d', count: overdueQueue.filter((p) => ageBucket(p.dueDate).days > 30).length, color: '#991B1B', bg: '#FEF2F2' },
-                { label: '>15d', count: overdueQueue.filter((p) => ageBucket(p.dueDate).days > 15 && ageBucket(p.dueDate).days <= 30).length, color: '#92400E', bg: '#FFFBEB' },
-                { label: '>7d',  count: overdueQueue.filter((p) => ageBucket(p.dueDate).days > 7  && ageBucket(p.dueDate).days <= 15).length, color: '#D97706', bg: '#FFFBEB' },
-              ].map(({ label, count, color, bg }) => count > 0 ? (
-                <span key={label} style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 99, background: bg, color, border: `1px solid ${bg === '#FEF2F2' ? '#FECACA' : '#FDE68A'}` }}>
-                  {count} {label}
-                </span>
-              ) : null)}
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-            {overdueQueue.slice(0, 6).map((p, i, arr) => {
-              const age = ageBucket(p.dueDate);
-              return (
-                <div
-                  key={p.id}
-                  className="flex items-center justify-between"
-                  style={{
-                    padding: '8px 0',
-                    borderBottom: i < arr.length - 1 ? '1px solid #F4F4F6' : 'none',
-                    gap: 12,
-                  }}
-                >
-                  <div className="flex items-center gap-2.5 flex-1 min-w-0">
-                    <div
-                      className="flex-shrink-0 flex items-center justify-center rounded-lg"
-                      style={{ width: 28, height: 28, background: '#FEF2F2' }}
-                    >
-                      <span style={{ fontSize: 10, fontWeight: 700, color: '#991B1B' }}>
-                        {p.tenant.slice(0, 2).toUpperCase()}
-                      </span>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p style={{ fontSize: 13, fontWeight: 500, color: '#0A0A0B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {p.tenant}
-                      </p>
-                      <div className="flex items-center gap-2">
-                        <p style={{ fontSize: 11, color: '#A1A1AA' }}>Room {p.room}</p>
-                        <span style={{ fontSize: 10, fontWeight: 600, color: age.color }}>· {age.label}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <p style={{ fontSize: 13, fontWeight: 600, color: '#0A0A0B', fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
-                    {fmt(p.totalAmount)}
-                  </p>
-                  <div className="flex items-center gap-1 flex-shrink-0">
-                    <button
-                      title="Mark as paid"
-                      onClick={() => void handleStatusChange(p.id, 'paid')}
-                      className="ds-btn ds-btn-secondary"
-                      style={{ fontSize: 11, padding: '4px 8px', gap: 4 }}
-                    >
-                      <CheckCircle2 style={{ width: 12, height: 12, color: '#059669' }} />
-                      Collect
-                    </button>
-                    <button
-                      title="WhatsApp reminder"
-                      onClick={() => void handleWhatsAppReminder(p)}
-                      className="ds-btn ds-btn-secondary"
-                      style={{ fontSize: 11, padding: '4px 8px' }}
-                    >
-                      <MessageCircle style={{ width: 12, height: 12, color: '#25D366' }} />
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-            {overdueQueue.length > 6 && (
-              <button
-                onClick={() => setFilterStatus('overdue')}
-                style={{ fontSize: 12, color: '#6366F1', marginTop: 8, textAlign: 'left', cursor: 'pointer', background: 'none', border: 'none', padding: 0 }}
-              >
-                View all {overdueQueue.length} overdue payments →
-              </button>
-            )}
           </div>
         </div>
       )}
@@ -533,16 +442,16 @@ export function Payments({ onNavigate }: PaymentsProps) {
         {/* Filter bar */}
         <div
           className="flex items-center justify-between flex-wrap gap-3"
-          style={{ padding: '12px 16px', borderBottom: '1px solid #F4F4F6' }}
+          style={{ padding: '8px 12px', borderBottom: '1px solid #F4F4F6' }}
         >
           <div className="flex items-center gap-1.5">
-            <Filter style={{ width: 13, height: 13, color: '#A1A1AA' }} />
+            <Filter style={{ width: 12, height: 12, color: '#A1A1AA' }} />
             {(['all', 'paid', 'pending', 'overdue'] as const).map((s) => (
               <button
                 key={s}
                 onClick={() => setFilterStatus(s)}
                 style={{
-                  fontSize: 12, fontWeight: 500, padding: '4px 10px', borderRadius: 99, cursor: 'pointer',
+                  fontSize: 11, fontWeight: 500, padding: '3px 9px', borderRadius: 99, cursor: 'pointer',
                   border: `1px solid ${filterStatus === s ? '#6366F1' : '#E4E4E7'}`,
                   background: filterStatus === s ? '#6366F1' : '#fff',
                   color: filterStatus === s ? '#fff' : '#52525B',
@@ -550,22 +459,62 @@ export function Payments({ onNavigate }: PaymentsProps) {
                 }}
               >
                 {s === 'all' ? 'All' : STATUS_LABEL[s]}
-                <span style={{ marginLeft: 5, opacity: 0.75 }}>{filterCounts[s]}</span>
+                <span style={{ marginLeft: 4, opacity: 0.75, fontSize: 10 }}>{filterCounts[s]}</span>
               </button>
             ))}
           </div>
-          <p style={{ fontSize: 12, color: '#A1A1AA' }}>
-            {filteredPayments.length} {filteredPayments.length === 1 ? 'record' : 'records'}
-          </p>
+          <div className="flex items-center gap-3">
+            {overdueQueue.length > 0 && (
+              <div className="flex items-center gap-1.5">
+                {[
+                  { label: '>30d', count: overdueQueue.filter((p) => ageBucket(p.dueDate).days > 30).length, color: '#991B1B', bg: '#FEF2F2' },
+                  { label: '>15d', count: overdueQueue.filter((p) => ageBucket(p.dueDate).days > 15 && ageBucket(p.dueDate).days <= 30).length, color: '#92400E', bg: '#FFFBEB' },
+                  { label: '>7d',  count: overdueQueue.filter((p) => ageBucket(p.dueDate).days > 7  && ageBucket(p.dueDate).days <= 15).length, color: '#D97706', bg: '#FFFBEB' },
+                ].map(({ label, count, color, bg }) => count > 0 ? (
+                  <span key={label} style={{ fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 99, background: bg, color, border: `1px solid ${bg === '#FEF2F2' ? '#FECACA' : '#FDE68A'}`, cursor: 'pointer' }}
+                    onClick={() => setFilterStatus('overdue')}>
+                    {count} {label}
+                  </span>
+                ) : null)}
+              </div>
+            )}
+            <p style={{ fontSize: 11, color: '#A1A1AA' }}>{filteredPayments.length} records</p>
+          </div>
         </div>
+
+        {/* Bulk actions bar */}
+        {selectedPaymentIds.size > 0 && (
+          <div style={{ padding: '7px 12px', background: '#EEF2FF', borderBottom: '1px solid #C7D2FE', display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: '#4338CA' }}>{selectedPaymentIds.size} selected</span>
+            <button onClick={() => void handleBulkMarkPaid()} className="ds-btn ds-btn-secondary"
+              style={{ fontSize: 11, padding: '3px 9px', color: '#059669', borderColor: '#A7F3D0', gap: 4 }}>
+              <CheckCircle2 style={{ width: 12, height: 12 }} /> Mark Paid
+            </button>
+            <button onClick={() => setSelectedPaymentIds(new Set())} className="ds-btn ds-btn-secondary"
+              style={{ fontSize: 11, padding: '3px 8px' }}>
+              Clear
+            </button>
+          </div>
+        )}
 
         {/* Desktop table */}
         <div className="hidden md:block overflow-x-auto">
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ background: '#FAFAFA', borderBottom: '1px solid #F1F1F3' }}>
-                {['Tenant', 'Room', 'Property', 'Monthly Rent', 'Extra', 'Total', 'Due Date', 'Status', 'Actions'].map((h) => (
-                  <th key={h} style={{ padding: '10px 14px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: '#71717A', letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+                <th style={{ width: 36, padding: '8px 6px 8px 12px' }}>
+                  <input
+                    type="checkbox"
+                    checked={selectedPaymentIds.size === filteredPayments.length && filteredPayments.length > 0}
+                    onChange={(e) => {
+                      if (e.target.checked) setSelectedPaymentIds(new Set(filteredPayments.map((p) => p.id)));
+                      else setSelectedPaymentIds(new Set());
+                    }}
+                    style={{ cursor: 'pointer', accentColor: '#6366F1' }}
+                  />
+                </th>
+                {['Tenant', 'Room', 'Property', 'Rent', 'Extra', 'Total', 'Due', 'Status', 'Actions'].map((h) => (
+                  <th key={h} style={{ padding: '8px 12px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: '#71717A', letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
                     {h}
                   </th>
                 ))}
@@ -574,7 +523,7 @@ export function Payments({ onNavigate }: PaymentsProps) {
             <tbody>
               {filteredPayments.length === 0 ? (
                 <tr>
-                  <td colSpan={9} style={{ padding: '40px 14px', textAlign: 'center', fontSize: 13, color: '#A1A1AA' }}>
+                  <td colSpan={10} style={{ padding: '40px 14px', textAlign: 'center', fontSize: 13, color: '#A1A1AA' }}>
                     No payments found
                   </td>
                 </tr>
@@ -583,42 +532,55 @@ export function Payments({ onNavigate }: PaymentsProps) {
                   key={payment.id}
                   style={{
                     borderBottom: i < filteredPayments.length - 1 ? '1px solid #F4F4F6' : 'none',
-                    background: payment.status === 'overdue' ? '#FFFAFA' : '#fff',
+                    background: selectedPaymentIds.has(payment.id) ? '#F5F3FF' : payment.status === 'overdue' ? '#FFFAFA' : '#fff',
                     transition: 'background 0.1s',
                   }}
                 >
-                  <td style={{ padding: '10px 14px' }}>
-                    <div className="flex items-center gap-2.5">
+                  <td style={{ padding: '7px 6px 7px 12px' }}>
+                    <input
+                      type="checkbox"
+                      checked={selectedPaymentIds.has(payment.id)}
+                      onChange={(e) => {
+                        const next = new Set(selectedPaymentIds);
+                        if (e.target.checked) next.add(payment.id);
+                        else next.delete(payment.id);
+                        setSelectedPaymentIds(next);
+                      }}
+                      style={{ cursor: 'pointer', accentColor: '#6366F1' }}
+                    />
+                  </td>
+                  <td style={{ padding: '7px 12px' }}>
+                    <div className="flex items-center gap-2">
                       <div
-                        className="flex-shrink-0 flex items-center justify-center rounded-lg"
-                        style={{ width: 30, height: 30, background: '#EEF2FF' }}
+                        className="flex-shrink-0 flex items-center justify-center rounded-md"
+                        style={{ width: 26, height: 26, background: '#EEF2FF' }}
                       >
-                        <span style={{ fontSize: 11, fontWeight: 700, color: '#6366F1' }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: '#6366F1' }}>
                           {payment.tenant.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()}
                         </span>
                       </div>
                       <span style={{ fontSize: 13, fontWeight: 500, color: '#0A0A0B' }}>{payment.tenant}</span>
                     </div>
                   </td>
-                  <td style={{ padding: '10px 14px', fontSize: 13, color: '#52525B', fontVariantNumeric: 'tabular-nums' }}>
+                  <td style={{ padding: '7px 12px', fontSize: 12, color: '#52525B', fontVariantNumeric: 'tabular-nums' }}>
                     {payment.room}
                   </td>
-                  <td style={{ padding: '10px 14px', fontSize: 12, color: '#71717A', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <td style={{ padding: '7px 12px', fontSize: 11, color: '#71717A', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {getPropertyName(payment.propertyId)}
                   </td>
-                  <td style={{ padding: '10px 14px', fontSize: 13, fontWeight: 500, color: '#0A0A0B', fontVariantNumeric: 'tabular-nums' }}>
+                  <td style={{ padding: '7px 12px', fontSize: 12, fontWeight: 500, color: '#0A0A0B', fontVariantNumeric: 'tabular-nums' }}>
                     {fmt(payment.monthlyRent)}
                   </td>
-                  <td style={{ padding: '10px 14px', fontSize: 13, color: payment.extraCharges > 0 ? '#D97706' : '#A1A1AA', fontVariantNumeric: 'tabular-nums' }}>
+                  <td style={{ padding: '7px 12px', fontSize: 12, color: payment.extraCharges > 0 ? '#D97706' : '#A1A1AA', fontVariantNumeric: 'tabular-nums' }}>
                     {payment.extraCharges > 0 ? fmt(payment.extraCharges) : '—'}
                   </td>
-                  <td style={{ padding: '10px 14px', fontSize: 13, fontWeight: 600, color: '#0A0A0B', fontVariantNumeric: 'tabular-nums' }}>
+                  <td style={{ padding: '7px 12px', fontSize: 12, fontWeight: 600, color: '#0A0A0B', fontVariantNumeric: 'tabular-nums' }}>
                     {fmt(payment.totalAmount)}
                   </td>
-                  <td style={{ padding: '10px 14px', fontSize: 12, color: '#71717A', whiteSpace: 'nowrap' }}>
+                  <td style={{ padding: '7px 12px', fontSize: 11, color: '#71717A', whiteSpace: 'nowrap' }}>
                     {new Date(payment.dueDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
                   </td>
-                  <td style={{ padding: '10px 14px' }}>
+                  <td style={{ padding: '7px 12px' }}>
                     <div className="relative inline-flex items-center">
                       <select
                         value={payment.status}
@@ -639,13 +601,21 @@ export function Payments({ onNavigate }: PaymentsProps) {
                       <ChevronDown style={{ width: 10, height: 10, position: 'absolute', right: 6, pointerEvents: 'none', color: STATUS_STYLE[payment.status].color }} />
                     </div>
                   </td>
-                  <td style={{ padding: '10px 14px' }}>
+                  <td style={{ padding: '7px 12px' }}>
                     <div className="flex items-center gap-1">
                       <button
-                        title="Add extra charge"
-                        onClick={() => { setSelectedPayment(payment); setAddChargeOpen(true); }}
+                        title={payment.status === 'paid' ? 'Invoice closed — add charges to the current pending invoice' : 'Add extra charge'}
+                        disabled={payment.status === 'paid'}
+                        onClick={() => {
+                          if (payment.status === 'paid') {
+                            toast.info('This invoice is paid and locked. To add charges, find the pending invoice for this tenant.');
+                            return;
+                          }
+                          setSelectedPayment(payment);
+                          setAddChargeOpen(true);
+                        }}
                         className="ds-btn ds-btn-secondary"
-                        style={{ fontSize: 11, padding: '4px 6px', minWidth: 0 }}
+                        style={{ fontSize: 11, padding: '4px 6px', minWidth: 0, opacity: payment.status === 'paid' ? 0.35 : 1, cursor: payment.status === 'paid' ? 'not-allowed' : 'pointer' }}
                       >
                         <Plus style={{ width: 12, height: 12 }} />
                       </button>
@@ -770,6 +740,128 @@ export function Payments({ onNavigate }: PaymentsProps) {
           ))}
         </div>
       </div>
+
+      {/* ── Mark Paid Modal ───────────────────── */}
+      <Dialog open={markPaidOpen} onOpenChange={setMarkPaidOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirm Payment Received</DialogTitle>
+            <DialogDescription>
+              {markPaidPayment ? `${markPaidPayment.tenant} · Room ${markPaidPayment.room} · ${fmt(markPaidPayment.totalAmount)}` : ''}
+            </DialogDescription>
+          </DialogHeader>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, paddingTop: 4, paddingBottom: 4 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <Label style={{ fontSize: 12, fontWeight: 600 }}>Payment Mode</Label>
+              <select
+                value={markPaidForm.paymentMode}
+                onChange={(e) => setMarkPaidForm({ ...markPaidForm, paymentMode: e.target.value })}
+                style={{ width: '100%', height: 40, padding: '0 10px', border: '1px solid #E4E4E7', borderRadius: 8, fontSize: 13, color: '#0A0A0B', background: '#fff' }}
+              >
+                <option value="upi">UPI</option>
+                <option value="cash">Cash</option>
+                <option value="bank_transfer">Bank Transfer</option>
+                <option value="cheque">Cheque</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <Label style={{ fontSize: 12, fontWeight: 600 }}>Reference Number (optional)</Label>
+              <Input
+                placeholder="UPI transaction ID, cheque number, etc."
+                value={markPaidForm.referenceNumber}
+                onChange={(e) => setMarkPaidForm({ ...markPaidForm, referenceNumber: e.target.value })}
+                style={{ height: 40 }}
+              />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <Label style={{ fontSize: 12, fontWeight: 600 }}>Paid Date</Label>
+              <Input
+                type="date"
+                value={markPaidForm.paidDate}
+                onChange={(e) => setMarkPaidForm({ ...markPaidForm, paidDate: e.target.value })}
+                style={{ height: 40 }}
+              />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <Label style={{ fontSize: 12, fontWeight: 600 }}>Notes (optional)</Label>
+              <Input
+                placeholder="e.g. Cash collected in person"
+                value={markPaidForm.paymentNotes}
+                onChange={(e) => setMarkPaidForm({ ...markPaidForm, paymentNotes: e.target.value })}
+                style={{ height: 40 }}
+              />
+            </div>
+          </div>
+          <DialogFooter style={{ gap: 8 }}>
+            <Button variant="outline" onClick={() => setMarkPaidOpen(false)}>Cancel</Button>
+            <Button onClick={() => void handleConfirmMarkPaid()} disabled={markPaidSaving} className="ds-btn ds-btn-primary">
+              {markPaidSaving ? <Loader2 style={{ width: 14, height: 14, marginRight: 6 }} className="animate-spin" /> : <CheckCircle2 style={{ width: 14, height: 14, marginRight: 6 }} />}
+              Confirm Payment
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Bulk Mark Paid Modal ─────────────── */}
+      <Dialog open={bulkMarkPaidOpen} onOpenChange={setBulkMarkPaidOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Mark {selectedPaymentIds.size} Payment{selectedPaymentIds.size > 1 ? 's' : ''} as Paid</DialogTitle>
+            <DialogDescription>Payment metadata will be applied to all selected payments.</DialogDescription>
+          </DialogHeader>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14, paddingTop: 4, paddingBottom: 4 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <Label style={{ fontSize: 12, fontWeight: 600 }}>Payment Mode</Label>
+              <select
+                value={bulkMarkPaidForm.paymentMode}
+                onChange={(e) => setBulkMarkPaidForm({ ...bulkMarkPaidForm, paymentMode: e.target.value })}
+                style={{ width: '100%', height: 40, padding: '0 10px', border: '1px solid #E4E4E7', borderRadius: 8, fontSize: 13, color: '#0A0A0B', background: '#fff' }}
+              >
+                <option value="upi">UPI</option>
+                <option value="cash">Cash</option>
+                <option value="bank_transfer">Bank Transfer</option>
+                <option value="cheque">Cheque</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <Label style={{ fontSize: 12, fontWeight: 600 }}>Reference Number (optional)</Label>
+              <Input
+                placeholder="UPI transaction ID, cheque number, etc."
+                value={bulkMarkPaidForm.referenceNumber}
+                onChange={(e) => setBulkMarkPaidForm({ ...bulkMarkPaidForm, referenceNumber: e.target.value })}
+                style={{ height: 40 }}
+              />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <Label style={{ fontSize: 12, fontWeight: 600 }}>Paid Date</Label>
+              <Input
+                type="date"
+                value={bulkMarkPaidForm.paidDate}
+                onChange={(e) => setBulkMarkPaidForm({ ...bulkMarkPaidForm, paidDate: e.target.value })}
+                style={{ height: 40 }}
+              />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <Label style={{ fontSize: 12, fontWeight: 600 }}>Notes (optional)</Label>
+              <Input
+                placeholder="e.g. Paid in advance, partial cash + UPI…"
+                value={bulkMarkPaidForm.paymentNotes}
+                onChange={(e) => setBulkMarkPaidForm({ ...bulkMarkPaidForm, paymentNotes: e.target.value })}
+                style={{ height: 40 }}
+              />
+            </div>
+          </div>
+          <DialogFooter style={{ gap: 8 }}>
+            <Button variant="outline" onClick={() => setBulkMarkPaidOpen(false)}>Cancel</Button>
+            <Button onClick={() => void handleConfirmBulkMarkPaid()} disabled={bulkMarkPaidSaving} className="ds-btn ds-btn-primary">
+              {bulkMarkPaidSaving ? <Loader2 style={{ width: 14, height: 14, marginRight: 6 }} className="animate-spin" /> : <CheckCircle2 style={{ width: 14, height: 14, marginRight: 6 }} />}
+              Confirm {selectedPaymentIds.size} Payment{selectedPaymentIds.size > 1 ? 's' : ''}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Add Extra Charge Modal ───────────── */}
       <Dialog open={addChargeOpen} onOpenChange={setAddChargeOpen}>
