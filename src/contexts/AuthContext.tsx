@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { supabase } from '../lib/supabase';
 import { AppUser, UserRole, supabaseAuthDataApi } from '../services/supabaseData';
-import { isSupportedUserRole } from '../utils/roles';
+import { isSupportedUserRole, isPlatformAdminRole } from '../utils/roles';
 import { setAppMode } from '../config/appMode';
 
 interface User {
@@ -29,6 +29,7 @@ interface AuthContextType {
   authError: string;
   isSuspended: boolean;
   sendLoginMagicLink: (email: string) => Promise<boolean>;
+  signInWithPassword: (email: string, password: string) => Promise<boolean>;
   signInWithGoogle: () => Promise<boolean>;
   sendSignupMagicLink: (draft: SignupDraft) => Promise<boolean>;
   sendPhoneOtp: (phone: string) => Promise<boolean>;
@@ -172,14 +173,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
 
   const resolveSessionUser = async (authUserId: string): Promise<User | null> => {
-    // Check suspension before mapping — suspended owners get signed out on session load
+    // Check suspension before mapping — suspended owners (and managers/staff scoped
+    // under a suspended owner, via owner_scope_id) get signed out on session load.
     const { data: rawProfile } = await supabase
       .from('profiles')
-      .select('id,is_suspended,role')
+      .select('id,is_suspended,role,owner_scope_id')
       .eq('id', authUserId)
-      .maybeSingle<{ id: string; is_suspended?: boolean; role: string }>();
+      .maybeSingle<{ id: string; is_suspended?: boolean; role: string; owner_scope_id?: string | null }>();
 
-    if (rawProfile?.is_suspended && (rawProfile.role === 'owner' || rawProfile.role === 'owner_manager')) {
+    let effectiveSuspended = rawProfile?.is_suspended ?? false;
+    const isScopedRole = rawProfile?.role === 'owner_manager' || rawProfile?.role === 'staff';
+    if (!effectiveSuspended && isScopedRole && rawProfile?.owner_scope_id && rawProfile.owner_scope_id !== rawProfile.id) {
+      const { data: ownerProfile } = await supabase
+        .from('profiles')
+        .select('is_suspended')
+        .eq('id', rawProfile.owner_scope_id)
+        .maybeSingle<{ is_suspended?: boolean }>();
+      effectiveSuspended = ownerProfile?.is_suspended ?? false;
+    }
+
+    if (effectiveSuspended && (rawProfile?.role === 'owner' || isScopedRole)) {
       setIsSuspended(true);
       await supabase.auth.signOut();
       return null;
@@ -190,7 +203,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!profile) {
       return null;
     }
-    return mapUser(profile);
+
+    let mappedUser = mapUser(profile);
+
+    // --- Admin Impersonation Support ---
+    if (isPlatformAdminRole(mappedUser.role)) {
+      try {
+        if (typeof window !== 'undefined') {
+          const impersonatedId = localStorage.getItem('admin_impersonate_id');
+          if (impersonatedId) {
+            const impProfile = await supabaseAuthDataApi.getProfileById(impersonatedId);
+            if (impProfile) {
+              mappedUser = mapUser(impProfile);
+              // Make sure the role is owner
+              if (!isSupportedUserRole(mappedUser.role) || mappedUser.role === 'platform_admin') {
+                 mappedUser.role = 'owner';
+              }
+            }
+          }
+        }
+      } catch {}
+    }
+
+    return mappedUser;
   };
 
   const ensureProfileFromAuthUser = async (authUser: {
@@ -337,6 +372,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  // Live suspension kill-switch — signs out an owner/manager the instant an admin suspends them,
+  // instead of waiting for the next session resolution (page load / token refresh).
+  useEffect(() => {
+    if (!user || (user.role !== 'owner' && user.role !== 'owner_manager')) return;
+
+    // Managers/staff are suspended via their owner's profile (owner_scope_id), not their own —
+    // watch that row too so suspension propagates to active manager sessions instantly.
+    const watchedId = user.role === 'owner_manager' && user.ownerScopeId ? user.ownerScopeId : user.id;
+
+    const channel = supabase
+      .channel(`auth-suspension-${user.id}-${watchedId}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${watchedId}` },
+        (payload) => {
+          const next = payload.new as { is_suspended?: boolean } | null;
+          if (next?.is_suspended) {
+            setIsSuspended(true);
+            void supabase.auth.signOut().then(() => setUser(null));
+          }
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [user]);
+
   const sendLoginMagicLink = async (email: string): Promise<boolean> => {
     setIsLoading(true);
     setAuthError('');
@@ -363,6 +427,53 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return true;
     } catch (error) {
       setAuthError(toAuthMessage(error, 'Unable to send sign-in link.'));
+      return false;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Password-based sign-in — used exclusively by the isolated Admin Sign In screen.
+  // Non-admin accounts are rejected even on successful auth, so this cannot become
+  // a backdoor into owner/manager/tenant portals.
+  const signInWithPassword = async (email: string, password: string): Promise<boolean> => {
+    setIsLoading(true);
+    setAuthError('');
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: normalizeEmail(email),
+        password,
+      });
+
+      if (error) {
+        setAuthError(toAuthMessage(error, 'Invalid email or password.'));
+        return false;
+      }
+
+      const authUser = data.user;
+      if (!authUser?.id) {
+        setAuthError('Sign-in succeeded but user record is missing. Contact your administrator.');
+        return false;
+      }
+
+      const sessionUser = await resolveSessionUser(authUser.id);
+      if (!sessionUser) {
+        await supabase.auth.signOut();
+        setAuthError('Admin account not found. Run the bootstrap script or contact your system administrator.');
+        return false;
+      }
+
+      if (!isPlatformAdminRole(sessionUser.role)) {
+        await supabase.auth.signOut();
+        setAuthError('Access denied. This portal is for platform administrators only.');
+        return false;
+      }
+
+      setAppMode('live', { reload: false });
+      setUser(sessionUser);
+      return true;
+    } catch (error) {
+      setAuthError(toAuthMessage(error, 'Unable to sign in.'));
       return false;
     } finally {
       setIsLoading(false);
@@ -534,6 +645,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.removeItem(DEMO_USER_KEY);
       localStorage.removeItem(DEMO_PERSONA_KEY);
       localStorage.removeItem('app_mode');
+      localStorage.removeItem('admin_impersonate_id'); // Clear impersonation
       if (isDemo) {
         setUser(null);
         return;
@@ -564,7 +676,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, authError, isSuspended, sendLoginMagicLink, signInWithGoogle, sendSignupMagicLink, sendPhoneOtp, verifyPhoneOtp, signInAsDemo, refreshProfile, logout, isLoading }}>
+    <AuthContext.Provider value={{ user, authError, isSuspended, sendLoginMagicLink, signInWithPassword, signInWithGoogle, sendSignupMagicLink, sendPhoneOtp, verifyPhoneOtp, signInAsDemo, refreshProfile, logout, isLoading }}>
       {children}
     </AuthContext.Provider>
   );

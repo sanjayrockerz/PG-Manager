@@ -8,6 +8,7 @@ import {
   SupportTicketStatus,
   supabaseOwnerDataApi,
 } from '../services/supabaseData';
+import { getSupportTickets } from '../services/dataService';
 import { useProperty } from '../contexts/PropertyContext';
 import { LiveStatusBadge } from './LiveStatusBadge';
 import { useRealtimeRefresh } from '../hooks/useRealtimeRefresh';
@@ -54,7 +55,7 @@ export function Support() {
     setErrorMessage('');
 
     try {
-      const rows = await supabaseOwnerDataApi.listSupportTickets(selectedProperty);
+      const rows = await getSupportTickets(selectedProperty);
       setTickets(rows);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Unable to load support tickets.');

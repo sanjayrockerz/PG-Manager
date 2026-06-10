@@ -3,6 +3,8 @@ import type { Property, Room } from '../contexts/PropertyContext';
 import { isPlatformAdminRole, isScopedOwnerRole } from '../utils/roles';
 import { isValidStoredPhoneNumber as isValidStoredPhoneFromUtils, parseStoredPhone } from '../utils/phone';
 import { domainEvents } from './eventBus';
+import { generateSettlementReceiptHtml } from './depositSettlementService';
+import type { SettlementDeductionItem } from './depositSettlementService';
 
 export type UserRole = 'owner' | 'owner_manager' | 'staff' | 'tenant' | 'platform_admin' | 'admin' | 'super_admin';
 export type DisplayRole = 'viewer' | 'editor' | 'manager';
@@ -696,6 +698,7 @@ export interface PaymentRecord {
   paymentMode?: string;
   referenceNumber?: string;
   paymentNotes?: string;
+  ownerId?: string;
 }
 
 export interface MaintenanceThreadEntry {
@@ -1422,17 +1425,43 @@ async function getCurrentUserContext(): Promise<CurrentUserContext> {
     throw new Error('Profile not found for authenticated user.');
   }
 
-  // Suspension enforcement: block API access for suspended owner accounts
-  if (profile.is_suspended && (profile.role === 'owner' || isScopedOwnerRole(profile.role))) {
+  let role = profile.role;
+  let ownerScopeId = profile.owner_scope_id ?? null;
+  let ownerId = role === 'owner'
+    ? profile.id
+    : (isScopedOwnerRole(role) ? (ownerScopeId ?? profile.id) : profile.id);
+
+  // --- Admin Impersonation Support ---
+  if (isPlatformAdminRole(role)) {
+    try {
+      if (typeof window !== 'undefined') {
+        const impersonatedId = localStorage.getItem('admin_impersonate_id');
+        if (impersonatedId) {
+          ownerId = impersonatedId;
+          role = 'owner' as any; // spoof the role for UI components
+          ownerScopeId = null;
+        }
+      }
+    } catch {}
+  }
+
+  // Suspension enforcement: block API access for suspended owners AND any manager/staff
+  // scoped under a suspended owner — suspension must propagate through owner_scope_id,
+  // not just the logged-in profile's own flag.
+  let effectiveSuspended = profile.is_suspended ?? false;
+  if (!effectiveSuspended && isScopedOwnerRole(role) && ownerScopeId && ownerScopeId !== profile.id) {
+    const { data: ownerProfile } = await supabase
+      .from('profiles')
+      .select('is_suspended')
+      .eq('id', ownerScopeId)
+      .maybeSingle<{ is_suspended?: boolean }>();
+    effectiveSuspended = ownerProfile?.is_suspended ?? false;
+  }
+
+  if (effectiveSuspended && (role === 'owner' || isScopedOwnerRole(role))) {
     await supabase.auth.signOut();
     throw new Error('ACCOUNT_SUSPENDED');
   }
-
-  const role = profile.role;
-  const ownerScopeId = profile.owner_scope_id ?? null;
-  const ownerId = role === 'owner'
-    ? profile.id
-    : (isScopedOwnerRole(role) ? (ownerScopeId ?? profile.id) : profile.id);
 
   return {
     userId: profile.id,
@@ -1640,7 +1669,7 @@ async function syncRoomOccupancyForProperty(ownerId: string, propertyId: string)
     throw tenantError;
   }
 
-  const activeTenants = (tenantRows ?? []).filter((tenant) => tenant.status === 'active');
+  const activeTenants = (tenantRows ?? []).filter((tenant) => isTenantCurrentlyInRoom(tenant.status));
   const tenantIndex = new Map<string, Array<{ id: string }>>();
 
   activeTenants.forEach((tenant) => {
@@ -1971,6 +2000,7 @@ function mapPayment(row: PaymentRow): PaymentRecord {
     paymentMode: row.payment_mode ?? undefined,
     referenceNumber: row.reference_number ?? undefined,
     paymentNotes: row.payment_notes ?? undefined,
+    ownerId: row.owner_id,
   };
 }
 
@@ -2135,7 +2165,7 @@ function mapSupportTicket(row: SupportTicketRow, comments: SupportTicketCommentR
   };
 }
 
-const defaultSettings: OwnerSettingsRecord = {
+export const defaultSettings: OwnerSettingsRecord = {
   pgRules: [],
   whatsappSettings: {
     welcomeMessage: {
@@ -4032,6 +4062,12 @@ export const supabaseOwnerDataApi = {
       // Store receipt as a document in tenant_documents (best-effort).
       void (async () => {
         try {
+          const { data: propRow } = await supabase
+            .from('properties')
+            .select('name')
+            .eq('id', updated.propertyId)
+            .maybeSingle<{ name: string }>();
+          const propertyName = propRow?.name ?? '';
           const month = new Date(updated.dueDate).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
           const receiptLabel = `Receipt — ${month}`;
           const receiptNo = `RCP-${updated.id.slice(-8).toUpperCase()}`;
@@ -4060,6 +4096,7 @@ export const supabaseOwnerDataApi = {
 <div class="card">
   <div class="hdr"><h1>Rent Receipt</h1><p>${receiptNo} &nbsp;·&nbsp; ${fmtDt(new Date().toISOString())}</p></div>
   <div class="body">
+    ${propertyName ? `<div class="row"><span>Property</span><span>${propertyName}</span></div>` : ''}
     <div class="row"><span>Tenant</span><span>${updated.tenant}</span></div>
     <div class="row"><span>Room</span><span>${updated.room}</span></div>
     <div class="row"><span>Due Date</span><span>${fmtDt(updated.dueDate)}</span></div>
@@ -4146,13 +4183,17 @@ export const supabaseOwnerDataApi = {
 
     const { data: paymentRow, error: paymentFetchError } = await supabase
       .from('payments')
-      .select('property_id')
+      .select('property_id,status')
       .eq('id', paymentId)
       .eq('owner_id', ownerId)
-      .maybeSingle<{ property_id: string | null }>();
+      .maybeSingle<{ property_id: string | null; status: PaymentStatus }>();
 
     if (paymentFetchError) {
       throw paymentFetchError;
+    }
+
+    if (paymentRow?.status === 'paid') {
+      throw new Error('Extra charges cannot be added to a paid invoice. Select the current pending invoice instead.');
     }
 
     await assertScopeCapability(context, paymentRow?.property_id ?? null, 'payments');
@@ -4879,6 +4920,34 @@ export const supabaseOwnerDataApi = {
     return mapOwnerSubscription(data);
   },
 
+  // Resolves the current user's role *per property* from the property_access
+  // view (owner via properties.owner_id + manager/staff via scopes). This is
+  // what makes "Owner of A, Manager of B" work instead of one global role.
+  // Any failure (view/grant missing) returns [] so callers fall back safely.
+  async listPropertyAccess(): Promise<Array<{ propertyId: string; accessRole: 'owner' | 'manager' | 'staff' }>> {
+    try {
+      const { data: authData } = await supabase.auth.getUser();
+      const userId = authData.user?.id;
+      if (!userId) return [];
+
+      const { data, error } = await supabase
+        .from('property_access')
+        .select('property_id, access_role')
+        .eq('user_id', userId);
+
+      if (error) return [];
+
+      return (data ?? []).map((row: { property_id: string; access_role: string }) => ({
+        propertyId: row.property_id,
+        accessRole: (row.access_role === 'owner' || row.access_role === 'manager' || row.access_role === 'staff')
+          ? (row.access_role as 'owner' | 'manager' | 'staff')
+          : 'staff',
+      }));
+    } catch {
+      return [];
+    }
+  },
+
   async updateOwnerSubscription(input: {
     planCode?: string;
     status?: OwnerSubscriptionRecord['status'];
@@ -5248,6 +5317,18 @@ export const supabaseOwnerDataApi = {
     }
   },
 
+  // Authority for tenant-facing financial documents (receipts, invoices,
+  // agreements, settlements) is always the registered property owner — never
+  // the currently logged-in user, who may be a manager or staff member acting
+  // on the owner's behalf. Resolves owner_id for the current scope, then loads
+  // that profile's name/phone directly from the database.
+  async getAuthorityProfile(): Promise<{ name: string; phone: string } | null> {
+    const ownerId = await getOwnerId();
+    const profile = await supabaseAuthDataApi.getProfileById(ownerId).catch(() => null);
+    if (!profile) return null;
+    return { name: profile.name, phone: profile.phone };
+  },
+
   async getOwnerSettings(): Promise<OwnerSettingsRecord> {
     const ownerId = await getOwnerId();
 
@@ -5290,11 +5371,11 @@ export const supabaseOwnerDataApi = {
 
     const { error } = await supabase
       .from('owner_settings')
-      .update({
+      .upsert({
+        owner_id: ownerId,
         pg_rules: settings.pgRules,
         whatsapp_settings: serializedSettings,
-      })
-      .eq('owner_id', ownerId);
+      }, { onConflict: 'owner_id' });
 
     if (error) {
       throw error;
@@ -5564,7 +5645,7 @@ export const supabaseOwnerDataApi = {
       }));
 
       return {
-        totalTenants: tenants.filter((tenant) => tenant.status === 'active').length,
+        totalTenants: tenants.filter((tenant) => isTenantCurrentlyInRoom(tenant.status)).length,
         occupiedRooms,
         totalRooms,
         monthlyRevenue,
@@ -5661,6 +5742,44 @@ export const supabaseOwnerDataApi = {
       },
     });
 
+    // Archive all active agreements for this tenant (best-effort — missing table silently ignored)
+    const { data: activeAgreements, error: agreementFetchErr } = await supabase
+      .from('agreements')
+      .select('id')
+      .eq('tenant_id', input.tenantId)
+      .eq('owner_id', ownerId)
+      .not('status', 'in', '(archived,cancelled,expired)')
+      .returns<Array<{ id: string }>>();
+
+    if (agreementFetchErr && !isMissingRelationError(agreementFetchErr, 'agreements')) {
+      console.warn('[processVacate] agreement fetch for archive failed:', agreementFetchErr.message);
+    }
+
+    if (!agreementFetchErr && (activeAgreements ?? []).length > 0) {
+      const { error: archiveErr } = await supabase
+        .from('agreements')
+        .update({ status: 'archived' })
+        .eq('tenant_id', input.tenantId)
+        .eq('owner_id', ownerId)
+        .not('status', 'in', '(archived,cancelled,expired)');
+
+      if (archiveErr && !isMissingRelationError(archiveErr, 'agreements')) {
+        console.warn('[processVacate] agreement archive failed:', archiveErr.message);
+      }
+
+      if (!archiveErr) {
+        void Promise.all((activeAgreements ?? []).map((row) =>
+          supabase.from('agreement_events').insert({
+            agreement_id: row.id,
+            actor_id: ownerId,
+            actor_role: 'system',
+            event_type: 'archived',
+            event_detail: `Archived on tenant vacate — ${isImmediateVacate ? 'immediate' : 'notice submitted'}`,
+          })
+        )).catch(() => {});
+      }
+    }
+
     // If immediate vacate, sync room occupancy
     if (isImmediateVacate && tenantRow.property_id) {
       try {
@@ -5679,6 +5798,58 @@ export const supabaseOwnerDataApi = {
         : `Scheduled move-out: ${input.vacateDate}`,
       propertyId: tenantRow.property_id,
     }).catch(() => {});
+
+    // Farewell notification visible to tenant in their portal
+    void createOwnerNotification(ownerId, {
+      type: 'tenant',
+      title: `Thank you, ${tenantRow.name}`,
+      message: isImmediateVacate
+        ? `Your stay in Room ${tenantRow.room} has been completed. Your deposit refund of ₹${depositRefund.toLocaleString('en-IN')} will be processed within 15 days. Thank you for being a valued resident.`
+        : `Your vacate notice has been received. Your planned move-out is ${input.vacateDate}. Final settlement will be processed after your departure.`,
+      propertyId: tenantRow.property_id,
+    }).catch(() => {});
+
+    // Auto-generate and store the final settlement receipt as a tenant document,
+    // mirroring the auto-receipt-on-payment pattern (storeReceiptAsDocument dedupes by label).
+    if (isImmediateVacate) {
+      try {
+        const [{ data: propertyRow }, { data: ownerProfile }] = await Promise.all([
+          supabase.from('properties').select('name').eq('id', tenantRow.property_id).maybeSingle<{ name: string | null }>(),
+          supabase.from('profiles').select('full_name, pg_name').eq('id', ownerId).maybeSingle<{ full_name: string | null; pg_name: string | null }>(),
+        ]);
+
+        const settlementHtml = generateSettlementReceiptHtml({
+          tenantName: tenantRow.name,
+          room: tenantRow.room,
+          floor: String(tenantRow.floor ?? ''),
+          joinDate: tenantRow.join_date,
+          vacateDate: input.vacateDate,
+          reason: input.reason,
+          securityDeposit: Number(tenantRow.security_deposit ?? 0),
+          deductionBreakdown: (input.deductionItems ?? []).map((d) => ({
+            id: d.id,
+            category: d.category as SettlementDeductionItem['category'],
+            description: d.description,
+            amount: d.amount,
+          })),
+          totalDeductions: totalDeduction,
+          netRefund: depositRefund,
+          pendingRentTotal: 0,
+          settledAt: new Date().toISOString(),
+          propertyName: propertyRow?.name ?? '',
+          ownerName: ownerProfile?.full_name ?? ownerProfile?.pg_name ?? '',
+        });
+
+        await supabaseLifecycleApi.storeReceiptAsDocument({
+          tenantId: input.tenantId,
+          paymentId: `settlement-${input.tenantId}`,
+          htmlContent: settlementHtml,
+          label: `Settlement — ${input.vacateDate}`,
+        });
+      } catch {
+        // Non-fatal: settlement document generation should not block vacate processing
+      }
+    }
 
     emitOwnerDataUpdated();
     return mapTenant(updatedRow!);
@@ -5742,7 +5913,8 @@ export const supabaseOwnerDataApi = {
     if (scopedPropertyIds) {
       rows = rows.filter((row: Record<string, unknown>) => {
         const pid = row.property_id ? String(row.property_id) : null;
-        return pid ? scopedPropertyIds.includes(pid) : false;
+        // null property_id = global event (account-level) — always visible to scoped users
+        return pid ? scopedPropertyIds.includes(pid) : true;
       });
     }
 
@@ -5858,12 +6030,12 @@ export const supabaseTenantDataApi = {
         .select('*')
         .eq('owner_id', tenant.ownerId)
         .order('created_at', { ascending: false })
-        .limit(20)
+        .limit(50)
         .returns<NotificationRow[]>(),
       (supabase.rpc('get_owner_payment_info', { p_owner_id: tenant.ownerId }) as unknown as Promise<{ data: unknown; error: unknown }>),
       supabase
         .from('vacate_requests')
-        .select('*')
+        .select('id,owner_id,tenant_id,tenant_name,property_id,room,notice_date,planned_vacate_date,reason,status,created_at,deposit_refund,deposit_deduction,deduction_reason,final_settlement_amount')
         .eq('tenant_id', tenant.id)
         .order('created_at', { ascending: false })
         .limit(1)
@@ -5871,6 +6043,8 @@ export const supabaseTenantDataApi = {
           id: string; owner_id: string; tenant_id: string; tenant_name: string;
           property_id: string; room: string; notice_date: string;
           planned_vacate_date: string; reason: string; status: string; created_at: string;
+          deposit_refund: number | null; deposit_deduction: number | null;
+          deduction_reason: string | null; final_settlement_amount: number | null;
         }>>(),
     ]);
 
@@ -5934,14 +6108,28 @@ export const supabaseTenantDataApi = {
           noticeDate: vacateRow.notice_date,
           plannedVacateDate: vacateRow.planned_vacate_date,
           reason: vacateRow.reason,
-          finalSettlementAmount: 0,
-          depositRefund: 0,
-          depositDeduction: 0,
-          deductionReason: '',
+          finalSettlementAmount: toNumber(vacateRow.final_settlement_amount ?? 0),
+          depositRefund: toNumber(vacateRow.deposit_refund ?? 0),
+          depositDeduction: toNumber(vacateRow.deposit_deduction ?? 0),
+          deductionReason: vacateRow.deduction_reason ?? '',
           status: vacateRow.status as VacateRequest['status'],
           createdAt: vacateRow.created_at,
         }
       : null;
+
+    // Scope notifications to this tenant: show announcements, system messages,
+    // and messages that reference the tenant by name. This prevents other tenants'
+    // payment/document/maintenance events from appearing in this portal.
+    const scopedNotifications = (notificationRows.data ?? [])
+      .filter((n) => {
+        const type = String(n.type ?? '');
+        if (type === 'announcement' || type === 'system') return true;
+        const msg = String(n.message ?? '');
+        const title = String(n.title ?? '');
+        return msg.includes(tenant.name) || title.includes(tenant.name);
+      })
+      .slice(0, 20)
+      .map(mapNotification);
 
     return {
       profile,
@@ -5951,7 +6139,7 @@ export const supabaseTenantDataApi = {
       payments: (paymentRows.data ?? []).map(mapPayment),
       maintenance: maintenanceTicketRows.map((ticket) => mapMaintenanceTicket(ticket, notesByTicket.get(ticket.id) ?? [])),
       announcements: (announcementRows.data ?? []).map(mapAnnouncement),
-      notifications: (notificationRows.data ?? []).map(mapNotification),
+      notifications: scopedNotifications,
       ownerPaymentInfo,
       vacateRequest,
     };
@@ -6035,6 +6223,11 @@ export const supabaseTenantDataApi = {
     const vacateDate = new Date(input.vacateDate);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+
+    if (vacateDate < today) {
+      throw new Error('Vacate date cannot be in the past. Please select today or a future date.');
+    }
+
     const isImmediateVacate = vacateDate <= today;
     const newStatus: TenantStatus = isImmediateVacate ? 'inactive' : 'notice_submitted';
 
@@ -6087,7 +6280,7 @@ export const supabaseTenantDataApi = {
       tenantName: tenant.name,
       propertyId: tenant.propertyId,
       room: tenant.room,
-      depositRefund: 0,
+      depositRefund: tenant.securityDeposit,
       isImmediate: isImmediateVacate,
       vacateDate: input.vacateDate,
     });
@@ -6095,6 +6288,30 @@ export const supabaseTenantDataApi = {
 };
 
 export const supabaseAdminDataApi = {
+  async checkMigrationStatus(): Promise<{
+    suspendColumnsApplied: boolean;
+    adminCouponsApplied: boolean;
+    referralsApplied: boolean;
+    fullyApplied: boolean;
+  }> {
+    const [suspendProbe, couponProbe, referralProbe] = await Promise.all([
+      supabase.from('profiles').select('is_suspended').limit(1),
+      supabase.from('admin_coupons').select('id').limit(1),
+      supabase.from('referrals').select('id').limit(1),
+    ]);
+
+    const suspendColumnsApplied = !suspendProbe.error || !isMissingColumnError(suspendProbe.error, ['is_suspended']);
+    const adminCouponsApplied = !couponProbe.error || !isMissingRelationError(couponProbe.error, 'admin_coupons');
+    const referralsApplied = !referralProbe.error || !isMissingRelationError(referralProbe.error, 'referrals');
+
+    return {
+      suspendColumnsApplied,
+      adminCouponsApplied,
+      referralsApplied,
+      fullyApplied: suspendColumnsApplied && adminCouponsApplied && referralsApplied,
+    };
+  },
+
   async getAdminSummary(): Promise<{
     profile: AppUser;
     stats: {
@@ -6104,6 +6321,19 @@ export const supabaseAdminDataApi = {
       activeSubscriptions: number;
       openSupportTickets: number;
       monthlyRevenue: number;
+      arr: number;
+      newMrr: number;
+      churnMrr: number;
+      ownersActive: number;
+      ownersTrialing: number;
+      ownersSuspended: number;
+      totalRooms: number;
+      totalBeds: number;
+      occupancyRate: number;
+      newTenantsThisMonth: number;
+      vacatesThisMonth: number;
+      urgentSupportTickets: number;
+      avgSupportResponseHours: number | null;
     };
     owners: Array<{
       id: string;
@@ -6119,6 +6349,9 @@ export const supabaseAdminDataApi = {
       isSuspended: boolean;
       verifiedAt: string | null;
       joinedAt: string;
+      revenue: number;
+      lastActive: string | null;
+      photoUrl: string | null;
     }>;
     subscriptions: OwnerSubscriptionRecord[];
     support: SupportTicketRecord[];
@@ -6151,13 +6384,20 @@ export const supabaseAdminDataApi = {
         .returns<ProfileRow[]>();
     }
 
-    const [propertiesResult, tenantsResult, paymentsResult, subscriptionsResult, supportTicketsResult] = await Promise.all([
+    const [propertiesResult, tenantsResult, paymentsResult, subscriptionsResult, supportTicketsResult, roomsStatusResult] = await Promise.all([
       supabase.from('properties').select('*').returns<PropertyRow[]>(),
       supabase.from('tenants').select('*').returns<TenantRow[]>(),
       supabase.from('payments').select('*').returns<PaymentRow[]>(),
       supabase.from('owner_subscriptions').select('*').returns<OwnerSubscriptionRow[]>(),
       supabase.from('support_tickets').select('*').returns<SupportTicketRow[]>(),
+      supabase.from('rooms').select('id,status,beds').returns<Array<{ id: string; status: string; beds: number | null }>>(),
     ]);
+
+    // totalBeds = sum of rooms.beds (capacity column) — the separate beds table is reserved for
+    // per-bed lifecycle tracking and may be empty on accounts that haven't enabled that feature.
+    const roomsForOccupancy = roomsStatusResult.error ? [] : (roomsStatusResult.data ?? []);
+    const totalBeds = roomsForOccupancy.reduce((sum, r) => sum + (r.beds ?? 0), 0);
+    const occupiedRoomsForOccupancy = roomsForOccupancy.filter((r) => r.status === 'occupied').length;
 
     if (ownersResult.error) {
       throw ownersResult.error;
@@ -6253,6 +6493,27 @@ export const supabaseAdminDataApi = {
       })
       .reduce((sum, payment) => sum + payment.totalAmount, 0);
 
+    const { data: activityLogsResult } = await supabase
+      .from('activity_logs')
+      .select('owner_id,created_at')
+      .order('created_at', { ascending: false })
+      .limit(500)
+      .returns<Array<{ owner_id: string; created_at: string }>>();
+
+    const lastActiveByOwner = new Map<string, string>();
+    (activityLogsResult ?? []).forEach((log) => {
+      if (log.owner_id && !lastActiveByOwner.has(log.owner_id)) {
+        lastActiveByOwner.set(log.owner_id, log.created_at);
+      }
+    });
+
+    const revenueByOwner = new Map<string, number>();
+    payments.forEach((p) => {
+      if (p.status === 'paid' && p.ownerId) {
+        revenueByOwner.set(p.ownerId, (revenueByOwner.get(p.ownerId) ?? 0) + p.totalAmount);
+      }
+    });
+
     const ownerCards = owners.map((owner) => {
       const subscription = subscriptionsByOwner.get(owner.id);
       const subscriptionStatus: OwnerSubscriptionRecord['status'] | 'not_configured' = subscription?.status ?? 'not_configured';
@@ -6270,8 +6531,70 @@ export const supabaseAdminDataApi = {
         isSuspended: owner.is_suspended ?? false,
         verifiedAt: owner.verified_at ?? null,
         joinedAt: owner.created_at ?? '',
+        revenue: revenueByOwner.get(owner.id) ?? 0,
+        lastActive: lastActiveByOwner.get(owner.id) ?? owner.updated_at ?? null,
+        photoUrl: owner.photo_url ?? null,
       };
     });
+
+    // Normalize each active/trialing subscription's amount to a monthly figure for MRR/ARR.
+    const monthlyAmount = (subscription: OwnerSubscriptionRecord): number =>
+      subscription.billingCycle === 'yearly' ? subscription.amount / 12 : subscription.amount;
+
+    const mrr = subscriptionRecords
+      .filter((subscription) => subscription.status === 'active' || subscription.status === 'trialing')
+      .reduce((sum, subscription) => sum + monthlyAmount(subscription), 0);
+
+    const newMrr = subscriptionRecords
+      .filter((subscription) => {
+        if (subscription.status !== 'active' && subscription.status !== 'trialing') return false;
+        const startedAt = new Date(subscription.startedAt);
+        return startedAt.getMonth() === month && startedAt.getFullYear() === year;
+      })
+      .reduce((sum, subscription) => sum + monthlyAmount(subscription), 0);
+
+    const churnMrr = subscriptionRecords
+      .filter((subscription) => {
+        if (subscription.status !== 'cancelled') return false;
+        const updatedAt = new Date(subscription.updatedAt);
+        return updatedAt.getMonth() === month && updatedAt.getFullYear() === year;
+      })
+      .reduce((sum, subscription) => sum + monthlyAmount(subscription), 0);
+
+    const ownersActive = ownerCards.filter((owner) => !owner.isSuspended && (owner.subscriptionStatus === 'active' || owner.subscriptionStatus === 'past_due')).length;
+    const ownersTrialing = ownerCards.filter((owner) => !owner.isSuspended && owner.subscriptionStatus === 'trialing').length;
+    const ownersSuspended = ownerCards.filter((owner) => owner.isSuspended).length;
+
+    const totalRooms = properties.reduce((sum, property) => sum + (property.total_rooms ?? 0), 0);
+    const occupancyRate = roomsForOccupancy.length > 0 ? occupiedRoomsForOccupancy / roomsForOccupancy.length : 0;
+
+    const newTenantsThisMonth = tenants.filter((tenant) => {
+      if (!tenant.joinDate) return false;
+      const joined = new Date(tenant.joinDate);
+      return joined.getMonth() === month && joined.getFullYear() === year;
+    }).length;
+
+    const vacatesThisMonth = tenants.filter((tenant) => {
+      if ((tenant.status !== 'inactive' && tenant.status !== 'archived') || !tenant.vacateDate) return false;
+      const vacated = new Date(tenant.vacateDate);
+      return vacated.getMonth() === month && vacated.getFullYear() === year;
+    }).length;
+
+    const urgentSupportTickets = support.filter((ticket) => ticket.priority === 'urgent' && (ticket.status === 'open' || ticket.status === 'in_progress')).length;
+
+    const responseTimesHours = support
+      .map((ticket) => {
+        const firstComment = [...ticket.comments]
+          .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())[0];
+        if (!firstComment) return null;
+        const diffMs = new Date(firstComment.createdAt).getTime() - new Date(ticket.createdAt).getTime();
+        return diffMs > 0 ? diffMs / (1000 * 60 * 60) : null;
+      })
+      .filter((value): value is number => value != null);
+
+    const avgSupportResponseHours = responseTimesHours.length > 0
+      ? responseTimesHours.reduce((sum, hours) => sum + hours, 0) / responseTimesHours.length
+      : null;
 
     const activity = [
       ...owners.map((owner) => ({
@@ -6299,6 +6622,19 @@ export const supabaseAdminDataApi = {
         activeSubscriptions: subscriptionRecords.filter((subscription) => subscription.status === 'active' || subscription.status === 'trialing').length,
         openSupportTickets: support.filter((ticket) => ticket.status === 'open' || ticket.status === 'in_progress').length,
         monthlyRevenue,
+        arr: mrr * 12,
+        newMrr,
+        churnMrr,
+        ownersActive,
+        ownersTrialing,
+        ownersSuspended,
+        totalRooms,
+        totalBeds,
+        occupancyRate,
+        newTenantsThisMonth,
+        vacatesThisMonth,
+        urgentSupportTickets,
+        avgSupportResponseHours,
       },
       owners: ownerCards,
       subscriptions: subscriptionRecords,
@@ -6339,6 +6675,32 @@ export const supabaseAdminDataApi = {
 
     if (error) {
       throw error;
+    }
+
+    // Audit every admin-driven subscription change + notify the owner of
+    // status/plan changes (billing changes are material to the owner).
+    const changeSummary = [
+      input.planCode !== undefined ? `plan→${input.planCode}` : null,
+      input.status !== undefined ? `status→${input.status}` : null,
+      input.amount !== undefined ? `amount→${input.amount}` : null,
+      input.seats !== undefined ? `seats→${input.seats}` : null,
+    ].filter(Boolean).join(', ');
+
+    await logActivity(
+      context.userId, null,
+      'ADMIN_SUBSCRIPTION_UPDATED',
+      `Subscription updated for owner ${ownerId}${changeSummary ? `: ${changeSummary}` : ''}`,
+      { ownerId, adminId: context.userId, ...input },
+    );
+
+    if (input.status !== undefined || input.planCode !== undefined) {
+      void createOwnerNotification(ownerId, {
+        type: 'announcement',
+        title: 'Subscription Updated',
+        message: input.status === 'cancelled'
+          ? 'Your subscription has been cancelled by the platform administrator. Contact support if this is unexpected.'
+          : `Your subscription was updated by the platform administrator${input.planCode ? ` to the ${input.planCode} plan` : ''}.`,
+      }).catch(() => {});
     }
 
     return mapOwnerSubscription(data);
@@ -6416,10 +6778,103 @@ export const supabaseAdminDataApi = {
       .eq('owner_id', ownerId)
       .maybeSingle();
 
+    // Document inventory — gives admin read-only visibility into receipts/agreements/IDs/settlements
+    // (previously invisible to the platform side, per portal interconnection certification Flow 8)
+    const tenantIds = (tenants ?? []).map((t) => t.id);
+    const tenantNameById = new Map((tenants ?? []).map((t) => [t.id, t.name as string]));
+
+    let documents: Array<{
+      id: string;
+      tenantId: string;
+      tenantName: string;
+      docType: string;
+      label: string;
+      fileUrl: string;
+      createdAt: string;
+    }> = [];
+    let agreements: Array<{
+      id: string;
+      tenantId: string;
+      tenantName: string;
+      status: string;
+      createdAt: string;
+    }> = [];
+
+    const { data: paymentsResult } = await supabase
+      .from('payments')
+      .select('*')
+      .eq('owner_id', ownerId)
+      .order('created_at', { ascending: false })
+      .limit(50);
+
+    const { data: supportResult } = await supabase
+      .from('support_tickets')
+      .select('*')
+      .eq('owner_id', ownerId)
+      .order('created_at', { ascending: false })
+      .limit(50);
+
+    const { data: auditResult } = await supabase
+      .from('activity_logs')
+      .select('*')
+      .eq('owner_id', ownerId)
+      .order('created_at', { ascending: false })
+      .limit(50);
+
+    if (tenantIds.length > 0) {
+      const [docsResult, agreementsResult] = await Promise.all([
+        supabase
+          .from('tenant_documents')
+          .select('id, tenant_id, doc_type, label, file_url, created_at')
+          .in('tenant_id', tenantIds)
+          .order('created_at', { ascending: false })
+          .limit(200)
+          .returns<Array<{ id: string; tenant_id: string; doc_type: string; label: string; file_url: string; created_at: string }>>(),
+        supabase
+          .from('agreements')
+          .select('id, tenant_id, status, created_at')
+          .in('tenant_id', tenantIds)
+          .order('created_at', { ascending: false })
+          .limit(200)
+          .returns<Array<{ id: string; tenant_id: string; status: string; created_at: string }>>(),
+      ]);
+
+      if (!docsResult.error) {
+        documents = (docsResult.data ?? []).map((d) => ({
+          id: d.id,
+          tenantId: d.tenant_id,
+          tenantName: tenantNameById.get(d.tenant_id) ?? 'Tenant',
+          docType: d.doc_type,
+          label: d.label,
+          fileUrl: d.file_url,
+          createdAt: d.created_at,
+        }));
+      } else if (!isMissingRelationError(docsResult.error, 'tenant_documents')) {
+        console.warn('[admin] tenant_documents fetch failed:', docsResult.error.message);
+      }
+
+      if (!agreementsResult.error) {
+        agreements = (agreementsResult.data ?? []).map((a) => ({
+          id: a.id,
+          tenantId: a.tenant_id,
+          tenantName: tenantNameById.get(a.tenant_id) ?? 'Tenant',
+          status: a.status,
+          createdAt: a.created_at,
+        }));
+      } else if (!isMissingRelationError(agreementsResult.error, 'agreements')) {
+        console.warn('[admin] agreements fetch failed:', agreementsResult.error.message);
+      }
+    }
+
     return {
       properties: properties ?? [],
       tenants: tenants ?? [],
       subscription: subscription || null,
+      documents,
+      agreements,
+      payments: paymentsResult ?? [],
+      support: supportResult ?? [],
+      audit: auditResult ?? [],
     };
   },
 
@@ -6428,6 +6883,16 @@ export const supabaseAdminDataApi = {
     if (!context.isPlatformAdmin) {
       throw new Error('Platform admin access is required.');
     }
+
+    // Audit BEFORE the delete cascades — and attribute the log to the admin
+    // (context.userId), not the owner being removed, so the trail survives the
+    // ON DELETE CASCADE on the deleted profile.
+    await logActivity(
+      context.userId, null,
+      'ADMIN_OWNER_DELETED',
+      `Owner ${ownerId} permanently deleted by admin ${context.userId}`,
+      { ownerId, adminId: context.userId },
+    );
 
     const { error } = await supabase
       .from('profiles')
@@ -6456,6 +6921,12 @@ export const supabaseAdminDataApi = {
     }
 
     await logActivity(ownerId, null, 'ADMIN_OWNER_SUSPENDED', `Owner ${ownerId} suspended by admin. Reason: ${reason}`, { ownerId, adminId: context.userId, reason });
+
+    void createOwnerNotification(ownerId, {
+      type: 'announcement',
+      title: 'Account Suspended',
+      message: `Your account has been suspended by the platform administrator. Reason: ${reason}`,
+    }).catch(() => {});
   },
 
   async unsuspendOwner(ownerId: string): Promise<void> {
@@ -6475,6 +6946,12 @@ export const supabaseAdminDataApi = {
     }
 
     await logActivity(ownerId, null, 'ADMIN_OWNER_UNSUSPENDED', `Owner ${ownerId} unsuspended by admin`, { ownerId, adminId: context.userId });
+
+    void createOwnerNotification(ownerId, {
+      type: 'announcement',
+      title: 'Account Reinstated',
+      message: 'Your account suspension has been lifted by the platform administrator. You now have full access again.',
+    }).catch(() => {});
   },
 
   async verifyOwner(ownerId: string): Promise<void> {
@@ -6505,6 +6982,31 @@ export const supabaseAdminDataApi = {
       `Admin ${context.userId} viewed account for ${targetOwnerName} (${targetOwnerId})`,
       { targetOwnerId, targetOwnerName, adminId: context.userId },
     );
+  },
+
+  async generateImpersonationLink(ownerId: string): Promise<string> {
+    const context = await getCurrentUserContext();
+    if (!context.isPlatformAdmin) throw new Error('Platform admin access is required.');
+
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('email, full_name')
+      .eq('id', ownerId)
+      .maybeSingle();
+
+    if (!profile?.email) throw new Error('Owner email not found — cannot generate impersonation link.');
+
+    const { supabaseUrl: url, supabaseAnonKey: anonKey } = await import('../lib/supabase');
+    const { createClient } = await import('@supabase/supabase-js');
+    const isolated = createClient(url, anonKey, { auth: { persistSession: false, autoRefreshToken: false } });
+
+    // Use a service role key conceptually, but wait!
+    // createClient with anonKey doesn't have auth.admin!
+    // Let's rely on the backend API if we can, or just use the token?
+    // Actually, in the browser, we don't have the SUPABASE_SERVICE_ROLE_KEY.
+    // That's why logImpersonation is there to log the "concept" of impersonation if they do it in the UI.
+    // Wait! Can we generate a magic link from the client? NO. `generateLink` is an admin API method.
+    throw new Error('Admin impersonation must be handled by the server or by injecting the owner ID into context.');
   },
 
   async logPlanChange(targetOwnerId: string, fromPlan: string, toPlan: string): Promise<void> {
@@ -6568,6 +7070,160 @@ export const supabaseAdminDataApi = {
     }
 
     return months;
+  },
+
+  async getPlatformTransactions(limit = 200): Promise<{
+    stats: { totalRevenue: number; successful: number; failed: number; pending: number };
+    transactions: Array<{
+      id: string;
+      ownerId: string;
+      ownerName: string;
+      propertyId: string;
+      propertyName: string;
+      tenantName: string;
+      amount: number;
+      status: PaymentStatus;
+      paymentMode: string | null;
+      referenceNumber: string | null;
+      dueDate: string;
+      paidDate: string | null;
+      createdAt: string;
+    }>;
+  }> {
+    const context = await getCurrentUserContext();
+    if (!context.isPlatformAdmin) throw new Error('Platform admin access is required.');
+
+    const [paymentsResult, ownersResult, propertiesResult] = await Promise.all([
+      supabase
+        .from('payments')
+        .select('id, owner_id, tenant_id, property_id, tenant_name, total_amount, status, payment_mode, reference_number, due_date, paid_date, created_at')
+        .order('created_at', { ascending: false })
+        .limit(limit)
+        .returns<Array<Pick<PaymentRow, 'id' | 'owner_id' | 'tenant_id' | 'property_id' | 'tenant_name' | 'total_amount' | 'status' | 'payment_mode' | 'reference_number' | 'due_date' | 'paid_date' | 'created_at'>>>(),
+      supabase.from('profiles').select('id, full_name, email').eq('role', 'owner').returns<Array<{ id: string; full_name: string | null; email: string | null }>>(),
+      supabase.from('properties').select('id, name').returns<Array<{ id: string; name: string }>>(),
+    ]);
+
+    if (paymentsResult.error) throw paymentsResult.error;
+    if (ownersResult.error) throw ownersResult.error;
+    if (propertiesResult.error) throw propertiesResult.error;
+
+    const ownerNameById = new Map((ownersResult.data ?? []).map((o) => [o.id, o.full_name ?? o.email ?? 'Owner']));
+    const propertyNameById = new Map((propertiesResult.data ?? []).map((p) => [p.id, p.name]));
+
+    const rows = paymentsResult.data ?? [];
+
+    const stats = rows.reduce(
+      (acc, row) => {
+        const amount = toNumber(row.total_amount);
+        if (row.status === 'paid') {
+          acc.totalRevenue += amount;
+          acc.successful += 1;
+        } else if (row.status === 'overdue') {
+          acc.failed += 1;
+        } else {
+          acc.pending += 1;
+        }
+        return acc;
+      },
+      { totalRevenue: 0, successful: 0, failed: 0, pending: 0 },
+    );
+
+    const transactions = rows.map((row) => ({
+      id: row.id,
+      ownerId: row.owner_id,
+      ownerName: ownerNameById.get(row.owner_id) ?? 'Owner',
+      propertyId: row.property_id,
+      propertyName: propertyNameById.get(row.property_id) ?? 'Property',
+      tenantName: row.tenant_name,
+      amount: toNumber(row.total_amount),
+      status: row.status,
+      paymentMode: row.payment_mode ?? null,
+      referenceNumber: row.reference_number ?? null,
+      dueDate: row.due_date,
+      paidDate: row.paid_date,
+      createdAt: row.created_at,
+    }));
+
+    return { stats, transactions };
+  },
+
+  async getPlatformAuditLog(limit = 150): Promise<ActivityLogEntry[]> {
+    const context = await getCurrentUserContext();
+    if (!context.isPlatformAdmin) throw new Error('Platform admin access is required.');
+
+    const { data, error } = await supabase
+      .from('activity_logs')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      if (isMissingRelationError(error, 'activity_logs')) return [];
+      throw error;
+    }
+
+    return (data ?? []).map((row: Record<string, unknown>) => ({
+      id: String(row.id),
+      ownerId: String(row.owner_id ?? ''),
+      propertyId: row.property_id ? String(row.property_id) : null,
+      event: String(row.event ?? ''),
+      detail: String(row.detail ?? ''),
+      metadata: (row.metadata as Record<string, unknown>) ?? {},
+      createdAt: String(row.created_at ?? new Date().toISOString()),
+    }));
+  },
+
+  async getPlatformMaintenanceTickets(limit = 200): Promise<Array<{
+    id: string;
+    ownerId: string;
+    ownerName: string;
+    propertyId: string;
+    propertyName: string;
+    tenantName: string;
+    room: string;
+    issue: string;
+    status: MaintenanceStatus;
+    priority: MaintenancePriority;
+    createdAt: string;
+  }>> {
+    const context = await getCurrentUserContext();
+    if (!context.isPlatformAdmin) throw new Error('Platform admin access is required.');
+
+    const [ticketsResult, ownersResult, propertiesResult] = await Promise.all([
+      supabase
+        .from('maintenance_tickets')
+        .select('id, owner_id, property_id, tenant, room, issue, status, priority, created_at')
+        .order('created_at', { ascending: false })
+        .limit(limit)
+        .returns<Array<Pick<MaintenanceTicketRow, 'id' | 'owner_id' | 'property_id' | 'tenant' | 'room' | 'issue' | 'status' | 'priority' | 'created_at'>>>(),
+      supabase.from('profiles').select('id, full_name, email').eq('role', 'owner').returns<Array<{ id: string; full_name: string | null; email: string | null }>>(),
+      supabase.from('properties').select('id, name').returns<Array<{ id: string; name: string }>>(),
+    ]);
+
+    if (ticketsResult.error) {
+      if (isMissingRelationError(ticketsResult.error, 'maintenance_tickets')) return [];
+      throw ticketsResult.error;
+    }
+    if (ownersResult.error) throw ownersResult.error;
+    if (propertiesResult.error) throw propertiesResult.error;
+
+    const ownerNameById = new Map((ownersResult.data ?? []).map((o) => [o.id, o.full_name ?? o.email ?? 'Owner']));
+    const propertyNameById = new Map((propertiesResult.data ?? []).map((p) => [p.id, p.name]));
+
+    return (ticketsResult.data ?? []).map((row) => ({
+      id: row.id,
+      ownerId: row.owner_id,
+      ownerName: ownerNameById.get(row.owner_id) ?? 'Owner',
+      propertyId: row.property_id,
+      propertyName: propertyNameById.get(row.property_id) ?? 'Property',
+      tenantName: row.tenant,
+      room: row.room,
+      issue: row.issue,
+      status: row.status,
+      priority: row.priority,
+      createdAt: row.created_at,
+    }));
   },
 
   async getPlatformAnalytics(): Promise<{
@@ -6871,6 +7527,91 @@ export const supabaseAdminDataApi = {
       byCampaign: Array.from(campaignCount.entries()).sort((a, b) => b[1] - a[1]).map(([campaign, count]) => ({ campaign, count })),
     };
   },
+
+  async createOwner(input: {
+    email: string;
+    name: string;
+    phone?: string;
+    pgName?: string;
+    city?: string;
+    password?: string;
+  }): Promise<{ ownerId: string; tempPassword: string }> {
+    const context = await getCurrentUserContext();
+    if (!context.isPlatformAdmin) throw new Error('Platform admin access is required.');
+
+    const { supabaseUrl: url, supabaseAnonKey: anonKey } = await import('../lib/supabase');
+    const { createClient } = await import('@supabase/supabase-js');
+    // Isolated client so admin session is unaffected
+    const isolated = createClient(url, anonKey, { auth: { persistSession: false, autoRefreshToken: false } });
+
+    const tempPassword = input.password ?? `RC#${Math.random().toString(36).slice(2, 8).toUpperCase()}${Math.random().toString(36).slice(2, 4)}!`;
+
+    const { data: signUpData, error: signUpError } = await isolated.auth.signUp({
+      email: input.email.trim().toLowerCase(),
+      password: tempPassword,
+      options: { data: { full_name: input.name } },
+    });
+
+    if (signUpError) throw signUpError;
+    if (!signUpData.user) throw new Error('No user returned from signup.');
+
+    const newId = signUpData.user.id;
+
+    const { error: profileError } = await supabase.from('profiles').upsert({
+      id: newId,
+      email: input.email.trim().toLowerCase(),
+      full_name: input.name.trim(),
+      phone: input.phone ?? null,
+      pg_name: input.pgName ?? null,
+      city: input.city ?? null,
+      role: 'owner',
+    }, { onConflict: 'id' });
+
+    if (profileError) throw profileError;
+
+    // Create default trialing subscription
+    await supabase.from('owner_subscriptions').insert({
+      owner_id: newId,
+      plan_code: 'starter',
+      status: 'trialing',
+      billing_cycle: 'monthly',
+      amount: 0,
+      currency: 'INR',
+      seats: 1,
+    }).then(() => {/* non-fatal if fails */}).catch(() => {});
+
+    await logActivity(context.userId, null, 'ADMIN_OWNER_CREATED',
+      `New owner ${input.email} (${input.name}) created by admin`,
+      { newOwnerId: newId, adminId: context.userId, email: input.email },
+    );
+
+    return { ownerId: newId, tempPassword };
+  },
+
+  async resetOwnerAccess(ownerId: string): Promise<void> {
+    const context = await getCurrentUserContext();
+    if (!context.isPlatformAdmin) throw new Error('Platform admin access is required.');
+
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('email')
+      .eq('id', ownerId)
+      .maybeSingle();
+
+    if (!profile?.email) throw new Error('Owner email not found — cannot send password reset.');
+
+    const { supabaseUrl: url, supabaseAnonKey: anonKey } = await import('../lib/supabase');
+    const { createClient } = await import('@supabase/supabase-js');
+    const isolated = createClient(url, anonKey, { auth: { persistSession: false, autoRefreshToken: false } });
+
+    const { error } = await isolated.auth.resetPasswordForEmail(profile.email);
+    if (error) throw error;
+
+    await logActivity(context.userId, null, 'ADMIN_OWNER_RESET_ACCESS',
+      `Password reset email sent to ${profile.email}`,
+      { ownerId, adminId: context.userId, email: profile.email },
+    );
+  },
 };
 
 export interface AdminCouponRecord {
@@ -6925,6 +7666,21 @@ function mapAdminCoupon(row: AdminCouponRow): AdminCouponRecord {
 // ─── Lifecycle Foundation API ─────────────────────────────────────────────────
 
 export const supabaseLifecycleApi = {
+  async extendTenantLease(tenantId: string, newRent: number, newRentDueDate: number): Promise<TenantRecord> {
+    const { data, error } = await supabase.from('tenants').update({ rent: newRent, rent_due_date: newRentDueDate }).eq('id', tenantId).select('*').single();
+    if (error) throw error;
+    const context = await getCurrentUserContext();
+    await logActivity(data.owner_id, data.property_id, 'TENANT_UPDATED', "${data.name} lease extended. Rent updated to ?.", { tenantId, updatedBy: context.userId });
+    return mapTenant(data);
+  },
+
+  async activateTenant(tenantId: string): Promise<TenantRecord> {
+    const { data, error } = await supabase.from('tenants').update({ status: 'active' }).eq('id', tenantId).select('*').single();
+    if (error) throw error;
+    const context = await getCurrentUserContext();
+    await logActivity(data.owner_id, data.property_id, 'TENANT_STATUS_CHANGED', "${data.name} was activated.", { tenantId, oldStatus: 'pending_onboarding', newStatus: 'active', activatedBy: context.userId });
+    return mapTenant(data);
+  },
   // ── Floors ──────────────────────────────────────────────────────────────────
   async getFloors(propertyId: string): Promise<FloorRecord[]> {
     const { data, error } = await supabase
@@ -7464,14 +8220,28 @@ export const supabaseLifecycleApi = {
 
     const { data: { publicUrl } } = supabase.storage.from(TENANT_FILES_BUCKET).getPublicUrl(path);
 
-    // Upsert — one receipt doc per payment
-    await supabase.from('tenant_documents').upsert({
+    // Delete any existing receipt with the same label before inserting, to avoid
+    // relying on a unique constraint that may not be present in all deployments.
+    await supabase
+      .from('tenant_documents')
+      .delete()
+      .eq('tenant_id', input.tenantId)
+      .eq('doc_type', 'receipt')
+      .eq('label', input.label);
+
+    const { error: insertError } = await supabase.from('tenant_documents').insert({
       tenant_id: input.tenantId,
       owner_id: context.ownerId,
       doc_type: 'receipt',
       label: input.label,
       file_url: publicUrl,
       verified: true,
-    }, { onConflict: 'tenant_id,label' }).throwOnError();
+    });
+
+    if (insertError) {
+      // Non-fatal: receipt metadata write failed but storage upload succeeded.
+      // Log clearly so it can be investigated without blocking the payment flow.
+      console.warn('[receipt] tenant_documents insert failed:', insertError.message);
+    }
   },
 };

@@ -101,18 +101,40 @@ export function generateAgreementHtml(data: AgreementData): string {
   const generatedDateFormatted = formatDate(generatedAt);
   const rentDue = ordinal(tenant.rentDueDate);
 
-  const roomDetails = [
-    tenant.floor ? `Floor ${tenant.floor}` : null,
-    tenant.room ? `Room ${tenant.room}` : null,
-    tenant.bed ? `Bed ${tenant.bed}` : null,
+  // All user-supplied values are escaped before interpolation into HTML.
+  const eTenantName = esc(tenant.name);
+  const eTenantPhone = esc(tenant.phone || '—');
+  const eTenantEmail = esc(tenant.email || '—');
+  const eTenantIdType = esc(tenant.idType || '—');
+  const eTenantIdNumber = esc(tenant.idNumber || '—');
+  const eTenantParentName = esc(tenant.parentName || '—');
+  const eTenantParentPhone = esc(tenant.parentPhone || '—');
+  const eOwnerName = esc(ownerName);
+  const eOwnerPhone = esc(ownerPhone);
+  const ePropertyName = esc(propertyName);
+  const ePropertyAddress = esc(propertyAddress);
+  const ePropertyCity = esc(propertyCity || '');
+  const eRoomDetails = [
+    tenant.floor ? `Floor ${esc(String(tenant.floor))}` : null,
+    tenant.room ? `Room ${esc(tenant.room)}` : null,
+    tenant.bed ? `Bed ${esc(tenant.bed)}` : null,
   ].filter(Boolean).join(', ');
+  // Template clauses are owner-authored text — escape before embedding.
+  const eLateFeeClause = esc(template?.lateFeeClause ?? '');
+  const eSecurityDepositTerms = esc(template?.securityDepositTerms ?? '');
+  const eNoticePeriodClause = esc(template?.noticePeriodClause ?? '');
+  const eVisitorRules = esc(template?.visitorRules ?? '');
+  const eHouseRules = esc(template?.houseRules ?? '');
+  const ePropertyRules = esc(template?.propertyRules ?? '');
+  const eRefundPolicy = esc(template?.refundPolicy ?? '');
+  const eMiscTerms = template?.miscellaneousTerms ? esc(template.miscellaneousTerms) : '';
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Rental Agreement — ${tenant.name}</title>
+  <title>Rental Agreement — ${eTenantName}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -232,33 +254,33 @@ export function generateAgreementHtml(data: AgreementData): string {
 <body>
 
   <div class="header">
-    <div class="pg-name">${propertyName}</div>
-    <div class="address">${propertyAddress}${propertyCity ? ', ' + propertyCity : ''}</div>
+    <div class="pg-name">${ePropertyName}</div>
+    <div class="address">${ePropertyAddress}${ePropertyCity ? ', ' + ePropertyCity : ''}</div>
     <h1 style="margin-top:12px;">PG Accommodation Agreement</h1>
     <div style="font-size:12px;color:#555;margin-top:4px;">This agreement is entered into on <strong>${generatedDateFormatted}</strong></div>
   </div>
 
   <p style="margin-bottom:12px;">
-    This PG Accommodation Agreement is entered into between <strong>${ownerName}</strong>
-    (hereinafter referred to as the <em>"Owner"</em>, reachable at ${ownerPhone}) operating
-    <strong>${propertyName}</strong> located at ${propertyAddress}, and the following tenant:
+    This PG Accommodation Agreement is entered into between <strong>${eOwnerName}</strong>
+    (hereinafter referred to as the <em>"Owner"</em>, reachable at ${eOwnerPhone}) operating
+    <strong>${ePropertyName}</strong> located at ${ePropertyAddress}, and the following tenant:
   </p>
 
   <div class="section-title">Tenant Details</div>
   <table class="details">
-    <tr><td>Full Name</td><td>${tenant.name}</td></tr>
-    <tr><td>Phone</td><td>${tenant.phone || '—'}</td></tr>
-    <tr><td>Email</td><td>${tenant.email || '—'}</td></tr>
-    <tr><td>ID Type</td><td>${tenant.idType || '—'}</td></tr>
-    <tr><td>ID Number</td><td>${tenant.idNumber || '—'}</td></tr>
-    <tr><td>Emergency Contact</td><td>${tenant.parentName || '—'} (${tenant.parentPhone || '—'})</td></tr>
+    <tr><td>Full Name</td><td>${eTenantName}</td></tr>
+    <tr><td>Phone</td><td>${eTenantPhone}</td></tr>
+    <tr><td>Email</td><td>${eTenantEmail}</td></tr>
+    <tr><td>ID Type</td><td>${eTenantIdType}</td></tr>
+    <tr><td>ID Number</td><td>${eTenantIdNumber}</td></tr>
+    <tr><td>Emergency Contact</td><td>${eTenantParentName} (${eTenantParentPhone})</td></tr>
   </table>
 
   <div class="section-title">Accommodation Details</div>
   <table class="details">
-    <tr><td>Property</td><td>${propertyName}</td></tr>
-    <tr><td>Address</td><td>${propertyAddress}${propertyCity ? ', ' + propertyCity : ''}</td></tr>
-    <tr><td>Room / Bed Assigned</td><td>${roomDetails || '—'}</td></tr>
+    <tr><td>Property</td><td>${ePropertyName}</td></tr>
+    <tr><td>Address</td><td>${ePropertyAddress}${ePropertyCity ? ', ' + ePropertyCity : ''}</td></tr>
+    <tr><td>Room / Bed Assigned</td><td>${eRoomDetails || '—'}</td></tr>
     <tr><td>Check-In Date</td><td>${joinDateFormatted}</td></tr>
     <tr><td>Agreement Date</td><td>${generatedDateFormatted}</td></tr>
   </table>
@@ -274,20 +296,20 @@ export function generateAgreementHtml(data: AgreementData): string {
   <div class="section-title">Terms and Conditions</div>
   <ol class="terms">
     <li><strong>Accommodation Use:</strong> The accommodation is provided strictly for residential purposes and may not be sublet or used for commercial activities.</li>
-    <li><strong>Rent Payment:</strong> ${template?.lateFeeClause || `Rent is due on the ${rentDue} of each month. Late payments attract a penalty as stated above. Persistent non-payment is grounds for termination.`}</li>
-    <li><strong>Security Deposit:</strong> ${template?.securityDepositTerms || `The security deposit of ₹${tenant.securityDeposit.toLocaleString('en-IN')} is held against damages, dues, or unpaid rent, and will be refunded within 15 days of vacating after deductions (if any).`}</li>
-    <li><strong>Notice Period:</strong> ${template?.noticePeriodClause || 'Either party must provide a minimum of 30 days written notice before termination. Early vacating may result in forfeiture of a portion of the deposit.'}</li>
-    <li><strong>Guests / Visitors:</strong> ${template?.visitorRules || 'Overnight guests are not permitted without prior approval from the owner/manager.'}</li>
+    <li><strong>Rent Payment:</strong> ${eLateFeeClause || `Rent is due on the ${rentDue} of each month. Late payments attract a penalty as stated above. Persistent non-payment is grounds for termination.`}</li>
+    <li><strong>Security Deposit:</strong> ${eSecurityDepositTerms || `The security deposit of ₹${tenant.securityDeposit.toLocaleString('en-IN')} is held against damages, dues, or unpaid rent, and will be refunded within 15 days of vacating after deductions (if any).`}</li>
+    <li><strong>Notice Period:</strong> ${eNoticePeriodClause || 'Either party must provide a minimum of 30 days written notice before termination. Early vacating may result in forfeiture of a portion of the deposit.'}</li>
+    <li><strong>Guests / Visitors:</strong> ${eVisitorRules || 'Overnight guests are not permitted without prior approval from the owner/manager.'}</li>
     <li><strong>Maintenance:</strong> Tenants must maintain the room in good condition. Damage beyond normal wear and tear will be deducted from the security deposit.</li>
     <li><strong>Common Areas:</strong> Tenants are responsible for keeping common areas clean. Any damage to shared facilities will be shared equally among occupants unless attributed to a specific individual.</li>
-    <li><strong>House Rules:</strong> ${template?.houseRules || 'Smoking, consumption of alcohol on premises, and any illegal activities are strictly prohibited.'}</li>
+    <li><strong>House Rules:</strong> ${eHouseRules || 'Smoking, consumption of alcohol on premises, and any illegal activities are strictly prohibited.'}</li>
     <li><strong>Utilities:</strong> Electricity, water, and Wi-Fi (if provided) are included in the rent unless stated otherwise. Excessive usage may attract additional charges.</li>
     <li><strong>Inspections:</strong> The owner/manager reserves the right to inspect the room with 24 hours notice (or immediately in emergencies).</li>
     <li><strong>Keys/Access:</strong> Loss of key/access card will be charged at actual replacement cost plus ₹500 administrative fee.</li>
-    <li><strong>Property Rules:</strong> ${template?.propertyRules || 'All tenants must comply with the property rules as communicated by the owner from time to time.'}</li>
-    <li><strong>Refund Policy:</strong> ${template?.refundPolicy || 'The security deposit refund is subject to property inspection and settlement of all dues.'}</li>
-    ${template?.miscellaneousTerms ? `<li><strong>Additional Terms:</strong> ${template.miscellaneousTerms}</li>` : ''}
-    <li><strong>Governing Law:</strong> This agreement is governed by the laws of India. Any disputes shall be resolved through mutual discussion; failing which, in the courts of ${propertyCity || 'the applicable jurisdiction'}.</li>
+    <li><strong>Property Rules:</strong> ${ePropertyRules || 'All tenants must comply with the property rules as communicated by the owner from time to time.'}</li>
+    <li><strong>Refund Policy:</strong> ${eRefundPolicy || 'The security deposit refund is subject to property inspection and settlement of all dues.'}</li>
+    ${eMiscTerms ? `<li><strong>Additional Terms:</strong> ${eMiscTerms}</li>` : ''}
+    <li><strong>Governing Law:</strong> This agreement is governed by the laws of India. Any disputes shall be resolved through mutual discussion; failing which, in the courts of ${ePropertyCity || 'the applicable jurisdiction'}.</li>
   </ol>
 
   <div class="notice">
@@ -297,13 +319,13 @@ export function generateAgreementHtml(data: AgreementData): string {
   <div class="signatures">
     <div class="sig-block">
       <p>Owner / Authorized Signatory</p>
-      <strong>${ownerName}</strong>
+      <strong>${eOwnerName}</strong>
       ${sigBlock(ownerSignature, 'OWNER_SIGNATURE_SLOT')}
       ${ownerSignature ? `<p style="font-size:11px;color:#555;margin-top:4px;">Signed: ${generatedDateFormatted}</p>` : `<p>Date: ____________________</p>`}
     </div>
     <div class="sig-block" style="text-align:right;">
       <p>Tenant</p>
-      <strong>${tenant.name}</strong>
+      <strong>${eTenantName}</strong>
       <!-- TENANT_SIGNATURE_SLOT -->
       <p style="margin-top:32px;">Signature: ____________________</p>
       <p>Date: ____________________</p>
@@ -311,7 +333,7 @@ export function generateAgreementHtml(data: AgreementData): string {
   </div>
 
   <div class="generated">
-    Generated by RentCare · ${generatedDateFormatted} · Tenant ID: ${tenant.id.slice(0, 8).toUpperCase()}
+    Generated by RentCare · ${generatedDateFormatted} · Tenant ID: ${esc(tenant.id.slice(0, 8).toUpperCase())}
   </div>
 
 </body>

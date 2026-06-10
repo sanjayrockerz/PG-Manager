@@ -61,7 +61,6 @@ const adminSections: { title: string; items: NavItem[] }[] = [
     title: 'Admin',
     items: [
       { id: 'admin-section', label: 'Admin Panel',   icon: Shield },
-      { id: 'tenant-portal', label: 'Tenant Portal', icon: Users },
     ],
   },
 ];
@@ -178,7 +177,7 @@ export function Sidebar({
       <aside
         className={`
           fixed lg:static inset-y-0 left-0 z-50
-          flex flex-col overflow-hidden
+          flex flex-col
           transform transition-all duration-250 ease-in-out
           ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
         `}
@@ -188,6 +187,21 @@ export function Sidebar({
           borderRight: '1px solid #E4E4E7',
         }}
       >
+        {/* Desktop collapse toggle (Premium floating button) */}
+        <button
+          onClick={toggleCollapse}
+          className="hidden lg:flex items-center justify-center absolute bg-white border border-gray-200 rounded-full shadow-sm hover:bg-gray-50 hover:text-gray-900 transition-all z-[60] text-gray-500"
+          style={{ 
+            width: 24, 
+            height: 24, 
+            top: 14,
+            right: -12,
+          }}
+          title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+        >
+          <ChevronRight style={{ width: 14, height: 14, transform: sidebarCollapsed ? 'none' : 'rotate(180deg)', transition: 'transform 0.2s ease-in-out' }} />
+        </button>
+
         {/* ── Logo ─────────────────────────────── */}
         <div
           className="flex items-center flex-shrink-0"
@@ -228,28 +242,6 @@ export function Sidebar({
           >
             <X style={{ width: 14, height: 14 }} />
           </button>
-
-          {/* Desktop collapse toggle */}
-          {!sidebarCollapsed && (
-            <button
-              onClick={toggleCollapse}
-              className="hidden lg:flex items-center justify-center rounded-md hover:bg-zinc-100 transition-colors flex-shrink-0"
-              style={{ width: 24, height: 24, color: '#A1A1AA' }}
-              title="Collapse sidebar"
-            >
-              <ChevronRight style={{ width: 13, height: 13, transform: 'rotate(180deg)' }} />
-            </button>
-          )}
-          {sidebarCollapsed && (
-            <button
-              onClick={toggleCollapse}
-              className="hidden lg:flex items-center justify-center rounded-md hover:bg-zinc-100 transition-colors"
-              style={{ width: 24, height: 24, color: '#A1A1AA', margin: '0 auto' }}
-              title="Expand sidebar"
-            >
-              <ChevronRight style={{ width: 13, height: 13 }} />
-            </button>
-          )}
         </div>
 
         {/* ── Navigation ───────────────────────── */}

@@ -4,7 +4,7 @@ import {
   Plus, Search, Eye, Edit, Trash, Phone, MapPin,
   IndianRupee, CheckCircle, XCircle, Save, AlertTriangle,
   Bed, FileText, Loader2, Calendar, Upload, Download,
-  Clock, AlertCircle, Users, ShieldAlert, ChevronRight,
+  Clock, AlertCircle, Users, ShieldAlert, ChevronRight, Copy,
 } from 'lucide-react';
 import { validateTenantForm, type TenantFormErrors } from '../utils/validation';
 import { Button } from './ui/button';
@@ -20,8 +20,6 @@ import {
   AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from './ui/alert-dialog';
-import { Sheet, SheetContent } from './ui/sheet';
-import { TenantDetail } from './TenantDetail';
 import { toast } from 'sonner';
 import { useProperty } from '../contexts/PropertyContext';
 import {
@@ -119,8 +117,9 @@ export function Tenants({ onViewTenant }: TenantsProps) {
   const [deletingTenant, setDeletingTenant] = useState<TenantRecord | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
-  // Tenant detail drawer
-  const [drawerTenantId, setDrawerTenantId] = useState<string | null>(null);
+  // Post-creation invite dialog
+  const [inviteDialogTenant, setInviteDialogTenant] = useState<TenantRecord | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
 
   // Bulk select
   const [selectedTenantIds, setSelectedTenantIds] = useState<Set<string>>(new Set());
@@ -172,7 +171,7 @@ export function Tenants({ onViewTenant }: TenantsProps) {
       getPropertyName(t.propertyId).toLowerCase().includes(q);
     const matchesStatus = filterStatus === 'all' || t.status === filterStatus;
     return matchesSearch && matchesStatus;
-  }), [tenants, searchQuery, filterStatus]); // eslint-disable-line react-hooks/exhaustive-deps
+  }), [tenants, searchQuery, filterStatus, properties]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const filterCounts = useMemo(() => ({
     all: tenants.length,
@@ -228,12 +227,7 @@ export function Tenants({ onViewTenant }: TenantsProps) {
       setAddErrors({});
       setAddForm(makeEmptyForm(properties[0]?.id));
       setIdDocFile(null);
-      // Show access instructions — tenant must self-register using their registered email/phone
-      const appUrl = window.location.origin;
-      toast.success(
-        `Tenant added! Share this link with ${created.name} to set up their portal account: ${appUrl}`,
-        { duration: 8000 },
-      );
+      setInviteDialogTenant(created);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to add tenant');
     } finally {
@@ -309,19 +303,19 @@ export function Tenants({ onViewTenant }: TenantsProps) {
     : [];
 
   const fieldClass = (err?: string) =>
-    `w-full h-10 px-3 text-sm rounded-md border transition-colors focus:outline-none focus:ring-2 focus:ring-purple-400/30 focus:border-purple-500
-     ${err ? 'border-red-400 bg-red-50' : 'border-gray-300 bg-white'}`;
+    `w-full h-10 px-3 text-sm rounded-md border transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-400/30 focus:border-indigo-500
+     ${err ? 'border-red-400 bg-red-50' : 'border-gray-200 bg-white'}`;
 
   const selectClass = (err?: string) =>
-    `w-full h-10 px-3 text-sm rounded-md border transition-colors focus:outline-none focus:ring-2 focus:ring-purple-400/30 focus:border-purple-500 appearance-none
-     ${err ? 'border-red-400 bg-red-50' : 'border-gray-300 bg-white'}`;
+    `w-full h-10 px-3 text-sm rounded-md border transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-400/30 focus:border-indigo-500 appearance-none
+     ${err ? 'border-red-400 bg-red-50' : 'border-gray-200 bg-white'}`;
 
   const FieldError = ({ msg }: { msg?: string }) =>
     msg ? <p className="text-xs text-red-600 font-medium mt-1">{msg}</p> : null;
 
   const WizardStepIndicator = () => (
     <div className="flex items-center gap-0 mb-4">
-      {(['Basic', 'Guardian', 'Accommodation', 'Review'] as const).map((label, i) => {
+      {(['Basic', 'Guardian', 'Accommodation', 'Documents'] as const).map((label, i) => {
         const step = i + 1;
         const active = addStep === step;
         const done = addStep > step;
@@ -647,7 +641,7 @@ export function Tenants({ onViewTenant }: TenantsProps) {
         return (
           <div className="flex flex-col gap-3.5">
             <WizardStepIndicator />
-            <p className="text-sm font-semibold text-gray-900">Review</p>
+            <p className="text-sm font-semibold text-gray-900">ID &amp; Documents</p>
 
             <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg grid grid-cols-2 gap-1.5">
               {([
@@ -950,7 +944,7 @@ export function Tenants({ onViewTenant }: TenantsProps) {
               ) : filteredTenants.map((tenant, i) => (
                 <tr
                   key={tenant.id}
-                  onClick={() => setDrawerTenantId(tenant.id)}
+                  onClick={() => onViewTenant(tenant.id)}
                   style={{
                     borderBottom: i < filteredTenants.length - 1 ? '1px solid #F4F4F6' : 'none',
                     background: selectedTenantIds.has(tenant.id) ? '#F5F3FF' : tenant.status === 'payment_overdue' ? '#FFFAFA' : '#fff',
@@ -1016,7 +1010,7 @@ export function Tenants({ onViewTenant }: TenantsProps) {
                     <div className="flex items-center gap-1">
                       <button
                         title="View profile"
-                        onClick={() => setDrawerTenantId(tenant.id)}
+                        onClick={() => onViewTenant(tenant.id)}
                         className="ds-btn ds-btn-primary"
                         style={{ fontSize: 11, padding: '4px 8px', gap: 4 }}
                       >
@@ -1053,7 +1047,7 @@ export function Tenants({ onViewTenant }: TenantsProps) {
           ) : filteredTenants.map((tenant) => (
             <div
               key={tenant.id}
-              onClick={() => setDrawerTenantId(tenant.id)}
+              onClick={() => onViewTenant(tenant.id)}
               style={{
                 border: `1px solid ${tenant.status === 'payment_overdue' ? '#FECACA' : '#E4E4E7'}`,
                 borderRadius: 10, padding: '12px 14px',
@@ -1137,18 +1131,6 @@ export function Tenants({ onViewTenant }: TenantsProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* ── Tenant Detail Drawer ─────────────── */}
-      <Sheet open={!!drawerTenantId} onOpenChange={(v) => { if (!v) setDrawerTenantId(null); }}>
-        <SheetContent side="right" className="sm:max-w-4xl w-full overflow-y-auto p-0">
-          {drawerTenantId && (
-            <TenantDetail
-              tenantId={drawerTenantId}
-              onBack={() => setDrawerTenantId(null)}
-            />
-          )}
-        </SheetContent>
-      </Sheet>
 
       {/* ── Edit Tenant Modal ────────────────── */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
@@ -1308,6 +1290,79 @@ export function Tenants({ onViewTenant }: TenantsProps) {
             {importResult && importResult.failed > 0 && (
               <button onClick={resetImport} className="ds-btn ds-btn-secondary" style={{ fontSize: 12, padding: '6px 12px' }}>Try Again</button>
             )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Tenant Invite Dialog ─────────────── */}
+      <Dialog open={!!inviteDialogTenant} onOpenChange={(v) => { if (!v) { setInviteDialogTenant(null); setLinkCopied(false); } }}>
+        <DialogContent style={{ maxWidth: 440 }}>
+          <DialogHeader>
+            <DialogTitle style={{ fontSize: 16, fontWeight: 700, color: '#0A0A0B' }}>
+              Tenant Added — Share Portal Access
+            </DialogTitle>
+            <DialogDescription>
+              {inviteDialogTenant?.name} has been added. Share the portal link so they can set up their account.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, paddingTop: 4, paddingBottom: 4 }}>
+            {/* Tenant summary */}
+            <div style={{ padding: '10px 14px', background: '#F8FAFC', border: '1px solid #E4E4E7', borderRadius: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {[
+                ['Name', inviteDialogTenant?.name ?? '—'],
+                ['Phone', inviteDialogTenant?.phone ?? '—'],
+                ['Email', inviteDialogTenant?.email || '—'],
+                ['Room', inviteDialogTenant?.room ?? '—'],
+              ].map(([label, value]) => (
+                <div key={label} className="flex justify-between items-center">
+                  <span style={{ fontSize: 11, color: '#A1A1AA' }}>{label}</span>
+                  <span style={{ fontSize: 12, fontWeight: 500, color: '#0A0A0B' }}>{value}</span>
+                </div>
+              ))}
+            </div>
+
+            {/* Portal link */}
+            <div style={{ padding: '10px 14px', background: '#EEF2FF', border: '1px solid #C7D2FE', borderRadius: 8 }}>
+              <p style={{ fontSize: 11, fontWeight: 600, color: '#4338CA', marginBottom: 6 }}>Portal Setup Link</p>
+              <div className="flex items-center gap-2">
+                <code style={{ flex: 1, fontSize: 12, color: '#3730A3', background: '#fff', border: '1px solid #C7D2FE', borderRadius: 6, padding: '6px 10px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {window.location.origin}
+                </code>
+                <button
+                  onClick={() => {
+                    void navigator.clipboard.writeText(window.location.origin);
+                    setLinkCopied(true);
+                    setTimeout(() => setLinkCopied(false), 2500);
+                  }}
+                  className="ds-btn ds-btn-secondary"
+                  style={{ fontSize: 11, padding: '5px 10px', gap: 4, flexShrink: 0, borderColor: '#C7D2FE', color: linkCopied ? '#059669' : '#4338CA' }}
+                >
+                  {linkCopied ? <CheckCircle style={{ width: 12, height: 12 }} /> : <Copy style={{ width: 12, height: 12 }} />}
+                  {linkCopied ? 'Copied!' : 'Copy'}
+                </button>
+              </div>
+            </div>
+
+            {/* Instructions */}
+            <div style={{ padding: '10px 14px', background: '#FFFBEB', border: '1px solid #FDE68A', borderRadius: 8 }}>
+              <p style={{ fontSize: 12, fontWeight: 600, color: '#92400E', marginBottom: 4 }}>Instructions for {inviteDialogTenant?.name}</p>
+              <ol style={{ fontSize: 11, color: '#B45309', lineHeight: 1.7, paddingLeft: 16, margin: 0 }}>
+                <li>Open the link above on your phone or computer</li>
+                <li>Select <strong>"Tenant Portal"</strong></li>
+                <li>Sign in using your registered phone number: <strong>{inviteDialogTenant?.phone}</strong></li>
+                <li>Enter the OTP and access your dashboard</li>
+              </ol>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <CheckCircle style={{ width: 13, height: 13, color: '#059669', flexShrink: 0 }} />
+              <p style={{ fontSize: 11, color: '#52525B' }}>First rent invoice and security deposit record have been created automatically.</p>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setInviteDialogTenant(null); setLinkCopied(false); }}>Done</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

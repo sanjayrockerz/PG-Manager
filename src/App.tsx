@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { PropertyProvider } from './contexts/PropertyContext';
+import { WorkspaceProvider } from './contexts/WorkspaceContext';
 import { Dashboard } from './components/Dashboard';
 import { Tenants } from './components/Tenants';
 import { TenantDetail } from './components/TenantDetail';
@@ -20,6 +21,7 @@ import { Sidebar } from './components/Sidebar';
 import { MobileNav } from './components/MobileNav';
 import { Header } from './components/Header';
 import { OTPLogin } from './components/OTPLogin';
+import { AdminLogin } from './components/AdminLogin';
 import { OTPSignup } from './components/OTPSignup';
 import { PortalSelector, type PortalType } from './components/PortalSelector';
 import { Pricing } from './components/Pricing';
@@ -104,7 +106,7 @@ function AppContent() {
       return;
     }
 
-    if (isPlatformAdminRole(user.role) && activeTab !== 'admin-section' && activeTab !== 'tenant-portal') {
+    if (isPlatformAdminRole(user.role) && activeTab !== 'admin-section') {
       setActiveTab('admin-section');
       setSelectedTenantId(null);
       return;
@@ -194,6 +196,18 @@ function AppContent() {
     // Step 1: no portal selected — show the portal selector
     if (!selectedPortal) {
       return <PortalSelector onSelect={handlePortalSelect} />;
+    }
+
+    // Admin Portal uses an isolated email+password sign-in — no Google/magic-link/OTP.
+    if (selectedPortal === 'admin') {
+      return (
+        <AdminLogin
+          onBack={() => {
+            setSelectedPortal(null);
+            writeStoredPortal(null);
+          }}
+        />
+      );
     }
 
     // Step 2: portal selected — show login with portal context
@@ -330,12 +344,26 @@ function AppContent() {
     }
   };
 
+  // Platform admins get a full-screen admin portal — no owner sidebar/header overlay
+  if (isPlatformAdminRole(user.role) && activeTab === 'admin-section') {
+    return (
+      <PropertyProvider>
+        <WorkspaceProvider>
+          <PageGuard action="page:admin-section">
+            <AdminSection />
+          </PageGuard>
+        </WorkspaceProvider>
+      </PropertyProvider>
+    );
+  }
+
   return (
     <PropertyProvider>
+      <WorkspaceProvider>
       <div className="flex h-screen bg-[#F8FAFC] overflow-hidden">
         {/* Sidebar for desktop */}
-        <Sidebar 
-          activeTab={activeTab} 
+        <Sidebar
+          activeTab={activeTab}
           setActiveTab={setActiveTabWithRoleGuard}
           sidebarOpen={sidebarOpen}
           setSidebarOpen={setSidebarOpen}
@@ -346,12 +374,12 @@ function AppContent() {
 
         {/* Main content */}
         <div className="flex-1 flex flex-col overflow-hidden">
-          <Header 
-            setSidebarOpen={setSidebarOpen} 
+          <Header
+            setSidebarOpen={setSidebarOpen}
             currentPage={activeTab}
             onNotificationClick={() => setActiveTabWithRoleGuard('notifications')}
           />
-          
+
           <main className="flex-1 overflow-y-auto pb-20 md:pb-0">
             <PageFrame>
               {renderContent()}
@@ -362,6 +390,7 @@ function AppContent() {
           <MobileNav activeTab={activeTab} setActiveTab={setActiveTabWithRoleGuard} userRole={user.role} />
         </div>
       </div>
+      </WorkspaceProvider>
     </PropertyProvider>
   );
 }

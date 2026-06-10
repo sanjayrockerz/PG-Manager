@@ -214,24 +214,27 @@ const PLATFORM_ADMIN_PERMISSIONS: PermissionMatrix = {
   'page:announcements': false,
   'page:settings': true,
   'page:admin-section': true,
-  'page:tenant-portal': true,
+  'page:tenant-portal': false,
   'page:support': true,
-  'properties:create': true,
-  'properties:edit': true,
-  'properties:delete': true,
-  'tenants:create': true,
-  'tenants:edit': true,
-  'tenants:delete': true,
-  'payments:view': true,
-  'payments:update-status': true,
-  'payments:add-charge': true,
-  'maintenance:create': true,
-  'maintenance:update-status': true,
-  'maintenance:add-note': true,
-  'announcements:create': true,
-  'announcements:edit': true,
-  'announcements:delete': true,
-  'announcements:pin': true,
+  // Owner-domain lifecycle entities (properties, tenants, payments, maintenance,
+  // announcements) are owned and operated by owner/manager roles — platform admin
+  // has visibility via the Admin Panel's read-only owner detail view, not direct CRUD.
+  'properties:create': false,
+  'properties:edit': false,
+  'properties:delete': false,
+  'tenants:create': false,
+  'tenants:edit': false,
+  'tenants:delete': false,
+  'payments:view': false,
+  'payments:update-status': false,
+  'payments:add-charge': false,
+  'maintenance:create': false,
+  'maintenance:update-status': false,
+  'maintenance:add-note': false,
+  'announcements:create': false,
+  'announcements:edit': false,
+  'announcements:delete': false,
+  'announcements:pin': false,
   'settings:view': true,
   'settings:edit': true,
   'team:manage': true,
@@ -259,6 +262,29 @@ export function hasPermission(role: string | null | undefined, action: Permissio
   const matrix = ROLE_PERMISSION_MAP[role as UserRole];
   if (!matrix) return false;
   return matrix[action] ?? false;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROPERTY-SCOPED AUTHORIZATION
+// A user can hold different roles on different properties (Owner of A, Manager of
+// B). hasPermission() answers the *global* question; hasPropertyPermission()
+// answers "can this user do <action> on the property where they hold <accessRole>".
+// accessRole comes from WorkspaceContext / the property_access view.
+// ─────────────────────────────────────────────────────────────────────────────
+export type PropertyAccessRole = 'owner' | 'manager' | 'staff';
+
+const WORKSPACE_ROLE_TO_MATRIX: Record<PropertyAccessRole, PermissionMatrix> = {
+  owner: OWNER_PERMISSIONS,
+  manager: OWNER_MANAGER_PERMISSIONS,
+  staff: STAFF_PERMISSIONS,
+};
+
+export function hasPropertyPermission(
+  accessRole: PropertyAccessRole | null | undefined,
+  action: PermissionAction,
+): boolean {
+  if (!accessRole) return false;
+  return WORKSPACE_ROLE_TO_MATRIX[accessRole]?.[action] ?? false;
 }
 
 // Maps each navigable tab to its required permission action

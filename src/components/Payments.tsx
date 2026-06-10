@@ -12,9 +12,9 @@ import {
 import { useProperty } from '../contexts/PropertyContext';
 import { useRealtimeRefresh } from '../hooks/useRealtimeRefresh';
 import { isDemoModeEnabled, getPayments, updatePaymentStatusRecord, addPaymentChargeRecord, getTenantById } from '../services/dataService';
+import { supabaseOwnerDataApi } from '../services/supabaseData';
 import type { PaymentRecord, PaymentStatus } from '../services/supabaseData';
-import { openReceiptWindow } from '../services/receiptGenerator';
-import { useDateRange } from '../contexts/DateRangeContext';
+import { openReceiptWindow, openInvoiceWindow } from '../services/receiptGenerator';
 
 // ── Period helpers ──────────────────────────────────────────────────────────
 type PeriodMode = 'all' | 'last-month' | 'this-month' | 'next-month';
@@ -86,12 +86,21 @@ interface PaymentsProps {
 
 export function Payments({ onNavigate }: PaymentsProps) {
   const { properties, selectedProperty } = useProperty();
-  const { range, label: rangeLabel } = useDateRange();
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  // Receipt/invoice "Issued by" authority — always the registered property
+  // owner, fetched from the database (not the logged-in user).
+  const [authorityName, setAuthorityName] = useState<string | undefined>(undefined);
+
+  useEffect(() => {
+    if (isDemoModeEnabled()) return;
+    supabaseOwnerDataApi.getAuthorityProfile()
+      .then((profile) => setAuthorityName(profile?.name || undefined))
+      .catch(() => setAuthorityName(undefined));
+  }, []);
   const [filterStatus, setFilterStatus] = useState<'all' | PaymentStatus>('all');
   // period state kept for backward compat with local aging bucket picker; removed global period conflict
-  const [period, setPeriod] = useState<PeriodMode>('this-month');
+  const [period, setPeriod] = useState<PeriodMode>('all');
 
   // Mark paid modal
   const [markPaidOpen, setMarkPaidOpen] = useState(false);
@@ -138,13 +147,15 @@ export function Payments({ onNavigate }: PaymentsProps) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  // Period-filtered payment set — driven by global DateRangeContext
+  // Period-filtered payment set — driven by local period picker
+  const localPeriodRange = useMemo(() => getPeriodRange(period), [period]);
   const periodPayments = useMemo(() => {
+    if (!localPeriodRange) return payments; // 'all' shows everything
     return payments.filter((p) => {
       const d = new Date(p.dueDate);
-      return d >= range.start && d <= range.end;
+      return d >= localPeriodRange.start && d <= localPeriodRange.end;
     });
-  }, [payments, range]);
+  }, [payments, localPeriodRange]);
 
   const unstampedOverdue = periodPayments.filter(
     (p) => p.status === 'pending' && new Date(p.dueDate) < today,
@@ -254,7 +265,12 @@ export function Payments({ onNavigate }: PaymentsProps) {
   };
 
   const handleOpenReceipt = (payment: PaymentRecord) => {
-    openReceiptWindow({ payment, propertyName: getPropertyName(payment.propertyId) });
+    const data = { payment, propertyName: getPropertyName(payment.propertyId), ownerName: authorityName };
+    if (payment.status === 'paid') {
+      openReceiptWindow(data);
+    } else {
+      openInvoiceWindow(data);
+    }
   };
 
   const handleWhatsAppReminder = async (payment: PaymentRecord) => {
@@ -628,12 +644,12 @@ export function Payments({ onNavigate }: PaymentsProps) {
                         <MessageCircle style={{ width: 12, height: 12, color: '#25D366' }} />
                       </button>
                       <button
-                        title="View receipt"
+                        title={payment.status === 'paid' ? 'View receipt' : 'View invoice'}
                         onClick={() => handleOpenReceipt(payment)}
                         className="ds-btn ds-btn-secondary"
                         style={{ fontSize: 11, padding: '4px 6px', minWidth: 0 }}
                       >
-                        <Receipt style={{ width: 12, height: 12, color: '#6366F1' }} />
+                        <Receipt style={{ width: 12, height: 12, color: payment.status === 'paid' ? '#16a34a' : '#6366F1' }} />
                       </button>
                     </div>
                   </td>
@@ -644,7 +660,7 @@ export function Payments({ onNavigate }: PaymentsProps) {
         </div>
 
         {/* Mobile cards */}
-        <div className="md:hidden" style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div className="md:hidden flex flex-col" style={{ padding: 12, gap: 8 }}>
           {filteredPayments.length === 0 ? (
             <p style={{ textAlign: 'center', fontSize: 13, color: '#A1A1AA', padding: '32px 0' }}>No payments found</p>
           ) : filteredPayments.map((payment) => (
@@ -733,7 +749,8 @@ export function Payments({ onNavigate }: PaymentsProps) {
                   className="ds-btn ds-btn-secondary"
                   style={{ flex: 1, fontSize: 12, padding: '6px 0', justifyContent: 'center', gap: 4 }}
                 >
-                  <Receipt style={{ width: 12, height: 12, color: '#6366F1' }} /> Receipt
+                  <Receipt style={{ width: 12, height: 12, color: payment.status === 'paid' ? '#16a34a' : '#6366F1' }} />
+                  {payment.status === 'paid' ? 'Receipt' : 'Invoice'}
                 </button>
               </div>
             </div>

@@ -1,67 +1,90 @@
 import { useMemo, useState } from 'react';
-import { Bed, Building2, DoorClosed, DoorOpen, Filter, Users } from 'lucide-react';
+import { Bed, Building2, DoorClosed, DoorOpen, Grid3x3, Users } from 'lucide-react';
 import { BuildingView } from './BuildingView';
 import { useProperty } from '../contexts/PropertyContext';
 
+type RoomFilter = 'all' | 'vacant' | 'occupied' | 'maintenance';
+
+const ROOM_STATUS: Record<string, { label: string; bg: string; color: string; border: string }> = {
+  occupied:    { label: 'Occupied',    bg: '#ECFDF5', color: '#065F46', border: '#A7F3D0' },
+  vacant:      { label: 'Vacant',      bg: '#F4F4F6', color: '#52525B', border: '#E4E4E7' },
+  maintenance: { label: 'Maintenance', bg: '#FFFBEB', color: '#92400E', border: '#FDE68A' },
+};
+
+const FILTER_BORDER: Record<RoomFilter, string> = {
+  all:         '#E4E4E7',
+  occupied:    '#A7F3D0',
+  vacant:      '#E4E4E7',
+  maintenance: '#FDE68A',
+};
+
 export function Rooms() {
   const { selectedProperty, properties } = useProperty();
-  const [filterStatus, setFilterStatus] = useState<'all' | 'vacant' | 'occupied' | 'maintenance'>('all');
-  const [viewMode, setViewMode] = useState<'grid' | 'building'>('building');
+  const [filterStatus, setFilterStatus] = useState<RoomFilter>('all');
+  const [viewMode, setViewMode] = useState<'building' | 'grid'>('building');
 
   const rooms = useMemo(() => {
     if (selectedProperty === 'all') {
-      return properties.flatMap((property) =>
-        property.rooms.map((room) => ({
-          ...room,
-          propertyName: property.name,
-        })),
-      );
+      return properties.flatMap((p) => p.rooms.map((r) => ({ ...r, propertyName: p.name })));
     }
-
-    const property = properties.find((entry) => entry.id === selectedProperty);
-    if (!property) {
-      return [];
-    }
-
-    return property.rooms.map((room) => ({
-      ...room,
-      propertyName: property.name,
-    }));
+    const prop = properties.find((p) => p.id === selectedProperty);
+    return prop ? prop.rooms.map((r) => ({ ...r, propertyName: prop.name })) : [];
   }, [properties, selectedProperty]);
 
-  const filteredRooms = rooms.filter((room) => (filterStatus === 'all' ? true : room.status === filterStatus));
+  const filteredRooms = filterStatus === 'all' ? rooms : rooms.filter((r) => r.status === filterStatus);
 
   const stats = {
-    total: rooms.length,
-    occupied: rooms.filter((room) => room.status === 'occupied').length,
-    vacant: rooms.filter((room) => room.status === 'vacant').length,
-    maintenance: rooms.filter((room) => room.status === 'maintenance').length,
+    total:       rooms.length,
+    occupied:    rooms.filter((r) => r.status === 'occupied').length,
+    vacant:      rooms.filter((r) => r.status === 'vacant').length,
+    maintenance: rooms.filter((r) => r.status === 'maintenance').length,
   };
 
+  const filterOptions: { key: RoomFilter; label: string; count: number }[] = [
+    { key: 'all',         label: 'All',         count: stats.total },
+    { key: 'occupied',    label: 'Occupied',    count: stats.occupied },
+    { key: 'vacant',      label: 'Vacant',      count: stats.vacant },
+    { key: 'maintenance', label: 'Maintenance', count: stats.maintenance },
+  ];
+
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+      {/* ── Header ─────────────────────────── */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-gray-900">Rooms</h1>
-          <p className="text-gray-600 mt-1">Live room inventory and occupancy overview</p>
+          <h1 className="ds-page-title">Rooms &amp; Beds</h1>
+          <p style={{ fontSize: 13, color: '#A1A1AA', marginTop: 2 }}>
+            Live inventory — {stats.occupied} occupied · {stats.vacant} vacant · {stats.maintenance} maintenance
+          </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center rounded-lg overflow-hidden" style={{ border: '1px solid #E4E4E7', background: '#fff' }}>
           <button
             onClick={() => setViewMode('building')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg ${
-              viewMode === 'building' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '6px 12px', fontSize: 12, fontWeight: 500, cursor: 'pointer',
+              background: viewMode === 'building' ? '#6366F1' : 'transparent',
+              color: viewMode === 'building' ? '#fff' : '#52525B',
+              border: 'none', borderRight: '1px solid #E4E4E7',
+              transition: 'all 0.15s',
+            }}
           >
-            <Building2 className="w-4 h-4" />
+            <Building2 style={{ width: 13, height: 13 }} />
             Building
           </button>
           <button
             onClick={() => setViewMode('grid')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg ${
-              viewMode === 'grid' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-            }`}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '6px 12px', fontSize: 12, fontWeight: 500, cursor: 'pointer',
+              background: viewMode === 'grid' ? '#6366F1' : 'transparent',
+              color: viewMode === 'grid' ? '#fff' : '#52525B',
+              border: 'none',
+              transition: 'all 0.15s',
+            }}
           >
-            <Filter className="w-4 h-4" />
+            <Grid3x3 style={{ width: 13, height: 13 }} />
             Grid
           </button>
         </div>
@@ -71,130 +94,105 @@ export function Rooms() {
         <BuildingView />
       ) : (
         <>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="bg-white rounded-xl p-4 border border-gray-200">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-blue-50 rounded-lg">
-                  <Bed className="w-5 h-5 text-blue-600" />
+          {/* ── Stat strip ──────────────────── */}
+          <div className="ds-card flex items-center" style={{ padding: 0, overflow: 'hidden' }}>
+            {[
+              { label: 'Total Rooms', value: stats.total,       icon: Bed,        iconBg: '#EEF2FF', iconColor: '#6366F1' },
+              { label: 'Occupied',    value: stats.occupied,    icon: DoorClosed,  iconBg: '#ECFDF5', iconColor: '#059669' },
+              { label: 'Vacant',      value: stats.vacant,      icon: DoorOpen,    iconBg: '#F4F4F6', iconColor: '#52525B' },
+              { label: 'Maintenance', value: stats.maintenance, icon: Grid3x3,    iconBg: '#FFFBEB', iconColor: '#D97706' },
+            ].map(({ label, value, icon: Icon, iconBg, iconColor }, i, arr) => (
+              <div key={label} className="flex items-center" style={{ flex: 1 }}>
+                <div style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 10, flex: 1 }}>
+                  <div style={{ width: 32, height: 32, borderRadius: 8, background: iconBg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <Icon style={{ width: 14, height: 14, color: iconColor }} />
+                  </div>
+                  <div>
+                    <p style={{ fontSize: 10, color: '#A1A1AA', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>{label}</p>
+                    <p style={{ fontSize: 18, fontWeight: 700, color: '#0A0A0B', fontVariantNumeric: 'tabular-nums' }}>{value}</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-xs text-gray-600">Total Rooms</p>
-                  <p className="text-gray-900">{stats.total}</p>
-                </div>
+                {i < arr.length - 1 && <div style={{ width: 1, height: 36, background: '#F1F1F3', flexShrink: 0 }} />}
               </div>
-            </div>
-
-            <div className="bg-white rounded-xl p-4 border border-gray-200">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-green-50 rounded-lg">
-                  <DoorClosed className="w-5 h-5 text-green-600" />
-                </div>
-                <div>
-                  <p className="text-xs text-gray-600">Occupied</p>
-                  <p className="text-gray-900">{stats.occupied}</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-xl p-4 border border-gray-200">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-purple-50 rounded-lg">
-                  <DoorOpen className="w-5 h-5 text-purple-600" />
-                </div>
-                <div>
-                  <p className="text-xs text-gray-600">Vacant</p>
-                  <p className="text-gray-900">{stats.vacant}</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-white rounded-xl p-4 border border-gray-200">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-orange-50 rounded-lg">
-                  <Filter className="w-5 h-5 text-orange-600" />
-                </div>
-                <div>
-                  <p className="text-xs text-gray-600">Maintenance</p>
-                  <p className="text-gray-900">{stats.maintenance}</p>
-                </div>
-              </div>
-            </div>
+            ))}
           </div>
 
-          <div className="bg-white rounded-xl border border-gray-200 p-4">
-            <div className="flex gap-2 overflow-x-auto">
-              {(['all', 'vacant', 'occupied', 'maintenance'] as const).map((status) => (
+          {/* ── Filter bar ──────────────────── */}
+          <div className="ds-card" style={{ padding: '8px 12px' }}>
+            <div className="flex items-center gap-1.5 overflow-x-auto">
+              {filterOptions.map(({ key, label, count }) => (
                 <button
-                  key={status}
-                  onClick={() => setFilterStatus(status)}
-                  className={`px-4 py-2 rounded-lg text-sm whitespace-nowrap ${
-                    filterStatus === status ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                  }`}
+                  key={key}
+                  onClick={() => setFilterStatus(key)}
+                  style={{
+                    fontSize: 11, fontWeight: 500, padding: '3px 9px', borderRadius: 99, cursor: 'pointer',
+                    whiteSpace: 'nowrap', flexShrink: 0,
+                    border: `1px solid ${filterStatus === key ? '#6366F1' : '#E4E4E7'}`,
+                    background: filterStatus === key ? '#6366F1' : '#fff',
+                    color: filterStatus === key ? '#fff' : '#52525B',
+                    transition: 'all 0.15s',
+                  }}
                 >
-                  {status === 'all' ? 'All' : status.charAt(0).toUpperCase() + status.slice(1)}
+                  {label}
+                  <span style={{ marginLeft: 4, opacity: 0.7, fontSize: 10 }}>{count}</span>
                 </button>
               ))}
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {filteredRooms.map((room) => (
-              <div
-                key={room.id}
-                className={`bg-white rounded-xl border p-5 ${
-                  room.status === 'vacant'
-                    ? 'border-purple-200'
-                    : room.status === 'occupied'
-                      ? 'border-green-200'
-                      : 'border-orange-200'
-                }`}
-              >
-                <div className="flex items-start justify-between mb-3">
-                  <div>
-                    <h3 className="text-gray-900">Room {room.number}</h3>
-                    <p className="text-xs text-gray-500 mt-1">{room.propertyName}</p>
-                  </div>
-                  <span
-                    className={`px-2 py-1 rounded-full text-xs capitalize ${
-                      room.status === 'vacant'
-                        ? 'bg-purple-100 text-purple-700'
-                        : room.status === 'occupied'
-                          ? 'bg-green-100 text-green-700'
-                          : 'bg-orange-100 text-orange-700'
-                    }`}
+          {/* ── Room grid ───────────────────── */}
+          {filteredRooms.length === 0 ? (
+            <div className="ds-card" style={{ padding: '40px 20px', textAlign: 'center' }}>
+              <DoorOpen style={{ width: 32, height: 32, color: '#D4D4D8', margin: '0 auto 12px' }} />
+              <p style={{ fontSize: 14, fontWeight: 500, color: '#52525B' }}>No rooms match this filter</p>
+              <p style={{ fontSize: 12, color: '#A1A1AA', marginTop: 4 }}>Try selecting a different status</p>
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
+              {filteredRooms.map((room) => {
+                const st = ROOM_STATUS[room.status] ?? ROOM_STATUS['vacant'];
+                return (
+                  <div
+                    key={room.id}
+                    className="ds-card"
+                    style={{ padding: '14px 16px', borderLeft: `3px solid ${st.border}` }}
                   >
-                    {room.status}
-                  </span>
-                </div>
+                    <div className="flex items-start justify-between mb-3">
+                      <div>
+                        <p style={{ fontSize: 14, fontWeight: 600, color: '#0A0A0B' }}>Room {room.number}</p>
+                        <p style={{ fontSize: 11, color: '#A1A1AA', marginTop: 1 }}>{room.propertyName}</p>
+                      </div>
+                      <span style={{
+                        fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: 99,
+                        background: st.bg, color: st.color, border: `1px solid ${st.border}`,
+                        textTransform: 'capitalize', flexShrink: 0,
+                      }}>
+                        {st.label}
+                      </span>
+                    </div>
 
-                <div className="space-y-2 text-sm">
-                  <div className="flex items-center justify-between text-gray-600">
-                    <span>Floor</span>
-                    <span className="text-gray-900">{room.floor}</span>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                      {[
+                        { label: 'Floor',  value: `Floor ${room.floor}` },
+                        { label: 'Type',   value: room.type.charAt(0).toUpperCase() + room.type.slice(1) },
+                        { label: 'Rent',   value: `₹${room.rent.toLocaleString('en-IN')}` },
+                      ].map(({ label, value }) => (
+                        <div key={label} className="flex items-center justify-between">
+                          <span style={{ fontSize: 11, color: '#A1A1AA' }}>{label}</span>
+                          <span style={{ fontSize: 12, fontWeight: 500, color: '#52525B' }}>{value}</span>
+                        </div>
+                      ))}
+                      <div className="flex items-center justify-between">
+                        <span style={{ fontSize: 11, color: '#A1A1AA' }}>Beds</span>
+                        <span style={{ fontSize: 12, fontWeight: 500, color: '#52525B', display: 'flex', alignItems: 'center', gap: 4 }}>
+                          <Users style={{ width: 11, height: 11 }} />
+                          {typeof room.occupiedBeds === 'number' ? `${room.occupiedBeds}/${room.beds}` : room.beds}
+                        </span>
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex items-center justify-between text-gray-600">
-                    <span>Type</span>
-                    <span className="text-gray-900 capitalize">{room.type}</span>
-                  </div>
-                  <div className="flex items-center justify-between text-gray-600">
-                    <span>Beds</span>
-                    <span className="text-gray-900 flex items-center gap-1">
-                      <Users className="w-4 h-4" />
-                      {typeof room.occupiedBeds === 'number' ? `${room.occupiedBeds}/${room.beds}` : room.beds}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between text-gray-600">
-                    <span>Rent</span>
-                    <span className="text-gray-900">Rs {room.rent.toLocaleString('en-IN')}</span>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {filteredRooms.length === 0 && (
-            <div className="bg-white rounded-xl border border-gray-200 p-6 text-sm text-gray-500">
-              No rooms match this filter.
+                );
+              })}
             </div>
           )}
         </>

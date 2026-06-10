@@ -19,6 +19,7 @@ import {
 } from './ui/alert-dialog';
 import { toast } from 'sonner';
 import { useProperty } from '../contexts/PropertyContext';
+import { useRealtimeRefresh } from '../hooks/useRealtimeRefresh';
 import { supabaseOwnerDataApi, type TenantRecord, type MaintenanceTicketRecord } from '../services/supabaseData';
 import { getTenants, getMaintenanceTickets } from '../services/dataService';
 import type { Property, Room } from '../contexts/PropertyContext';
@@ -50,12 +51,6 @@ const statusLabel: Record<RoomStatus, string> = {
   occupied: 'Occupied',
   vacant: 'Vacant',
   maintenance: 'Maintenance',
-};
-
-const statusColor: Record<RoomStatus, string> = {
-  occupied: 'bg-green-100 text-green-700',
-  vacant: 'bg-gray-100 text-gray-700',
-  maintenance: 'bg-amber-100 text-amber-700',
 };
 
 // Starter plan allows 1 property; Pro/Business are unlimited
@@ -114,11 +109,22 @@ export function Properties({ onNavigate }: PropertiesV2Props) {
   const [planCode, setPlanCode] = useState<string>('starter');
   const [limitModalOpen, setLimitModalOpen] = useState(false);
 
-  useEffect(() => {
+  const loadPlanCode = () => {
     supabaseOwnerDataApi.getOwnerSubscription()
       .then((sub) => setPlanCode(sub.planCode))
       .catch(() => { /* stay on starter defaults */ });
+  };
+
+  useEffect(() => {
+    loadPlanCode();
   }, []);
+
+  // Live plan/limit updates when admin changes the owner's subscription
+  useRealtimeRefresh({
+    key: 'properties-subscription',
+    tables: ['owner_subscriptions'],
+    onChange: loadPlanCode,
+  });
 
   const isUnlimited = planCode !== 'starter';
   const atPropertyLimit = !isUnlimited && properties.length >= STARTER_PROPERTY_LIMIT;

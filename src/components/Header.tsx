@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
-import { Check, ChevronDown, Command, HelpCircle, Menu, Search, Building2 } from 'lucide-react';
-import { useProperty } from '../contexts/PropertyContext';
+import { useState } from 'react';
+import { Building2, ChevronDown, HelpCircle, Menu, Search } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { isPlatformAdminRole } from '../utils/roles';
 import { isDemoModeEnabled } from '../services/dataService';
 import { NotificationBell } from './NotificationBell';
+import { WorkspaceSelector } from './WorkspaceSelector';
 
 interface HeaderProps {
   setSidebarOpen: (open: boolean) => void;
@@ -13,7 +13,6 @@ interface HeaderProps {
 }
 
 export function Header({ setSidebarOpen, currentPage, onNotificationClick }: HeaderProps) {
-  const { properties, selectedProperty, setSelectedProperty } = useProperty();
   const { user } = useAuth();
 
   const isPlatformAdmin = isPlatformAdminRole(user?.role);
@@ -21,31 +20,12 @@ export function Header({ setSidebarOpen, currentPage, onNotificationClick }: Hea
 
   const showPropertySelector = currentPage !== 'properties' && user?.role !== 'tenant' && !isPlatformAdmin;
 
-  /* ── Property dropdown ─────────────────── */
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0, width: 0 });
-  const selectorRef = useRef<HTMLButtonElement>(null);
+  const impersonatedOwnerId = typeof window !== 'undefined' ? localStorage.getItem('admin_impersonate_id') : null;
 
-  const allOption = { id: 'all' as const, name: 'All Properties', count: properties.length };
-  const items = [allOption, ...properties.map(p => ({ id: p.id, name: p.name, count: 1 }))];
-  const selected = selectedProperty === 'all'
-    ? allOption
-    : items.find(p => p.id === selectedProperty) ?? allOption;
-
-  const openDropdown = () => {
-    if (selectorRef.current) {
-      const r = selectorRef.current.getBoundingClientRect();
-      setDropdownPos({ top: r.bottom + 6, left: r.left, width: Math.max(r.width, 240) });
-    }
-    setDropdownOpen(true);
+  const handleStopImpersonating = () => {
+    localStorage.removeItem('admin_impersonate_id');
+    window.location.href = '/';
   };
-
-  useEffect(() => {
-    if (!dropdownOpen) return;
-    const close = () => setDropdownOpen(false);
-    window.addEventListener('scroll', close, true);
-    return () => window.removeEventListener('scroll', close, true);
-  }, [dropdownOpen]);
 
   /* ── User section ──────────────────────── */
   const [userMenuOpen, setUserMenuOpen] = useState(false);
@@ -54,15 +34,24 @@ export function Header({ setSidebarOpen, currentPage, onNotificationClick }: Hea
     : user?.email?.slice(0, 2).toUpperCase() ?? 'U';
 
   return (
-    <header
-      className="flex-shrink-0 flex items-center justify-between px-4 sticky top-0 z-30"
-      style={{
-        height: 52,
-        background: '#FFFFFF',
-        borderBottom: '1px solid #E4E4E7',
-        gap: 12,
-      }}
-    >
+    <>
+      {impersonatedOwnerId && (
+        <div className="bg-blue-600 text-white text-xs font-medium py-1.5 px-4 flex items-center justify-center gap-4 z-40 relative">
+          <span>You are viewing this portal as an impersonated owner.</span>
+          <button onClick={handleStopImpersonating} className="bg-white/20 hover:bg-white/30 px-3 py-1 rounded transition-colors">
+            Return to Admin
+          </button>
+        </div>
+      )}
+      <header
+        className="flex-shrink-0 flex items-center justify-between px-4 sticky top-0 z-30"
+        style={{
+          height: 52,
+          background: '#FFFFFF',
+          borderBottom: '1px solid #E4E4E7',
+          gap: 12,
+        }}
+      >
       {/* ── Left: hamburger + property switcher ── */}
       <div className="flex items-center gap-3 flex-shrink-0">
         <button
@@ -73,106 +62,7 @@ export function Header({ setSidebarOpen, currentPage, onNotificationClick }: Hea
         </button>
 
         {showPropertySelector ? (
-          <>
-            <button
-              ref={selectorRef}
-              onClick={() => dropdownOpen ? setDropdownOpen(false) : openDropdown()}
-              className="flex items-center gap-2 rounded-lg transition-all"
-              style={{
-                height: 32,
-                padding: '0 10px',
-                background: dropdownOpen ? '#F4F4F6' : '#FAFAFA',
-                border: '1px solid #E4E4E7',
-                color: '#0A0A0B',
-                fontSize: 13,
-                fontWeight: 500,
-                cursor: 'pointer',
-                gap: 8,
-              }}
-            >
-              <Building2 style={{ width: 13, height: 13, color: '#6366F1', flexShrink: 0 }} />
-              <span style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {selected.name}
-                {selected.count > 1 && (
-                  <span style={{ color: '#A1A1AA', marginLeft: 4 }}>({selected.count})</span>
-                )}
-              </span>
-              <ChevronDown
-                style={{
-                  width: 13, height: 13, color: '#A1A1AA', flexShrink: 0,
-                  transform: dropdownOpen ? 'rotate(180deg)' : 'none',
-                  transition: 'transform 0.15s ease',
-                }}
-              />
-            </button>
-
-            {/* Dropdown */}
-            {dropdownOpen && (
-              <>
-                <div
-                  className="fixed inset-0"
-                  style={{ zIndex: 9998 }}
-                  onClick={() => setDropdownOpen(false)}
-                />
-                <div
-                  className="fixed rounded-xl overflow-hidden"
-                  style={{
-                    top: dropdownPos.top,
-                    left: dropdownPos.left,
-                    minWidth: dropdownPos.width,
-                    zIndex: 9999,
-                    background: '#FFFFFF',
-                    border: '1px solid #E4E4E7',
-                    boxShadow: '0 8px 30px -6px rgb(0 0 0 / 0.14), 0 2px 8px -2px rgb(0 0 0 / 0.08)',
-                    padding: '6px',
-                  }}
-                >
-                  {items.map((item, idx) => {
-                    const isSelected = selectedProperty === item.id;
-                    return (
-                      <button
-                        key={item.id}
-                        onClick={() => {
-                          setSelectedProperty(item.id);
-                          setDropdownOpen(false);
-                        }}
-                        className="w-full flex items-center gap-2.5 rounded-lg transition-colors"
-                        style={{
-                          padding: '7px 10px',
-                          background: isSelected ? '#EEF2FF' : 'transparent',
-                          color: isSelected ? '#4F46E5' : '#52525B',
-                          fontSize: 13,
-                          fontWeight: isSelected ? 500 : 400,
-                          cursor: 'pointer',
-                          border: 'none',
-                          textAlign: 'left',
-                          marginBottom: idx < items.length - 1 ? 1 : 0,
-                        }}
-                        onMouseEnter={e => {
-                          if (!isSelected) (e.currentTarget as HTMLElement).style.background = '#F4F4F6';
-                        }}
-                        onMouseLeave={e => {
-                          if (!isSelected) (e.currentTarget as HTMLElement).style.background = 'transparent';
-                        }}
-                      >
-                        <div
-                          className="flex-shrink-0 flex items-center justify-center rounded-md"
-                          style={{
-                            width: 24, height: 24,
-                            background: isSelected ? '#C7D2FE' : '#F4F4F6',
-                          }}
-                        >
-                          <Building2 style={{ width: 12, height: 12, color: isSelected ? '#4F46E5' : '#A1A1AA' }} />
-                        </div>
-                        <span className="flex-1 truncate">{item.name}</span>
-                        {isSelected && <Check style={{ width: 13, height: 13, color: '#6366F1', flexShrink: 0 }} />}
-                      </button>
-                    );
-                  })}
-                </div>
-              </>
-            )}
-          </>
+          <WorkspaceSelector />
         ) : (
           <div className="flex items-center gap-2" style={{ color: '#0A0A0B', fontSize: 14, fontWeight: 600 }}>
             <div
@@ -216,13 +106,6 @@ export function Header({ setSidebarOpen, currentPage, onNotificationClick }: Hea
             placeholder="Search tenants, rooms, payments..."
             style={{ fontSize: 13, color: '#0A0A0B', border: 'none' }}
           />
-          <div
-            className="hidden lg:flex items-center gap-1 flex-shrink-0"
-            style={{ padding: '1px 6px', background: '#ECECEF', borderRadius: 5 }}
-          >
-            <Command style={{ width: 10, height: 10, color: '#A1A1AA' }} />
-            <span style={{ fontSize: 10, color: '#A1A1AA', fontWeight: 500 }}>K</span>
-          </div>
         </div>
       </div>
 
@@ -284,6 +167,7 @@ export function Header({ setSidebarOpen, currentPage, onNotificationClick }: Hea
           </button>
         </div>
       </div>
-    </header>
+      </header>
+    </>
   );
 }

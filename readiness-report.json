@@ -1,0 +1,127 @@
+{
+  "generatedAt": "2026-06-08T10:37:05.372Z",
+  "overallStatus": "PASS",
+  "portals": [
+    {
+      "portal": "owner",
+      "label": "Owner Portal",
+      "status": "PASS",
+      "modules": [
+        {
+          "name": "Authentication & Profiles",
+          "status": "PASS",
+          "failingChecks": []
+        },
+        {
+          "name": "Properties & Rooms",
+          "status": "PASS",
+          "failingChecks": []
+        },
+        {
+          "name": "Tenant Management",
+          "status": "PASS",
+          "failingChecks": []
+        },
+        {
+          "name": "Payments",
+          "status": "PASS",
+          "failingChecks": []
+        },
+        {
+          "name": "Maintenance",
+          "status": "PASS",
+          "failingChecks": []
+        },
+        {
+          "name": "Announcements & Notifications",
+          "status": "PASS",
+          "failingChecks": []
+        },
+        {
+          "name": "Settings",
+          "status": "PASS",
+          "failingChecks": []
+        },
+        {
+          "name": "Team & Audit",
+          "status": "PASS",
+          "failingChecks": []
+        },
+        {
+          "name": "Support",
+          "status": "PASS",
+          "failingChecks": []
+        }
+      ]
+    },
+    {
+      "portal": "tenant",
+      "label": "Tenant Portal",
+      "status": "PASS",
+      "modules": [
+        {
+          "name": "Tenant Room & Payments",
+          "status": "PASS",
+          "failingChecks": []
+        },
+        {
+          "name": "Tenant Maintenance",
+          "status": "PASS",
+          "failingChecks": []
+        },
+        {
+          "name": "Tenant Announcements",
+          "status": "PASS",
+          "failingChecks": []
+        },
+        {
+          "name": "Vacate Notice",
+          "status": "PASS",
+          "failingChecks": []
+        }
+      ]
+    },
+    {
+      "portal": "admin",
+      "label": "Admin Portal",
+      "status": "PASS",
+      "modules": [
+        {
+          "name": "Owner Management",
+          "status": "PASS",
+          "failingChecks": []
+        },
+        {
+          "name": "Platform Analytics",
+          "status": "PASS",
+          "failingChecks": []
+        },
+        {
+          "name": "Coupons & Referrals",
+          "status": "PASS",
+          "failingChecks": []
+        },
+        {
+          "name": "Admin Support",
+          "status": "PASS",
+          "failingChecks": []
+        },
+        {
+          "name": "Platform Activity",
+          "status": "PASS",
+          "failingChecks": []
+        }
+      ]
+    }
+  ],
+  "infrastructure": {
+    "authHealthy": true,
+    "missingTables": [],
+    "missingColumns": [],
+    "missingBuckets": [],
+    "tablesTotal": 22,
+    "tablesMissing": 0,
+    "bucketsTotal": 3,
+    "bucketsMissing": 0
+  }
+}

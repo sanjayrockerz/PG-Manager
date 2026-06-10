@@ -22,7 +22,7 @@ import {
   submitTenantVacateRequest,
   createTenantMaintenanceTicket,
 } from '../services/dataService';
-import { openReceiptWindow } from '../services/receiptGenerator';
+import { openReceiptWindow, openInvoiceWindow } from '../services/receiptGenerator';
 import { useRealtimeRefresh } from '../hooks/useRealtimeRefresh';
 import { getAppMode } from '../config/appMode';
 import { supabase } from '../lib/supabase';
@@ -278,6 +278,16 @@ export function TenantPortal() {
 
   useEffect(() => { void load(); }, [load]);
 
+  // Guard: redirect inactive tenants away from active-only views on load.
+  useEffect(() => {
+    if (!snapshot) return;
+    if (snapshot.tenant.status !== 'inactive') return;
+    const INACTIVE_ALLOWED: TenantView[] = ['payments', 'documents'];
+    if (!INACTIVE_ALLOWED.includes(view as TenantView)) {
+      setView('payments');
+    }
+  }, [snapshot, view]);
+
   const isDemo = getAppMode() === 'demo';
   const { lastUpdatedAt, isSyncing } = useRealtimeRefresh({
     key: 'tenant-portal',
@@ -425,7 +435,45 @@ export function TenantPortal() {
     if (!tenantSignModal) return;
     const name = tenantSignatureName.trim();
     if (!name) { toast.error('Please provide your name.'); return; }
+
+    // Force-capture canvas state before reading — covers the edge case where
+    // the user drew additional strokes after clicking "Confirm Drawing".
+    if (tenantSignMethod === 'draw' && tenantHasStrokes) {
+      const canvas = tenantCanvasRef.current;
+      if (canvas) {
+        const latestCapture = canvas.toDataURL('image/png');
+        setTenantDrawCapture(latestCapture);
+        // Use latestCapture directly — state update is async and may not flush before we read it.
+        const sigImage = latestCapture;
+        if (!sigImage) { toast.error('Please draw your signature first.'); return; }
+        setTenantSigning(true);
+        try {
+          const ua = typeof navigator !== 'undefined' ? navigator.userAgent : undefined;
+          const updated = await supabaseLifecycleApi.signAgreement({
+            agreementId: tenantSignModal.agreement.id,
+            signatureName: name,
+            role: 'tenant',
+            signatureImage: sigImage,
+            deviceMetadata: ua,
+          });
+          setAgreements((prev) => prev.map((a) => a.id === updated.id ? updated : a));
+          setTenantSignModal(null);
+          setTenantSignatureName('');
+          setTenantDrawCapture(null);
+          setTenantHasStrokes(false);
+          setTenantSignMethod('typed');
+          toast.success('Agreement signed! The agreement is now fully executed.');
+        } catch (e) {
+          toast.error(e instanceof Error ? e.message : 'Signing failed');
+        } finally {
+          setTenantSigning(false);
+        }
+        return;
+      }
+    }
+
     const sigImage = tenantSignMethod === 'draw' ? (tenantDrawCapture ?? undefined) : undefined;
+    if (tenantSignMethod === 'draw' && !sigImage) { toast.error('Please draw and confirm your signature first.'); return; }
     setTenantSigning(true);
     try {
       const ua = typeof navigator !== 'undefined' ? navigator.userAgent : undefined;
@@ -500,33 +548,8 @@ export function TenantPortal() {
     );
   }
 
-  if (tenant.status === 'inactive') {
-    return (
-      <div className="min-h-[60vh] flex items-center justify-center p-6">
-        <div className="max-w-sm w-full bg-white border border-amber-200 rounded-2xl p-8 text-center shadow-sm">
-          <div className="w-14 h-14 bg-amber-50 rounded-full flex items-center justify-center mx-auto mb-4">
-            <AlertCircle className="w-7 h-7 text-amber-500" />
-          </div>
-          <h2 className="text-lg font-semibold text-gray-900 mb-2">Tenancy Ended</h2>
-          <p className="text-sm text-gray-500 mb-6">
-            Your tenancy has ended. You can view past payments and documents, or contact your property manager.
-          </p>
-          <button
-            onClick={() => setView('payments')}
-            className="w-full py-2.5 bg-sky-600 text-white rounded-xl text-sm font-semibold hover:bg-sky-700 transition-colors mb-2"
-          >
-            View Payment History
-          </button>
-          <button
-            onClick={() => { void logout(); }}
-            className="w-full py-2.5 border border-gray-200 text-gray-600 rounded-xl text-sm font-semibold hover:bg-gray-50 transition-colors"
-          >
-            Sign Out
-          </button>
-        </div>
-      </div>
-    );
-  }
+  // isInactiveTenant: read-only portal mode. Shown with a banner; navigation restricted below.
+  const isInactiveTenant = tenant.status === 'inactive';
 
   // ── View: Home ─────────────────────────────────────────────────────────────
   const viewHome = (
@@ -576,29 +599,6 @@ export function TenantPortal() {
         )}
       </div>
 
-      {/* Pending rent banner */}
-      {pendingPayments.length > 0 && (
-        <button
-          onClick={() => setView('payments')}
-          className="w-full bg-amber-50 border border-amber-200 rounded-xl p-4 text-left flex items-center justify-between hover:bg-amber-100 transition-colors"
-        >
-          <div className="flex items-center gap-3">
-            <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0" />
-            <div>
-              <p className="text-sm font-semibold text-amber-900">
-                {pendingPayments.length === 1
-                  ? `Rent due — ${fmtDate(pendingPayments[0].dueDate)}`
-                  : `${pendingPayments.length} pending payments`}
-              </p>
-              <p className="text-xs text-amber-700">
-                {fmtAmount(pendingPayments.reduce((s, p) => s + p.totalAmount, 0))} total outstanding
-              </p>
-            </div>
-          </div>
-          <ChevronRight className="w-4 h-4 text-amber-600" />
-        </button>
-      )}
-
       {/* Quick action grid */}
       <div className="grid grid-cols-2 gap-3">
         {[
@@ -606,7 +606,7 @@ export function TenantPortal() {
           { id: 'maintenance' as TenantView, icon: Wrench, label: 'Maintenance', sub: `${openTickets.length} open`, color: 'text-orange-600 bg-orange-50' },
           { id: 'announcements' as TenantView, icon: Bell, label: 'Announcements', sub: `${pinnedAnnouncements.length} pinned`, color: 'text-blue-600 bg-blue-50' },
           { id: 'notifications' as TenantView, icon: MessageSquare, label: 'Notifications', sub: `${tenantUnreadCount} unread`, color: 'text-indigo-600 bg-indigo-50' },
-          { id: 'documents' as TenantView, icon: FileText, label: 'Documents', sub: `${payments.filter((p) => p.status === 'paid').length} receipts`, color: 'text-purple-600 bg-purple-50' },
+          { id: 'documents' as TenantView, icon: FileText, label: 'Documents', sub: 'Agreements & Receipts', color: 'text-purple-600 bg-purple-50' },
         ].map(({ id, icon: Icon, label, sub, color }) => (
           <button
             key={id}
@@ -761,9 +761,17 @@ export function TenantPortal() {
                 {p.status === 'paid' && (
                   <button
                     onClick={() => openReceiptWindow({ payment: p, propertyName: property?.name ?? '', ownerName: owner?.name })}
-                    className="flex items-center gap-1 px-3 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-600 hover:bg-gray-50 transition-colors"
+                    className="flex items-center gap-1 px-3 py-1.5 border border-green-200 rounded-lg text-xs text-green-700 hover:bg-green-50 transition-colors"
                   >
                     <Download className="w-3.5 h-3.5" /> Receipt
+                  </button>
+                )}
+                {p.status !== 'paid' && (
+                  <button
+                    onClick={() => openInvoiceWindow({ payment: p, propertyName: property?.name ?? '', ownerName: owner?.name })}
+                    className="flex items-center gap-1 px-3 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-600 hover:bg-gray-50 transition-colors"
+                  >
+                    <FileText className="w-3.5 h-3.5" /> Invoice
                   </button>
                 )}
                 {p.status !== 'paid' && ownerPaymentInfo.upiId && (
@@ -1105,11 +1113,15 @@ export function TenantPortal() {
   // ── View: Documents ────────────────────────────────────────────────────────
   const paidPayments = payments.filter((p) => p.status === 'paid');
 
+  const ID_PROOF_TYPES_PORTAL = ['aadhaar_front', 'aadhaar_back', 'pan', 'passport', 'driving_license', 'photo'];
   const DOC_TYPE_DISPLAY: Record<string, string> = {
     aadhaar_front: 'Aadhaar (Front)', aadhaar_back: 'Aadhaar (Back)',
     pan: 'PAN Card', passport: 'Passport', driving_license: 'Driving License',
     photo: 'Profile Photo', other: 'Document',
   };
+
+  const idProofDocs = tenantDocs.filter((d) => ID_PROOF_TYPES_PORTAL.includes(d.docType));
+  const otherDocs = tenantDocs.filter((d) => !ID_PROOF_TYPES_PORTAL.includes(d.docType) && d.docType !== 'agreement' && d.docType !== 'receipt');
 
   const viewDocuments = (
     <div className="space-y-4 pb-6">
@@ -1120,10 +1132,10 @@ export function TenantPortal() {
         <h1 className="text-xl font-bold text-gray-900">Documents</h1>
       </div>
 
-      {/* Rental Agreements */}
+      {/* 1. Agreements */}
       <div className="bg-white border border-gray-200 rounded-xl">
         <div className="px-4 py-3 border-b border-gray-100">
-          <p className="text-sm font-semibold text-gray-900">Rental Agreements</p>
+          <p className="text-sm font-semibold text-gray-900">Agreements</p>
           <p className="text-xs text-gray-500">{agreements.length} agreement{agreements.length !== 1 ? 's' : ''}</p>
         </div>
         {agreements.length === 0 ? (
@@ -1179,10 +1191,10 @@ export function TenantPortal() {
         )}
       </div>
 
-      {/* Receipts */}
+      {/* 2. Receipts */}
       <div className="bg-white border border-gray-200 rounded-xl">
         <div className="px-4 py-3 border-b border-gray-100">
-          <p className="text-sm font-semibold text-gray-900">Rent Receipts</p>
+          <p className="text-sm font-semibold text-gray-900">Receipts</p>
           <p className="text-xs text-gray-500">{paidPayments.length} paid payment{paidPayments.length !== 1 ? 's' : ''}</p>
         </div>
         {paidPayments.length === 0 ? (
@@ -1210,11 +1222,11 @@ export function TenantPortal() {
         )}
       </div>
 
-      {/* ID Documents from tenant_documents table */}
-      {(tenantDocs.length > 0 || tenant.idDocumentUrl) && (
+      {/* 3. Identity Documents */}
+      {(tenant.idDocumentUrl || idProofDocs.length > 0) && (
         <div className="bg-white border border-gray-200 rounded-xl">
           <div className="px-4 py-3 border-b border-gray-100">
-            <p className="text-sm font-semibold text-gray-900">ID Documents</p>
+            <p className="text-sm font-semibold text-gray-900">Identity Documents</p>
           </div>
           <div className="divide-y divide-gray-100">
             {tenant.idDocumentUrl && (
@@ -1226,7 +1238,30 @@ export function TenantPortal() {
                 </a>
               </div>
             )}
-            {tenantDocs.map((doc) => (
+            {idProofDocs.map((doc) => (
+              <div key={doc.id} className="flex items-center justify-between px-4 py-3">
+                <div>
+                  <p className="text-sm text-gray-900">{doc.label || DOC_TYPE_DISPLAY[doc.docType] || doc.docType}</p>
+                  <p className="text-xs text-gray-400">{new Date(doc.createdAt).toLocaleDateString('en-IN')}</p>
+                </div>
+                <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center gap-1 px-3 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-600 hover:bg-gray-50">
+                  <Download className="w-3.5 h-3.5" /> View
+                </a>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 4. Other Files */}
+      {otherDocs.length > 0 && (
+        <div className="bg-white border border-gray-200 rounded-xl">
+          <div className="px-4 py-3 border-b border-gray-100">
+            <p className="text-sm font-semibold text-gray-900">Other Files</p>
+          </div>
+          <div className="divide-y divide-gray-100">
+            {otherDocs.map((doc) => (
               <div key={doc.id} className="flex items-center justify-between px-4 py-3">
                 <div>
                   <p className="text-sm text-gray-900">{doc.label || DOC_TYPE_DISPLAY[doc.docType] || doc.docType}</p>
@@ -1543,11 +1578,28 @@ export function TenantPortal() {
     return v;
   };
 
+  // Inactive tenants: limit tabs to payments + documents only.
+  const INACTIVE_ALLOWED_TABS: TenantView[] = ['payments', 'documents'];
+  const visibleTabs = isInactiveTenant
+    ? BOTTOM_TABS.filter((t) => INACTIVE_ALLOWED_TABS.includes(t.id))
+    : BOTTOM_TABS;
+
   return (
     <>
-      {showWelcome && <WelcomeScreen snapshot={snapshot} onDone={handleWelcomeDone} />}
+      {showWelcome && !isInactiveTenant && <WelcomeScreen snapshot={snapshot} onDone={handleWelcomeDone} />}
 
       <div className="flex flex-col min-h-screen bg-gray-50">
+        {/* Inactive tenancy banner */}
+        {isInactiveTenant && (
+          <div className="bg-amber-50 border-b border-amber-200 px-4 py-2.5 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 min-w-0">
+              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+              <p className="text-xs text-amber-800 font-medium truncate">Tenancy ended — payments &amp; documents available</p>
+            </div>
+            <button onClick={() => { void logout(); }} className="text-xs text-amber-700 underline hover:text-amber-900 shrink-0">Sign out</button>
+          </div>
+        )}
+
         {/* Content area */}
         <div className="flex-1 overflow-y-auto px-4 pt-4 pb-24">
           {err && (
@@ -1559,7 +1611,7 @@ export function TenantPortal() {
         {/* Bottom tab bar */}
         <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 safe-area-bottom z-40">
           <div className="flex items-center max-w-xl mx-auto">
-            {BOTTOM_TABS.map(({ id, label, icon: Icon }) => {
+            {visibleTabs.map(({ id, label, icon: Icon }) => {
               const isActive = activeTab(view) === id;
               return (
                 <button

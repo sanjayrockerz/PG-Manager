@@ -518,7 +518,6 @@ export function Dashboard({ onNavigate }: DashboardProps) {
           iconBg="#ECFDF5"
           iconColor="#059669"
           meta={`Across ${properties.length} ${properties.length === 1 ? 'property' : 'properties'}`}
-          trend={data.totalTenants > 0 ? 0 : undefined}
         />
         <StatCard
           label="Occupancy Rate"

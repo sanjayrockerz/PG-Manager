@@ -6,7 +6,12 @@
       "Bash(dir \"C:\\\\Users\\\\motis\\\\Downloads\\\\colors_and_type.css\")",
       "Bash(dir \"C:\\\\Users\\\\motis\\\\Downloads\\\\components.css\")",
       "Bash(Get-ChildItem -Recurse -Path src)",
-      "Bash(Select-Object -ExpandProperty FullName)"
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "mcp__claude_ai_Vercel__get_deployment",
+      "Bash(vercel --version)",
+      "Bash(vercel promote *)",
+      "Skill(run)",
+      "Skill(run:*)"
     ]
   }
 }

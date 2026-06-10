@@ -7,6 +7,7 @@ import {
   demoMaintenanceTickets,
   demoPayments,
   demoProperties,
+  demoSupportTickets,
   demoTenants,
   demoVacateRequests,
 } from '../data/demoData';
@@ -24,7 +25,9 @@ import {
   type MaintenanceThreadEntry,
   type PaymentRecord,
   type PaymentStatus,
+  type SupportTicketRecord,
   type WhatsAppQueueEntry,
+  supabaseAuthDataApi,
   supabaseOwnerDataApi,
   supabasePropertyApi,
   supabaseTenantDataApi,
@@ -55,6 +58,7 @@ interface DemoDataStore {
   vacateRequests: VacateRequest[];
   activityLog: ActivityLogEntry[];
   whatsappQueue: WhatsAppQueueEntry[];
+  supportTickets: SupportTicketRecord[];
 }
 
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
@@ -80,6 +84,7 @@ const getSeedDemoStore = (): DemoDataStore => ({
   vacateRequests: clone(demoVacateRequests),
   activityLog: clone(demoActivityLog),
   whatsappQueue: [],
+  supportTickets: clone(demoSupportTickets),
 });
 
 const hasDemoStoreShape = (value: unknown): value is DemoDataStore => {
@@ -134,6 +139,9 @@ const readDemoStore = (): DemoDataStore => {
       whatsappQueue: Array.isArray(stored.whatsappQueue)
         ? clone(stored.whatsappQueue as WhatsAppQueueEntry[])
         : [],
+      supportTickets: Array.isArray(stored.supportTickets)
+        ? clone(stored.supportTickets as SupportTicketRecord[])
+        : clone(demoSupportTickets),
     };
   } catch {
     const seed = getSeedDemoStore();
@@ -295,7 +303,7 @@ const mapTenantCreateInputToRecord = (
     ownerId: getDemoOwnerId(store),
     name: input.name.trim(),
     phone: input.phone,
-    email: input.email.trim().toLowerCase(),
+    email: (input.email ?? '').trim().toLowerCase(),
     photoUrl: '',
     propertyId: input.propertyId,
     floor: input.floor,
@@ -410,6 +418,17 @@ export async function getPayments(propertyId: string | 'all' = 'all'): Promise<P
   }
 
   return runSupabase(mode, () => supabaseOwnerDataApi.listPayments(propertyId));
+}
+
+export async function getSupportTickets(propertyId: string | 'all' = 'all'): Promise<SupportTicketRecord[]> {
+  const mode = getAppMode();
+  if (mode === 'demo') {
+    const tickets = readDemoStore().supportTickets;
+    if (propertyId === 'all') return clone(tickets);
+    return clone(tickets.filter((t) => t.propertyId === propertyId || t.propertyId == null));
+  }
+
+  return runSupabase(mode, () => supabaseOwnerDataApi.listSupportTickets(propertyId));
 }
 
 export async function createPropertyRecord(input: Omit<Property, 'id' | 'createdAt' | 'rooms'>): Promise<Property> {
@@ -634,13 +653,18 @@ export async function createTenantRecord(input: TenantCreateInput): Promise<Tena
         const propertyList = await getProperties();
         const prop = propertyList.find((p) => p.id === created.propertyId);
         if (prop) {
+          // Resolve the real owner of record (never a placeholder). The draft is
+          // attributed to the registered owner profile tied to the tenant.
+          const ownerProfile = await supabaseAuthDataApi
+            .getProfileById(created.ownerId)
+            .catch(() => null);
           await createAndStoreAgreement({
             tenant: created,
             propertyName: prop.name,
             propertyAddress: prop.address,
             propertyCity: `${prop.city}, ${prop.state}`,
-            ownerName: 'Property Owner',
-            ownerPhone: prop.contactPhone,
+            ownerName: ownerProfile?.name?.trim() || prop.name,
+            ownerPhone: ownerProfile?.phone?.trim() || prop.contactPhone,
             generatedAt: new Date().toISOString(),
           });
         }

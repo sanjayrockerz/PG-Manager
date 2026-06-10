@@ -11,7 +11,7 @@ import {
   AlertTriangle, Archive, ChevronRight, ChevronLeft,
   ReceiptText, Plus, Trash2, Printer, History,
   Upload, Eye, Download, Activity, CreditCard, X,
-  ImageIcon, Receipt,
+  ImageIcon, Receipt, UserCheck,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useProperty } from '../contexts/PropertyContext';
@@ -31,6 +31,7 @@ import {
   TENANT_STATUS_COLORS,
   isTenantCurrentlyInRoom,
   supabaseLifecycleApi,
+  supabaseAuthDataApi,
 } from '../services/supabaseData';
 import {
   type SettlementDeductionItem,
@@ -41,7 +42,7 @@ import {
   createDeductionItem,
 } from '../services/depositSettlementService';
 import { printAgreement, downloadAgreementHtml } from '../services/agreementService';
-import { openReceiptWindow } from '../services/receiptGenerator';
+import { openReceiptWindow, openInvoiceWindow } from '../services/receiptGenerator';
 
 interface TenantDetailProps {
   tenantId: string;
@@ -82,6 +83,45 @@ interface VacateModalProps {
   open: boolean;
   onClose: () => void;
   onComplete: (updated: TenantRecord) => void;
+}
+
+function ExtendLeaseModal({ tenant, open, onClose, onComplete }: { tenant: TenantRecord; open: boolean; onClose: () => void; onComplete: (t: TenantRecord) => void; }) {
+  const [rent, setRent] = useState(tenant.rent.toString());
+  const [dueDate, setDueDate] = useState(tenant.rentDueDate.toString());
+  const [saving, setSaving] = useState(false);
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const r = parseInt(rent, 10);
+      const d = parseInt(dueDate, 10);
+      if (isNaN(r) || r <= 0 || isNaN(d) || d < 1 || d > 31) throw new Error('Invalid values');
+      const updated = await supabaseLifecycleApi.extendTenantLease(tenant.id, r, d);
+      toast.success('Lease extended. Terms updated.');
+      onComplete(updated);
+      onClose();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Error extending lease');
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Extend Lease / Update Terms</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-4">
+          <div><label className="text-sm font-medium">New Monthly Rent</label><Input type="number" value={rent} onChange={(e) => setRent(e.target.value)} /></div>
+          <div><label className="text-sm font-medium">New Rent Due Date</label><Input type="number" value={dueDate} onChange={(e) => setDueDate(e.target.value)} /></div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
+          <Button onClick={() => void handleSave()} disabled={saving} className="bg-indigo-600 hover:bg-indigo-700 text-white">{saving ? 'Saving...' : 'Save Changes'}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
 }
 
 function VacateWorkflowModal({
@@ -538,7 +578,22 @@ function AgreementTab({ tenant, property }: { tenant: TenantRecord; property?: {
   const [signingAgreement, setSigningAgreement] = useState<AgreementRecord | null>(null);
   const [signatureName, setSignatureName] = useState('');
   const [signing, setSigning] = useState(false);
+  const [vaultSig, setVaultSig] = useState<{ type: 'image' | 'typed'; value: string; name: string } | undefined>(undefined);
   const isDemoMode = isDemoModeEnabled();
+
+  // Authority for agreements/receipts is always the registered property owner
+  // (profiles row at tenant.ownerId) — never the currently logged-in user, who
+  // may be a manager or staff member acting on the owner's behalf.
+  useEffect(() => {
+    if (isDemoMode) return;
+    supabaseAuthDataApi.getProfileById(tenant.ownerId)
+      .then((ownerProfile) => {
+        if (!ownerProfile) return;
+        setOwnerName(ownerProfile.name || '');
+        setOwnerPhone(ownerProfile.phone || '');
+      })
+      .catch(() => { /* owner profile unavailable — agreement falls back to generic label */ });
+  }, [tenant.ownerId, isDemoMode]);
 
   const loadAgreements = () => {
     if (isDemoMode) return;
@@ -550,6 +605,19 @@ function AgreementTab({ tenant, property }: { tenant: TenantRecord; property?: {
   };
 
   useEffect(() => { loadAgreements(); }, [tenant.id, isDemoMode]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fetch owner signature vault so Print/Download embed the real signature
+  useEffect(() => {
+    if (isDemoMode) return;
+    supabaseLifecycleApi.getActiveSignatureProfile().then((profile) => {
+      if (!profile) return;
+      if (profile.signatureType === 'typed' && profile.signatureText) {
+        setVaultSig({ type: 'typed', value: profile.signatureText, name: ownerName || 'Property Owner' });
+      } else if (profile.signatureImage) {
+        setVaultSig({ type: 'image', value: profile.signatureImage, name: ownerName || 'Property Owner' });
+      }
+    }).catch(() => { /* vault not configured — agreement generates without signature */ });
+  }, [isDemoMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleOwnerSign = async () => {
     if (!signingAgreement || !signatureName.trim()) {
@@ -575,14 +643,23 @@ function AgreementTab({ tenant, property }: { tenant: TenantRecord; property?: {
     }
   };
 
+  // Agreement authority gate — an agreement may never be finalized with a
+  // placeholder owner. Real owner identity (resolved from tenant.ownerId) and a
+  // signature on file are both required. Demo mode bypasses (synthetic owner).
+  const ownerIdentityReady = isDemoMode || ownerName.trim().length > 0;
+  const ownerSignatureReady = isDemoMode || !!vaultSig;
+  const agreementBlocked = !ownerIdentityReady || !ownerSignatureReady;
+  const effectiveOwnerName = ownerName.trim() || (isDemoMode ? 'Demo Owner' : '');
+
   const agreementData = {
     tenant,
     propertyName: property?.name ?? 'PG Accommodation',
     propertyAddress: property?.address ?? '',
     propertyCity: property ? `${property.city}, ${property.state}` : '',
-    ownerName: ownerName || 'Property Owner',
+    ownerName: effectiveOwnerName,
     ownerPhone: ownerPhone || '—',
     generatedAt: new Date().toISOString(),
+    ownerSignature: vaultSig ? { ...vaultSig, name: effectiveOwnerName } : undefined,
   };
 
   return (
@@ -705,42 +782,67 @@ function AgreementTab({ tenant, property }: { tenant: TenantRecord; property?: {
             ))}
           </div>
 
-          {/* Owner customization */}
-          <div className="space-y-3">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Owner Details (for Agreement)</p>
-            <div>
-              <label className="block text-xs text-gray-600 mb-1">Owner / PG Manager Name</label>
-              <input
-                type="text"
-                value={ownerName}
-                onChange={(e) => setOwnerName(e.target.value)}
-                placeholder="Your full name"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
+          {/* Authority — always the registered property owner, fetched from the
+              database via tenant.ownerId. Read-only: agreement authority cannot
+              be overridden by whoever (owner/manager/staff) is generating it. */}
+          <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 space-y-2.5">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Agreement Authority — Property Owner</p>
+            <div className="flex items-center justify-between">
+              <span className="text-gray-500 text-xs">Owner Name</span>
+              <span className="flex items-center gap-1.5 text-xs font-medium">
+                <span className="text-gray-900">{ownerName || (isDemoMode ? 'Demo Owner' : '— not resolved')}</span>
+                {ownerIdentityReady
+                  ? <CheckCircle className="w-3.5 h-3.5 text-green-600" />
+                  : <AlertCircle className="w-3.5 h-3.5 text-red-500" />}
+              </span>
             </div>
-            <div>
-              <label className="block text-xs text-gray-600 mb-1">Owner Phone</label>
-              <input
-                type="tel"
-                value={ownerPhone}
-                onChange={(e) => setOwnerPhone(e.target.value)}
-                placeholder="+91 XXXXX XXXXX"
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
+            <div className="flex items-center justify-between">
+              <span className="text-gray-500 text-xs">Owner Phone</span>
+              <span className="text-gray-900 text-xs font-medium">{ownerPhone || '—'}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-gray-500 text-xs">Owner Signature</span>
+              <span className="flex items-center gap-1.5 text-xs font-medium">
+                <span className="text-gray-900">{ownerSignatureReady ? 'On file' : 'Missing'}</span>
+                {ownerSignatureReady
+                  ? <CheckCircle className="w-3.5 h-3.5 text-green-600" />
+                  : <AlertCircle className="w-3.5 h-3.5 text-red-500" />}
+              </span>
             </div>
           </div>
 
+          {/* Blocking authority warning — agreement cannot be finalized without a
+              resolved owner identity and an on-file signature. */}
+          {agreementBlocked && (
+            <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+              <div className="text-sm">
+                <p className="font-semibold text-red-800">Agreement cannot be finalized</p>
+                <ul className="text-xs text-red-700 mt-1.5 space-y-1 list-disc list-inside">
+                  {!ownerIdentityReady && (
+                    <li>Owner profile could not be resolved for this tenant. Verify the owner account has a name set in Settings → Profile.</li>
+                  )}
+                  {!ownerSignatureReady && (
+                    <li>No owner signature on file. Add one in Settings → Signature Vault before generating agreements.</li>
+                  )}
+                </ul>
+              </div>
+            </div>
+          )}
+
           <div className="flex flex-col sm:flex-row gap-3 pt-2">
             <Button
-              className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white gap-2"
-              onClick={() => printAgreement(agreementData)}
+              className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white gap-2 disabled:opacity-50"
+              disabled={agreementBlocked}
+              onClick={() => { if (!agreementBlocked) printAgreement(agreementData); }}
             >
               <Printer className="w-4 h-4" /> Print Agreement
             </Button>
             <Button
               variant="outline"
-              className="flex-1 gap-2"
-              onClick={() => downloadAgreementHtml(agreementData)}
+              className="flex-1 gap-2 disabled:opacity-50"
+              disabled={agreementBlocked}
+              onClick={() => { if (!agreementBlocked) downloadAgreementHtml(agreementData); }}
             >
               <Download className="w-4 h-4" /> Download (HTML)
             </Button>
@@ -748,7 +850,7 @@ function AgreementTab({ tenant, property }: { tenant: TenantRecord; property?: {
 
           <div className="bg-blue-50 border border-blue-100 rounded-lg p-3">
             <p className="text-xs text-blue-700">
-              The agreement is generated from existing tenant data and standard PG terms. Use "Sign as Owner" on the saved agreement above to begin the signing workflow.
+              The agreement is generated from existing tenant data and standard PG terms. Owner name, phone and signature are pulled live from the registered owner's account — update them in Settings and every future agreement uses the latest values. Use "Sign as Owner" on the saved agreement above to begin the signing workflow.
             </p>
           </div>
         </CardContent>
@@ -811,17 +913,15 @@ function AgreementTab({ tenant, property }: { tenant: TenantRecord; property?: {
 interface ActivityEvent {
   id: string;
   date: string;
-  type: 'payment_paid' | 'payment_overdue' | 'payment_pending' | 'maintenance' | 'status' | 'joined';
+  type: 'maintenance' | 'status' | 'joined';
   title: string;
   detail: string;
 }
 
 function ActivityTimeline({
-  payments,
   tickets,
   tenant,
 }: {
-  payments: PaymentRecord[];
   tickets: MaintenanceTicketRecord[];
   tenant: TenantRecord;
 }) {
@@ -835,22 +935,6 @@ function ActivityTimeline({
     title: 'Tenant moved in',
     detail: `Room ${tenant.room}${tenant.bed ? ` · Bed ${tenant.bed}` : ''}`,
   });
-
-  // Payment events
-  for (const p of payments) {
-    const dateStr = p.paidDate ?? p.dueDate;
-    events.push({
-      id: `pay-${p.id}`,
-      date: dateStr,
-      type: p.status === 'paid' ? 'payment_paid' : p.status === 'overdue' ? 'payment_overdue' : 'payment_pending',
-      title: p.status === 'paid'
-        ? `Rent paid — ₹${p.totalAmount.toLocaleString('en-IN')}`
-        : p.status === 'overdue'
-          ? `Rent overdue — ₹${p.totalAmount.toLocaleString('en-IN')}`
-          : `Rent due — ₹${p.totalAmount.toLocaleString('en-IN')}`,
-      detail: `Due ${new Date(p.dueDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}${p.paidDate ? ` · Paid ${new Date(p.paidDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}` : ''}${p.extraCharges > 0 ? ` · +₹${p.extraCharges.toLocaleString('en-IN')} extra charges` : ''}`,
-    });
-  }
 
   // Maintenance events
   for (const t of tickets) {
@@ -868,9 +952,6 @@ function ActivityTimeline({
 
   const iconForType = (type: ActivityEvent['type']) => {
     switch (type) {
-      case 'payment_paid': return { icon: CheckCircle, color: '#059669', bg: '#ECFDF5' };
-      case 'payment_overdue': return { icon: AlertCircle, color: '#DC2626', bg: '#FEF2F2' };
-      case 'payment_pending': return { icon: Clock, color: '#D97706', bg: '#FFFBEB' };
       case 'maintenance': return { icon: Wrench, color: '#7C3AED', bg: '#F5F3FF' };
       case 'joined': return { icon: User, color: '#6366F1', bg: '#EEF2FF' };
       default: return { icon: Activity, color: '#71717A', bg: '#F4F4F6' };
@@ -1112,13 +1193,20 @@ const DOC_UPLOAD_TYPES = [
   { value: 'other',         label: 'Other Document' },
 ] as const;
 
-function DocumentVaultTab({ tenant }: { tenant: TenantRecord }) {
+const ID_PROOF_DOC_TYPES = ['aadhaar_front', 'aadhaar_back', 'pan', 'passport', 'driving_license', 'photo'];
+
+function DocumentVaultTab({ tenant, allowedGroups }: { tenant: TenantRecord; allowedGroups?: Array<'id_proof' | 'agreement' | 'receipt' | 'other'> }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const isDemoMode = isDemoModeEnabled();
   const [docs, setDocs] = useState<TenantDocument[]>([]);
   const [docsLoading, setDocsLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [uploadDocType, setUploadDocType] = useState<string>('aadhaar_front');
+  const uploadTypeOptions = DOC_UPLOAD_TYPES.filter((t) => {
+    if (!allowedGroups) return true;
+    const g = ID_PROOF_DOC_TYPES.includes(t.value) ? 'id_proof' : 'other';
+    return allowedGroups.includes(g as 'id_proof' | 'other');
+  });
+  const [uploadDocType, setUploadDocType] = useState<string>(uploadTypeOptions[0]?.value ?? 'other');
 
   const loadDocs = async () => {
     if (isDemoMode) return;
@@ -1182,7 +1270,9 @@ function DocumentVaultTab({ tenant }: { tenant: TenantRecord }) {
     grouped.get(g)?.push(doc);
   }
 
-  const totalDocs = docs.length + staticDocs.length;
+  const visibleGroups: string[] = allowedGroups ?? [...DOC_GROUP_ORDER];
+  const visibleStaticDocs = !allowedGroups || allowedGroups.includes('id_proof') ? staticDocs : [];
+  const totalDocs = docs.filter((d) => visibleGroups.includes(docGroup(d.docType))).length + visibleStaticDocs.length;
 
   return (
     <div className="space-y-5">
@@ -1195,7 +1285,7 @@ function DocumentVaultTab({ tenant }: { tenant: TenantRecord }) {
               onChange={(e) => setUploadDocType(e.target.value)}
               className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
             >
-              {DOC_UPLOAD_TYPES.map((t) => (
+              {uploadTypeOptions.map((t) => (
                 <option key={t.value} value={t.value}>{t.label}</option>
               ))}
             </select>
@@ -1218,11 +1308,11 @@ function DocumentVaultTab({ tenant }: { tenant: TenantRecord }) {
       </Card>
 
       {/* Static profile documents */}
-      {staticDocs.length > 0 && (
+      {visibleStaticDocs.length > 0 && (
         <div>
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">From Tenant Profile</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {staticDocs.map((doc) => (
+            {visibleStaticDocs.map((doc) => (
               <div key={doc.name} className="flex items-center justify-between p-3 bg-gray-50 border border-gray-200 rounded-lg">
                 <div className="flex items-center gap-3 min-w-0">
                   <div className="p-2 bg-indigo-100 rounded-lg flex-shrink-0"><FileText className="w-4 h-4 text-indigo-600" /></div>
@@ -1247,7 +1337,7 @@ function DocumentVaultTab({ tenant }: { tenant: TenantRecord }) {
         <div className="flex items-center gap-2 py-4 text-sm text-gray-400"><Loader2 className="w-4 h-4 animate-spin" /> Loading documents…</div>
       ) : (
         <>
-          {DOC_GROUP_ORDER.map((group) => {
+          {DOC_GROUP_ORDER.filter((g) => visibleGroups.includes(g)).map((group) => {
             const groupDocs = grouped.get(group) ?? [];
             if (groupDocs.length === 0) return null;
             return (
@@ -1293,6 +1383,110 @@ function DocumentVaultTab({ tenant }: { tenant: TenantRecord }) {
   );
 }
 
+// ─── Documents Tab (unified: Agreements + Receipts + Identity + Other) ───────
+
+type DocCategory = 'agreements' | 'receipts' | 'identity' | 'other';
+
+const DOC_CATEGORY_CONFIG: { id: DocCategory; label: string }[] = [
+  { id: 'agreements', label: 'Agreements' },
+  { id: 'receipts', label: 'Receipts' },
+  { id: 'identity', label: 'Identity Documents' },
+  { id: 'other', label: 'Other Files' },
+];
+
+function DocumentsTab({
+  tenant,
+  payments,
+  property,
+  receiptOwnerName,
+  onTenantUpdate,
+}: {
+  tenant: TenantRecord;
+  payments: PaymentRecord[];
+  property?: { name: string; address: string; city: string; state: string } | null;
+  receiptOwnerName?: string;
+  onTenantUpdate: (updated: TenantRecord) => void;
+}) {
+  const [category, setCategory] = useState<DocCategory>('agreements');
+  const paidPayments = payments.filter((p) => p.status === 'paid');
+
+  return (
+    <div className="space-y-4">
+      {/* Category nav pills */}
+      <div className="flex gap-2 overflow-x-auto pb-1">
+        {DOC_CATEGORY_CONFIG.map(({ id, label }) => (
+          <button
+            key={id}
+            onClick={() => setCategory(id)}
+            className={`flex-shrink-0 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+              category === id
+                ? 'bg-indigo-600 text-white'
+                : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {category === 'agreements' && (
+        <AgreementTab tenant={tenant} property={property} />
+      )}
+
+      {category === 'receipts' && (
+        <Card className="border-gray-200">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <ReceiptText className="w-4 h-4 text-indigo-600" /> Payment Receipts
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {paidPayments.length === 0 ? (
+              <p className="text-center py-8 text-gray-400 text-sm">
+                No receipts yet — receipts are generated when payments are marked as paid
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {paidPayments.map((p) => (
+                  <div key={p.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">
+                        {new Date(p.dueDate).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        ₹{p.totalAmount.toLocaleString('en-IN')} · Paid {p.paidDate ? new Date(p.paidDate).toLocaleDateString('en-IN') : '—'}
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs gap-1"
+                      onClick={() => openReceiptWindow({ payment: p, propertyName: property?.name ?? '', ownerName: receiptOwnerName })}
+                    >
+                      <Printer className="w-3.5 h-3.5" /> Receipt
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {category === 'identity' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <IdProofSection tenant={tenant} onUpdate={onTenantUpdate} />
+          <DocumentVaultTab tenant={tenant} allowedGroups={['id_proof']} />
+        </div>
+      )}
+
+      {category === 'other' && (
+        <DocumentVaultTab tenant={tenant} allowedGroups={['other']} />
+      )}
+    </div>
+  );
+}
+
 // ─── Main TenantDetail ────────────────────────────────────────────────────────
 
 export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
@@ -1303,7 +1497,11 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('activity');
   const [vacateOpen, setVacateOpen] = useState(false);
+  const [extendOpen, setExtendOpen] = useState(false);
   const [archiving, setArchiving] = useState(false);
+  // Receipt/invoice authority is always the registered property owner — fetched
+  // by tenant.ownerId, never the logged-in user (who may be a manager/staff).
+  const [receiptOwnerName, setReceiptOwnerName] = useState<string | undefined>(undefined);
 
   const property = properties.find((p) => p.id === tenant?.propertyId);
   const getPropertyName = (propertyId: string) =>
@@ -1329,6 +1527,13 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
 
   useEffect(() => { void load(); }, [tenantId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useEffect(() => {
+    if (!tenant) return;
+    supabaseAuthDataApi.getProfileById(tenant.ownerId)
+      .then((ownerProfile) => setReceiptOwnerName(ownerProfile?.name || undefined))
+      .catch(() => setReceiptOwnerName(undefined));
+  }, [tenant?.ownerId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleArchive = async () => {
     if (!tenant) return;
     setArchiving(true);
@@ -1345,7 +1550,7 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
 
   useRealtimeRefresh({
     key: `tenant-detail-${tenantId}`,
-    tables: ['tenants', 'payments', 'maintenance_tickets', 'agreements', 'tenant_documents'],
+    tables: ['tenants', 'payments', 'maintenance_tickets', 'agreements', 'agreement_events', 'owner_signature_profiles', 'agreement_templates', 'tenant_documents'],
     onChange: () => void load(),
     enabled: !isDemoModeEnabled(),
   });
@@ -1376,6 +1581,7 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
   const statusClass = TENANT_STATUS_COLORS[tenant.status] ?? 'bg-gray-100 text-gray-600';
   const statusLabel = TENANT_STATUS_LABELS[tenant.status] ?? tenant.status;
   const isCurrentlyInRoom = isTenantCurrentlyInRoom(tenant.status);
+  const canActivate = tenant.status === 'pending_onboarding';
   const canVacate = tenant.status === 'active' || tenant.status === 'payment_overdue';
   const canArchive = !isCurrentlyInRoom && tenant.status !== 'archived';
 
@@ -1387,16 +1593,6 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
       <Button variant="ghost" onClick={onBack} className="mb-4 text-gray-600 hover:text-gray-900">
         <ArrowLeft className="w-4 h-4 mr-2" /> Back to Tenants
       </Button>
-
-      {/* Pending alert banner */}
-      {pendingPayments.length > 0 && isCurrentlyInRoom && (
-        <div className="mb-4 bg-red-50 border border-red-200 rounded-lg px-4 py-3 flex items-center gap-3">
-          <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
-          <p className="text-sm text-red-700">
-            <strong>{pendingPayments.length} outstanding payment{pendingPayments.length > 1 ? 's' : ''}</strong> totalling ₹{pendingTotal.toLocaleString('en-IN')} need attention.
-          </p>
-        </div>
-      )}
 
       {/* Upcoming vacate alert */}
       {(tenant.status === 'notice_submitted' || tenant.status === 'vacating') && tenant.vacateDate && (
@@ -1442,6 +1638,25 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
                   </div>
 
                   <div className="flex gap-2 flex-wrap">
+                    {canActivate && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={async () => {
+                          try {
+                            const updated = await supabaseLifecycleApi.activateTenant(tenant.id);
+                            setTenant(updated);
+                            toast.success('Tenant lease activated successfully!');
+                          } catch (err) {
+                            toast.error(err instanceof Error ? err.message : 'Failed to activate tenant');
+                          }
+                        }}
+                        className="border-green-300 text-green-600 hover:bg-green-50 hover:border-green-400 h-8 text-xs"
+                      >
+                        <UserCheck className="w-3.5 h-3.5 mr-1.5" /> Activate Lease
+                      </Button>
+                    )}
+                    {tenant.status === 'active' && (<Button size="sm" variant="outline" onClick={() => setExtendOpen(true)} className="border-blue-300 text-blue-600 hover:bg-blue-50 hover:border-blue-400 h-8 text-xs"><Calendar className="w-3.5 h-3.5 mr-1.5" /> Extend Lease</Button>)}
                     {canVacate && (
                       <Button
                         size="sm"
@@ -1528,12 +1743,6 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
           <TabsTrigger value="documents" className="data-[state=active]:bg-[#4F46E5] data-[state=active]:text-white">
             <FileText className="w-4 h-4 mr-1.5" /> Documents
           </TabsTrigger>
-          <TabsTrigger value="receipts" className="data-[state=active]:bg-[#4F46E5] data-[state=active]:text-white">
-            <Receipt className="w-4 h-4 mr-1.5" /> Receipts
-          </TabsTrigger>
-          <TabsTrigger value="agreement" className="data-[state=active]:bg-[#4F46E5] data-[state=active]:text-white">
-            <ReceiptText className="w-4 h-4 mr-1.5" /> Agreement
-          </TabsTrigger>
           {tenant.vacateDate && (
             <TabsTrigger value="settlement" className="data-[state=active]:bg-[#4F46E5] data-[state=active]:text-white">
               <History className="w-4 h-4 mr-1.5" /> Settlement
@@ -1550,7 +1759,7 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <ActivityTimeline payments={payments} tickets={tickets} tenant={tenant} />
+              <ActivityTimeline tickets={tickets} tenant={tenant} />
             </CardContent>
           </Card>
         </TabsContent>
@@ -1569,7 +1778,7 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
                   <table className="w-full">
                     <thead>
                       <tr className="border-b border-gray-200 bg-gray-50">
-                        {['Due Date', 'Monthly Rent', 'Extra', 'Total', 'Status', 'Paid On'].map((h) => (
+                        {['Due Date', 'Monthly Rent', 'Extra', 'Total', 'Status', 'Paid On', ''].map((h) => (
                           <th key={h} className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase">{h}</th>
                         ))}
                       </tr>
@@ -1591,6 +1800,19 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
                           </td>
                           <td className="py-3 px-4 text-sm text-gray-500">
                             {p.paidDate ? new Date(p.paidDate).toLocaleDateString('en-IN') : '—'}
+                          </td>
+                          <td className="py-3 px-4">
+                            {p.status === 'paid' ? (
+                              <Button size="sm" variant="outline" className="h-7 text-xs gap-1 text-green-700 border-green-200"
+                                onClick={() => openReceiptWindow({ payment: p, propertyName: property?.name ?? '', ownerName: receiptOwnerName })}>
+                                <Receipt className="w-3 h-3" /> Receipt
+                              </Button>
+                            ) : (
+                              <Button size="sm" variant="outline" className="h-7 text-xs gap-1"
+                                onClick={() => openInvoiceWindow({ payment: p, propertyName: property?.name ?? '', ownerName: receiptOwnerName })}>
+                                <CreditCard className="w-3 h-3" /> Invoice
+                              </Button>
+                            )}
                           </td>
                         </tr>
                       ))}
@@ -1686,52 +1908,15 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
           </div>
         </TabsContent>
 
-        {/* Documents tab */}
+        {/* Documents tab — unified: Agreements, Receipts, Identity, Other */}
         <TabsContent value="documents">
-          <DocumentVaultTab tenant={tenant} />
-        </TabsContent>
-
-        {/* Receipts tab */}
-        <TabsContent value="receipts">
-          <Card className="border-gray-200">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <ReceiptText className="w-4 h-4 text-indigo-600" /> Payment Receipts
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {payments.filter((p) => p.status === 'paid').length === 0 ? (
-                <p className="text-center py-8 text-gray-400 text-sm">No receipts yet — receipts are generated when payments are marked as paid</p>
-              ) : (
-                <div className="space-y-2">
-                  {payments.filter((p) => p.status === 'paid').map((p) => (
-                    <div key={p.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
-                      <div>
-                        <p className="text-sm font-medium text-gray-900">
-                          {new Date(p.dueDate).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}
-                        </p>
-                        <p className="text-xs text-gray-500">
-                          ₹{p.totalAmount.toLocaleString('en-IN')} · Paid {p.paidDate ? new Date(p.paidDate).toLocaleDateString('en-IN') : '—'}
-                        </p>
-                      </div>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-7 text-xs gap-1"
-                        onClick={() => openReceiptWindow({ payment: p, propertyName: property?.name ?? '' })}
-                      >
-                        <Printer className="w-3.5 h-3.5" /> Receipt
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="agreement">
-          <AgreementTab tenant={tenant} property={property} />
+          <DocumentsTab
+            tenant={tenant}
+            payments={payments}
+            property={property}
+            receiptOwnerName={receiptOwnerName}
+            onTenantUpdate={(updated) => setTenant(updated)}
+          />
         </TabsContent>
 
         {/* Settlement tab (shown only after vacate) */}
@@ -1782,7 +1967,7 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
                       pendingRentTotal: 0,
                       settledAt: new Date().toISOString(),
                       propertyName: property?.name ?? '',
-                      ownerName: '',
+                      ownerName: receiptOwnerName ?? '',
                     });
                   }}
                 >
@@ -1795,12 +1980,13 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
       </Tabs>
 
       {/* Vacate workflow modal */}
+      {extendOpen && <ExtendLeaseModal tenant={tenant} open={extendOpen} onClose={() => setExtendOpen(false)} onComplete={(t) => setTenant(t)} />}
       {vacateOpen && (
         <VacateWorkflowModal
           tenant={tenant}
           pendingPayments={pendingPayments}
           propertyName={property?.name ?? ''}
-          ownerName=""
+          ownerName={receiptOwnerName ?? ''}
           open={vacateOpen}
           onClose={() => setVacateOpen(false)}
           onComplete={(updated) => {

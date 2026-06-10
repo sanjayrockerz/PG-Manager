@@ -18,11 +18,13 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
+import { useRealtimeRefresh } from '../hooks/useRealtimeRefresh';
 import { supabase } from '../lib/supabase';
 import {
   supabaseAuthDataApi, supabaseOwnerDataApi, supabaseLifecycleApi,
   type OwnerSettingsRecord, type ProfileUpdateInput, type OwnerSubscriptionRecord,
   type OwnerSignatureProfile, type AgreementTemplate, type AgreementTemplateUpsertInput,
+  defaultSettings,
 } from '../services/supabaseData';
 import { logSettingsChange } from '../utils/settingsAudit';
 import { SMS_PROVIDER_OPTIONS, type SMSProviderName } from '../services/smsProvider';
@@ -436,7 +438,7 @@ export function Settings() {
       const s = await supabaseOwnerDataApi.getOwnerSettings();
       setOwnerSettings(s);
     } catch {
-      // use defaults
+      setOwnerSettings(defaultSettings);
     } finally {
       setSettingsLoading(false);
     }
@@ -797,6 +799,13 @@ export function Settings() {
     void loadSignatureProfile();
     void loadAgreementTemplate();
   }, []);
+
+  // Live plan/limit updates when admin changes the owner's subscription
+  useRealtimeRefresh({
+    key: 'settings-subscription',
+    tables: ['owner_subscriptions'],
+    onChange: () => void loadSubscription(),
+  });
 
   const userInitials = (user?.name ?? user?.email ?? 'U').split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2);
   const currentPlan = PLANS.find((p) => p.code === (subscription?.planCode ?? 'starter')) ?? PLANS[0];
@@ -1372,7 +1381,7 @@ export function Settings() {
                       ))}
                     </ul>
                     {subscription?.trialEndsAt && subscription.status === 'trialing' && (
-                      <p className="text-sm text-amber-600">Trial ends: {new Date(subscription.trialEndsAt).toLocaleDateString('en-IN')}</p>
+                      <p className="text-sm text-amber-600">Renews on: {new Date(subscription.trialEndsAt).toLocaleDateString('en-IN')}</p>
                     )}
                     {subscription?.renewsAt && subscription.status === 'active' && (
                       <p className="text-sm text-gray-500">Renews: {new Date(subscription.renewsAt).toLocaleDateString('en-IN')}</p>

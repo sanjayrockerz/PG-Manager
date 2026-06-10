@@ -28,6 +28,9 @@ type TableName =
   | 'maintenance_threads'
   | 'tenant_documents'
   | 'agreements'
+  | 'agreement_events'
+  | 'agreement_templates'
+  | 'owner_signature_profiles'
   | 'property_floors'
   | 'beds';
 
@@ -57,6 +60,11 @@ export function useRealtimeRefresh({
 
   const uniqueTables = useMemo(() => Array.from(new Set(tables)), [tables]);
 
+  const onChangeRef = useRef(onChange);
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
+
   useEffect(() => {
     if (!enabled || uniqueTables.length === 0) {
       return;
@@ -72,7 +80,7 @@ export function useRealtimeRefresh({
 
       debounceRef.current = window.setTimeout(() => {
         setIsSyncing(true);
-        Promise.resolve(onChange())
+        Promise.resolve(onChangeRef.current())
           .finally(() => {
             lastRefreshRef.current = Date.now();
             setIsSyncing(false);
@@ -112,20 +120,38 @@ export function useRealtimeRefresh({
 
     window.addEventListener('owner-data-updated', handleManualRefresh);
 
-    channel.subscribe();
+    channel.subscribe((status, err) => {
+      if (status === 'SUBSCRIBED') {
+        // Connected successfully
+      } else if (status === 'CHANNEL_ERROR' || status === 'CLOSED') {
+        // Disconnected or error - trigger a manual fetch so we don't miss data
+        // while the socket tries to reconnect in the background
+        runRefresh();
+      } else if (status === 'TIMED_OUT') {
+        runRefresh();
+      }
+    });
+
+    const handleOnline = () => {
+      // User's network came back online. Refresh data.
+      runRefresh();
+    };
+
+    window.addEventListener('online', handleOnline);
 
     return () => {
       if (debounceRef.current) window.clearTimeout(debounceRef.current);
       if (fallbackTimerRef.current) window.clearTimeout(fallbackTimerRef.current);
 
       window.removeEventListener('owner-data-updated', handleManualRefresh);
+      window.removeEventListener('online', handleOnline);
 
       if (channelRef.current) {
         void supabase.removeChannel(channelRef.current);
         channelRef.current = null;
       }
     };
-  }, [debounceMs, enabled, key, onChange, uniqueTables]);
+  }, [debounceMs, enabled, key, uniqueTables]);
 
   return {
     lastUpdatedAt,

@@ -1,10 +1,11 @@
-import type { Property } from '../contexts/PropertyContext';
+import type { Property, Room } from '../contexts/PropertyContext';
 import type {
   ActivityLogEntry,
   AnnouncementRecord,
   DashboardSnapshot,
   MaintenanceTicketRecord,
   PaymentRecord,
+  SupportTicketRecord,
   TenantRecord,
   VacateRequest,
 } from '../services/supabaseData';
@@ -40,7 +41,8 @@ const monthLabel = (monthOffset: number): string =>
 const DEMO_OWNER_ID = 'demo-owner-1';
 
 // ─── Properties ───────────────────────────────────────────────────────────────
-export const demoProperties: Property[] = [
+// Base hand-authored properties (IDs referenced by AuthContext demo users).
+const baseDemoProperties: Property[] = [
   {
     id: 'demo-property-1',
     name: 'Shree Niwas PG',
@@ -95,7 +97,7 @@ export const demoProperties: Property[] = [
 
 // ─── Tenants ──────────────────────────────────────────────────────────────────
 // demo-tenant-1 must match AuthContext DEMO_USERS.tenant (Arjun Sharma, room 101 bed 1)
-export const demoTenants: TenantRecord[] = [
+const baseDemoTenants: TenantRecord[] = [
   // --- Shree Niwas PG ---
   {
     id: 'demo-tenant-1',
@@ -340,6 +342,166 @@ export const demoTenants: TenantRecord[] = [
   },
 ];
 
+// ─── Procedurally generated third property ──────────────────────────────────────
+// Scales the demo to 3 properties / 40 rooms / 77 beds / 60+ tenants without
+// disturbing the hand-authored narrative set above. Deterministic (stable across
+// renders) so payments/occupancy stay consistent.
+const P3_ID = 'demo-property-3';
+
+const DEMO_FIRST_NAMES = [
+  'Aditya', 'Ishaan', 'Vivaan', 'Reyansh', 'Krishna', 'Aarav', 'Kabir', 'Aryan', 'Dhruv', 'Karan',
+  'Manish', 'Nikhil', 'Rahul', 'Saurabh', 'Tushar', 'Varun', 'Akash', 'Gaurav', 'Harsh', 'Lakshya',
+  'Ananya', 'Diya', 'Isha', 'Meera', 'Riya', 'Sneha', 'Tanvi', 'Aditi', 'Pooja', 'Shreya',
+  'Naina', 'Kriti', 'Anjali', 'Bhavna', 'Devika', 'Garima', 'Jyoti', 'Komal', 'Lavanya', 'Mahima',
+  'Nidhi', 'Payal', 'Ritika', 'Simran', 'Vandana', 'Yamini', 'Farah', 'Ira', 'Tarini', 'Ojas',
+];
+const DEMO_SURNAMES = [
+  'Sharma', 'Verma', 'Gupta', 'Agarwal', 'Meena', 'Rajput', 'Choudhary', 'Joshi', 'Soni', 'Khandelwal',
+  'Saini', 'Yadav', 'Jain', 'Mathur', 'Bhandari', 'Purohit', 'Vyas', 'Tiwari', 'Mishra', 'Nair',
+];
+const DEMO_ID_TYPES = ['Aadhaar', 'PAN', 'Passport', 'Driving License'];
+
+function genRoomType(slot: number): { type: Room['type']; beds: number } {
+  if (slot < 2) return { type: 'single', beds: 1 };
+  if (slot < 4) return { type: 'double', beds: 2 };
+  return { type: 'triple', beds: 3 };
+}
+
+const p3Rooms: Room[] = [];
+const demoProperty3Tenants: TenantRecord[] = [];
+let p3Seq = 0;
+
+const P3_FLOORS = 5;
+const P3_ROOMS_PER_FLOOR = 6;
+
+for (let floor = 1; floor <= P3_FLOORS; floor++) {
+  for (let slot = 0; slot < P3_ROOMS_PER_FLOOR; slot++) {
+    const idx = (floor - 1) * P3_ROOMS_PER_FLOOR + slot;
+    const { type, beds } = genRoomType(slot);
+    const number = `${floor}${String(slot + 1).padStart(2, '0')}`;
+    const baseRent = type === 'single' ? 9200 : type === 'double' ? 8600 : 7400;
+    const rent = baseRent + (floor - 1) * 150;
+
+    // Deterministic occupancy → ~85% fill with a few vacant + one maintenance.
+    let status: Room['status'];
+    let occupiedBeds: number;
+    if (idx % 14 === 4) { status = 'vacant'; occupiedBeds = 0; }
+    else if (idx % 23 === 9) { status = 'maintenance'; occupiedBeds = 0; }
+    else {
+      const partial = beds > 1 && idx % 12 === 3;
+      occupiedBeds = partial ? beds - 1 : beds;
+      status = 'occupied';
+    }
+
+    p3Rooms.push({ id: `demo-room-p3-${number}`, number, floor, type, beds, rent, status, occupiedBeds });
+
+    for (let b = 1; b <= occupiedBeds; b++) {
+      const first = DEMO_FIRST_NAMES[p3Seq % DEMO_FIRST_NAMES.length];
+      const last = DEMO_SURNAMES[(p3Seq * 7 + floor) % DEMO_SURNAMES.length];
+      const monthsAgo = (p3Seq % 9) + 1;
+      const day = (p3Seq % 26) + 1;
+
+      let tStatus: TenantRecord['status'] = 'active';
+      let vacateDate: string | undefined;
+      let vacateReason: string | undefined;
+      if (p3Seq % 13 === 6) {
+        tStatus = 'payment_overdue';
+      } else if (p3Seq === 8) {
+        tStatus = 'notice_submitted';
+        vacateDate = toDateOnly(shiftDays(18));
+        vacateReason = 'Relocating closer to workplace.';
+      }
+
+      demoProperty3Tenants.push({
+        id: `demo-tenant-p3-${p3Seq + 1}`,
+        ownerId: DEMO_OWNER_ID,
+        name: `${first} ${last}`,
+        phone: `+9197${String(30000000 + p3Seq * 137).slice(0, 8)}`,
+        email: `${first.toLowerCase()}.${last.toLowerCase()}${p3Seq}@demo.app`,
+        photoUrl: '',
+        propertyId: P3_ID,
+        floor,
+        room: number,
+        bed: String(b),
+        rent,
+        securityDeposit: rent * 2,
+        rentDueDate: (p3Seq % 10) + 1,
+        parentName: `${DEMO_FIRST_NAMES[(p3Seq * 3 + 1) % DEMO_FIRST_NAMES.length]} ${last}`,
+        parentPhone: `+9198${String(20000000 + p3Seq * 211).slice(0, 8)}`,
+        idType: DEMO_ID_TYPES[p3Seq % DEMO_ID_TYPES.length],
+        idNumber: `${100000000000 + p3Seq * 8237}`,
+        idDocumentUrl: '',
+        joinDate: toJoinDate(-monthsAgo, day),
+        status: tStatus,
+        ...(vacateDate ? { vacateDate, vacateReason } : {}),
+        createdAt: toCreatedAt(-monthsAgo, day),
+      });
+      p3Seq++;
+    }
+  }
+}
+
+const demoProperty3: Property = {
+  id: P3_ID,
+  name: 'Lakeview Residency PG',
+  address: '5, Amrapali Circle, Vaishali Nagar',
+  addressLine1: '5, Amrapali Circle',
+  locality: 'Vaishali Nagar',
+  city: 'Jaipur',
+  state: 'Rajasthan',
+  pincode: '302021',
+  floors: P3_FLOORS,
+  totalRooms: p3Rooms.length,
+  contactName: 'Meghna Singhania',
+  contactPhone: '+919887654323',
+  contactEmail: 'lakeview.pg@demo.app',
+  formattedAddress: '5, Amrapali Circle, Vaishali Nagar, Jaipur, Rajasthan 302021',
+  occupancyMode: 'BED_BASED',
+  createdAt: toCreatedAt(-12, 3),
+  rooms: p3Rooms,
+};
+
+// A couple of P3 maintenance tickets so the third property is not an empty screen.
+const demoProperty3Tickets: MaintenanceTicketRecord[] = [
+  {
+    id: 'demo-ticket-p3-1',
+    ticketId: 'TKT-101',
+    tenant: demoProperty3Tenants[0]?.name ?? 'Resident',
+    propertyId: P3_ID,
+    room: demoProperty3Tenants[0]?.room ?? '101',
+    issue: 'AC servicing required',
+    description: 'Room AC is cooling poorly and needs a filter clean + gas top-up.',
+    source: 'portal',
+    status: 'in-progress',
+    priority: 'medium',
+    date: toDateOnly(shiftDays(-2)),
+    phone: demoProperty3Tenants[0]?.phone ?? '',
+    notes: ['Technician assigned, visit scheduled.'],
+    threads: [],
+    assignedTo: 'HVAC - CoolCare',
+  },
+  {
+    id: 'demo-ticket-p3-2',
+    ticketId: 'TKT-102',
+    tenant: demoProperty3Tenants[5]?.name ?? 'Resident',
+    propertyId: P3_ID,
+    room: demoProperty3Tenants[5]?.room ?? '102',
+    issue: 'Common area light fused',
+    description: 'Second floor corridor light is not working at night.',
+    source: 'manual',
+    status: 'open',
+    priority: 'low',
+    date: toDateOnly(shiftDays(-1)),
+    phone: demoProperty3Tenants[5]?.phone ?? '',
+    notes: [],
+    threads: [],
+  },
+];
+
+// ─── Combined exports (base narrative set + generated third property) ────────────
+export const demoProperties: Property[] = [...baseDemoProperties, demoProperty3];
+export const demoTenants: TenantRecord[] = [...baseDemoTenants, ...demoProperty3Tenants];
+
 // ─── Payments ─────────────────────────────────────────────────────────────────
 const activeTenants = demoTenants.filter((t) => isTenantCurrentlyInRoom(t.status));
 
@@ -462,6 +624,7 @@ export const demoMaintenanceTickets: MaintenanceTicketRecord[] = [
     notes: ['Locksmith visit pending — part to be ordered.'],
     threads: [],
   },
+  ...demoProperty3Tickets,
 ];
 
 // ─── Announcements ─────────────────────────────────────────────────────────────
@@ -514,6 +677,18 @@ export const demoAnnouncements: AnnouncementRecord[] = [
     sentViaWhatsApp: true,
     propertyId: null,
   },
+  {
+    id: 'demo-ann-5',
+    title: 'Lakeview Residency — Festive Decoration Drive',
+    content:
+      'We are decorating the Lakeview common lounge for the upcoming festival this weekend. Residents are welcome to join the decoration team on Saturday evening. Snacks provided!',
+    category: 'general',
+    date: toDateOnly(shiftDays(-2)),
+    isPinned: false,
+    views: 11,
+    sentViaWhatsApp: false,
+    propertyId: 'demo-property-3',
+  },
 ];
 
 // ─── Vacate Requests ──────────────────────────────────────────────────────────
@@ -533,6 +708,87 @@ export const demoVacateRequests: VacateRequest[] = [
     deductionReason: 'Minor wall damage in room.',
     status: 'confirmed',
     createdAt: shiftDays(-4).toISOString(),
+  },
+];
+
+// ─── Support Tickets ──────────────────────────────────────────────────────────
+export const demoSupportTickets: SupportTicketRecord[] = [
+  {
+    id: 'demo-support-1',
+    ownerId: DEMO_OWNER_ID,
+    propertyId: 'demo-property-1',
+    createdBy: DEMO_OWNER_ID,
+    assignedTo: null,
+    subject: 'Unable to generate rent receipts — PDF is blank',
+    description: 'When I click "Mark as Paid" and try to download the receipt, the PDF opens but is completely blank. This has been happening since yesterday.',
+    category: 'technical',
+    priority: 'high',
+    status: 'open',
+    visibility: 'owner',
+    resolvedAt: '',
+    createdAt: shiftDays(-1).toISOString(),
+    updatedAt: shiftDays(-1).toISOString(),
+    comments: [],
+  },
+  {
+    id: 'demo-support-2',
+    ownerId: DEMO_OWNER_ID,
+    propertyId: null,
+    createdBy: DEMO_OWNER_ID,
+    assignedTo: 'support@rentcare.com',
+    subject: 'How to transfer a tenant between properties?',
+    description: 'I have a tenant in Shree Niwas PG who wants to move to Lakeview Residency. Is there a way to transfer their profile without losing payment history?',
+    category: 'billing',
+    priority: 'medium',
+    status: 'in_progress',
+    visibility: 'owner',
+    resolvedAt: '',
+    createdAt: shiftDays(-3).toISOString(),
+    updatedAt: shiftDays(-2).toISOString(),
+    comments: [
+      {
+        id: 'demo-comment-2-1',
+        ticketId: 'demo-support-2',
+        authorId: 'platform-admin',
+        message: 'Thanks for reaching out! You can use the Vacate workflow for the current property and create a new tenant profile at the destination property. We are working on a direct transfer feature for the next release.',
+        internalNote: false,
+        createdAt: shiftDays(-2).toISOString(),
+      },
+    ],
+  },
+  {
+    id: 'demo-support-3',
+    ownerId: DEMO_OWNER_ID,
+    propertyId: 'demo-property-2',
+    createdBy: DEMO_OWNER_ID,
+    assignedTo: 'support@rentcare.com',
+    subject: 'WhatsApp reminders not reaching tenants',
+    description: 'I have enabled WhatsApp payment reminders but tenants at Rajputana Boys PG report they are not receiving any messages. Please check if there is an issue with the integration.',
+    category: 'technical',
+    priority: 'high',
+    status: 'resolved',
+    visibility: 'owner',
+    resolvedAt: shiftDays(-5).toISOString(),
+    createdAt: shiftDays(-8).toISOString(),
+    updatedAt: shiftDays(-5).toISOString(),
+    comments: [
+      {
+        id: 'demo-comment-3-1',
+        ticketId: 'demo-support-3',
+        authorId: 'platform-admin',
+        message: 'We identified an issue with the WhatsApp Business API rate limiting. The fix has been deployed. Please verify that reminders are now working and let us know.',
+        internalNote: false,
+        createdAt: shiftDays(-6).toISOString(),
+      },
+      {
+        id: 'demo-comment-3-2',
+        ticketId: 'demo-support-3',
+        authorId: DEMO_OWNER_ID,
+        message: 'Confirmed — reminders are working now. Thank you!',
+        internalNote: false,
+        createdAt: shiftDays(-5).toISOString(),
+      },
+    ],
   },
 ];
 
@@ -689,6 +945,119 @@ export const buildDemoDashboardSnapshot = (propertyId: string | 'all'): Dashboar
       name: b.name,
       revenue: b.revenue,
       target: Math.round(avgRevenue),
+    })),
+  };
+};
+
+// ─── Demo Admin Summary ───────────────────────────────────────────────────────
+export const buildDemoAdminSummary = () => {
+  const totalRooms = demoProperties.reduce((s, p) => s + p.rooms.length, 0);
+  const occupiedRooms = demoProperties.flatMap((p) => p.rooms).filter((r) => r.status === 'occupied').length;
+  const totalBeds = demoProperties.flatMap((p) => p.rooms).reduce((s, r) => s + ((r as any).beds ?? 0), 0);
+  const monthlyRevenue = demoPayments
+    .filter((p) => p.status === 'paid')
+    .reduce((s, p) => s + p.totalAmount, 0);
+  const openTickets = demoSupportTickets.filter((t) => t.status === 'open').length;
+  const urgentTickets = demoSupportTickets.filter((t) => t.priority === 'urgent').length;
+  const activeTenants = demoTenants.filter((t) => t.status === 'active').length;
+
+  return {
+    profile: {
+      id: 'demo-admin-1',
+      name: 'Platform Admin',
+      email: 'admin.demo@rentcare.demo',
+      phone: '',
+      role: 'platform_admin' as const,
+      ownerScopeId: null,
+      pgName: 'RentCare Platform',
+      city: 'Bengaluru',
+      photoUrl: null,
+      onboardingComplete: true,
+      firstLoginAt: null,
+    },
+    stats: {
+      totalOwners: 3,
+      totalProperties: demoProperties.length + 2,
+      totalTenants: activeTenants + 18,
+      activeSubscriptions: 2,
+      openSupportTickets: openTickets,
+      monthlyRevenue: monthlyRevenue + 48500,
+      arr: (monthlyRevenue + 48500) * 12,
+      newMrr: 12000,
+      churnMrr: 0,
+      ownersActive: 2,
+      ownersTrialing: 1,
+      ownersSuspended: 0,
+      totalRooms: totalRooms + 12,
+      totalBeds: totalBeds + 18,
+      occupancyRate: occupiedRooms / Math.max(totalRooms, 1),
+      newTenantsThisMonth: 4,
+      vacatesThisMonth: 1,
+      urgentSupportTickets: urgentTickets,
+      avgSupportResponseHours: 3.5,
+    },
+    owners: [
+      {
+        id: DEMO_OWNER_ID,
+        name: 'Vikram Singhania',
+        email: 'vikram@singhaniapg.com',
+        phone: '+919887654321',
+        city: 'Jaipur',
+        pgName: 'Singhania PG Network',
+        propertyCount: demoProperties.length,
+        tenantCount: activeTenants,
+        subscriptionStatus: 'active' as const,
+        planCode: 'growth',
+        isSuspended: false,
+        verifiedAt: shiftDays(-60).toISOString(),
+        joinedAt: shiftDays(-180).toISOString(),
+        revenue: monthlyRevenue,
+        lastActive: shiftDays(-1).toISOString(),
+        photoUrl: null,
+      },
+      {
+        id: 'demo-owner-2',
+        name: 'Pradeep Choudhary',
+        email: 'pradeep@lakeviewpg.com',
+        phone: '+919811234567',
+        city: 'Bengaluru',
+        pgName: 'Lakeview Residency',
+        propertyCount: 2,
+        tenantCount: 18,
+        subscriptionStatus: 'trialing' as const,
+        planCode: 'starter',
+        isSuspended: false,
+        verifiedAt: null,
+        joinedAt: shiftDays(-14).toISOString(),
+        revenue: 48500,
+        lastActive: shiftDays(-2).toISOString(),
+        photoUrl: null,
+      },
+    ],
+    subscriptions: [
+      {
+        id: 'demo-sub-1',
+        ownerId: DEMO_OWNER_ID,
+        planCode: 'growth',
+        status: 'active' as const,
+        billingCycle: 'monthly' as const,
+        amount: 2499,
+        currency: 'INR',
+        seats: 3,
+        currentPeriodStart: shiftDays(-30).toISOString(),
+        currentPeriodEnd: shiftDays(0).toISOString(),
+        trialEnd: null,
+        cancelAtPeriodEnd: false,
+        createdAt: shiftDays(-180).toISOString(),
+        updatedAt: shiftDays(-30).toISOString(),
+      },
+    ],
+    support: demoSupportTickets,
+    activity: demoActivityLog.map((a) => ({
+      id: a.id,
+      label: a.event.replace(/_/g, ' '),
+      detail: a.detail,
+      createdAt: a.createdAt,
     })),
   };
 };
