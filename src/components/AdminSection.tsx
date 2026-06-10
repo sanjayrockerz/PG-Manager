@@ -710,7 +710,17 @@ export function AdminSection() {
     const today = new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
     const freeUsers = summary.stats.totalOwners - summary.stats.ownersActive - summary.stats.ownersTrialing;
     const mrrGrowth = summary.stats.arr > 0 ? (summary.stats.newMrr / (summary.stats.arr / 12)) * 100 : 0;
-    const recentActivity = auditLogEntries.slice(0, 10);
+    const recentActivity = isDemoModeEnabled() 
+      ? (summary.activity || []).map(a => ({
+          id: a.id,
+          event: a.label.replace(/ /g, '_').toUpperCase(),
+          detail: a.detail,
+          createdAt: a.createdAt,
+          ownerId: 'demo-owner',
+          propertyId: null,
+          metadata: {}
+        } as AdminActivityEntry)).slice(0, 10)
+      : auditLogEntries.slice(0, 10);
 
     return (
       <div className="space-y-6">

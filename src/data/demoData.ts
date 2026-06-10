@@ -949,6 +949,40 @@ export const buildDemoDashboardSnapshot = (propertyId: string | 'all'): Dashboar
   };
 };
 
+// ─── Demo Admin Activity Log ───────────────────────────────────────────────────
+const demoAdminActivityLog = [
+  {
+    id: 'admin-log-1',
+    event: 'NEW_SIGNUP',
+    detail: 'Raj Mehta signed up for a trial account',
+    createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+  },
+  {
+    id: 'admin-log-2',
+    event: 'PLAN_UPGRADE',
+    detail: 'Anita Sharma upgraded plan: Growth → Scale',
+    createdAt: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(),
+  },
+  {
+    id: 'admin-log-3',
+    event: 'SUBSCRIPTION_CANCELLED',
+    detail: 'Vikram Patel cancelled their subscription',
+    createdAt: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+  },
+  {
+    id: 'admin-log-4',
+    event: 'NEW_SUPPORT_TICKET',
+    detail: 'Ticket #47 created: Payment issue',
+    createdAt: new Date(Date.now() - 26 * 60 * 60 * 1000).toISOString(),
+  },
+  {
+    id: 'admin-log-5',
+    event: 'PAYMENT_FAILED',
+    detail: 'Subscription payment of ₹1,500 failed for Suresh Kumar',
+    createdAt: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(),
+  },
+];
+
 // ─── Demo Admin Summary ───────────────────────────────────────────────────────
 export const buildDemoAdminSummary = () => {
   const totalRooms = demoProperties.reduce((s, p) => s + p.rooms.length, 0);
@@ -1053,7 +1087,7 @@ export const buildDemoAdminSummary = () => {
       },
     ],
     support: demoSupportTickets,
-    activity: demoActivityLog.map((a) => ({
+    activity: demoAdminActivityLog.map((a) => ({
       id: a.id,
       label: a.event.replace(/_/g, ' '),
       detail: a.detail,

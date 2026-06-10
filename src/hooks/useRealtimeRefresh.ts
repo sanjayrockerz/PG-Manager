@@ -58,7 +58,8 @@ export function useRealtimeRefresh({
   const lastRefreshRef = useRef<number>(Date.now());
   const fallbackTimerRef = useRef<number | null>(null);
 
-  const uniqueTables = useMemo(() => Array.from(new Set(tables)), [tables]);
+  const tablesKey = tables.slice().sort().join(',');
+  const uniqueTables = useMemo(() => Array.from(new Set(tables)), [tablesKey]);
 
   const onChangeRef = useRef(onChange);
   useEffect(() => {
@@ -123,7 +124,7 @@ export function useRealtimeRefresh({
     channel.subscribe((status, err) => {
       if (status === 'SUBSCRIBED') {
         // Connected successfully
-      } else if (status === 'CHANNEL_ERROR' || status === 'CLOSED') {
+      } else if (status === 'CHANNEL_ERROR') {
         // Disconnected or error - trigger a manual fetch so we don't miss data
         // while the socket tries to reconnect in the background
         runRefresh();
