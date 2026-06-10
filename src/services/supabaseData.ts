@@ -857,6 +857,8 @@ export interface TenantPortalSnapshot {
   notifications: NotificationRecord[];
   ownerPaymentInfo: TenantOwnerPaymentInfo;
   vacateRequest: VacateRequest | null;
+  documents: TenantDocument[];
+  agreements: AgreementRecord[];
 }
 
 export interface OwnerSettingsRecord {
@@ -5983,6 +5985,94 @@ export const supabaseNotificationApi = {
       throw error;
     }
   },
+
+  // ── Tenant Account Provisioning ───────────────────────────────────────────────
+  // Creates the Supabase auth user and profiles row for a new tenant so they can
+  // sign in via magic link without ever manually registering an account.
+
+  async provisionTenantAccount(email: string, name: string): Promise<{ userId: string; isNew: boolean }> {
+    const serviceRoleKey = String((import.meta as any).env?.VITE_SUPABASE_SERVICE_ROLE_KEY ?? '');
+    if (!serviceRoleKey) {
+      // Graceful fallback: if service role key not configured, skip provisioning silently.
+      // The owner can send the invite manually from TenantDetail.
+      return { userId: '', isNew: false };
+    }
+
+    const { createClient: createAdminClient } = await import('@supabase/supabase-js');
+    const adminClient = createAdminClient(supabaseUrl, serviceRoleKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+
+    // Check if an auth user already exists for this email.
+    const { data: listData } = await (adminClient.auth.admin.listUsers() as unknown as Promise<{ data: { users: Array<{ id: string; email?: string }> } }>);
+    const existingUser = listData?.users?.find(
+      (u) => u.email?.toLowerCase() === email.toLowerCase(),
+    );
+
+    if (existingUser) {
+      // Ensure profile row has role=tenant
+      await supabase
+        .from('profiles')
+        .update({ role: 'tenant' })
+        .eq('id', existingUser.id)
+        .eq('role', 'owner'); // Only correct if accidentally created as owner
+      return { userId: existingUser.id, isNew: false };
+    }
+
+    // Create new auth user (email_confirm:true so magic link works immediately)
+    const { data: newUserData, error: createError } = await adminClient.auth.admin.createUser({
+      email: email.toLowerCase(),
+      email_confirm: true,
+      user_metadata: { name, role: 'tenant' },
+    });
+
+    if (createError || !newUserData?.user?.id) {
+      throw createError ?? new Error('Failed to create tenant auth account.');
+    }
+
+    const userId = newUserData.user.id;
+
+    // Upsert profiles row
+    await supabase.from('profiles').upsert({
+      id: userId,
+      email: email.toLowerCase(),
+      name,
+      role: 'tenant',
+    }, { onConflict: 'id' });
+
+    return { userId, isNew: true };
+  },
+
+  async sendTenantMagicLink(email: string, redirectTo?: string): Promise<void> {
+    const serviceRoleKey = String((import.meta as any).env?.VITE_SUPABASE_SERVICE_ROLE_KEY ?? '');
+    if (!serviceRoleKey) {
+      // Fall back to anon magic link (works if account already exists and email provider enabled)
+      const emailRedirectTo = redirectTo ?? (typeof window !== 'undefined' ? window.location.origin : undefined);
+      await supabase.auth.signInWithOtp({
+        email: email.toLowerCase(),
+        options: { shouldCreateUser: false, ...(emailRedirectTo ? { emailRedirectTo } : {}) },
+      });
+      return;
+    }
+
+    const { createClient: createAdminClient } = await import('@supabase/supabase-js');
+    const adminClient = createAdminClient(supabaseUrl, serviceRoleKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+
+    const emailRedirectTo = redirectTo ?? (typeof window !== 'undefined' ? window.location.origin : undefined);
+
+    const { error } = await adminClient.auth.admin.generateLink({
+      type: 'magiclink',
+      email: email.toLowerCase(),
+      options: { ...(emailRedirectTo ? { redirectTo: emailRedirectTo } : {}) },
+    });
+
+    if (error) throw error;
+
+    // Supabase admin generateLink sends the email automatically when using the hosted platform.
+    // If self-hosted, you must configure the SMTP settings.
+  },
 };
 
 export const supabaseTenantDataApi = {
@@ -5998,6 +6088,8 @@ export const supabaseTenantDataApi = {
       notificationRows,
       ownerPaymentRpc,
       vacateRows,
+      documentRows,
+      agreementRows,
     ] = await Promise.all([
       supabase
         .from('properties')
@@ -6046,6 +6138,20 @@ export const supabaseTenantDataApi = {
           deposit_refund: number | null; deposit_deduction: number | null;
           deduction_reason: string | null; final_settlement_amount: number | null;
         }>>(),
+      supabase
+        .from('tenant_documents')
+        .select('*')
+        .eq('tenant_id', tenant.id)
+        .order('created_at')
+        .returns<TenantDocumentRow[]>()
+        .catch(() => ({ data: [] as TenantDocumentRow[], error: null })),
+      supabase
+        .from('agreements')
+        .select('*')
+        .eq('tenant_id', tenant.id)
+        .order('created_at', { ascending: false })
+        .returns<AgreementRow[]>()
+        .catch(() => ({ data: [] as AgreementRow[], error: null })),
     ]);
 
     if (propertyError) {
@@ -6142,6 +6248,8 @@ export const supabaseTenantDataApi = {
       notifications: scopedNotifications,
       ownerPaymentInfo,
       vacateRequest,
+      documents: (documentRows.data ?? []).map(mapTenantDocument),
+      agreements: (agreementRows.data ?? []).map(mapAgreement),
     };
   },
 

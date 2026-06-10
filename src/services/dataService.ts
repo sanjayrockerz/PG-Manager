@@ -647,6 +647,21 @@ export async function createTenantRecord(input: TenantCreateInput): Promise<Tena
   return runSupabase(mode, async () => {
     const created = await supabaseOwnerDataApi.createTenant(input);
 
+    // Auto-provision tenant auth account + send magic link (fire-and-forget, non-blocking)
+    void (async () => {
+      try {
+        if (input.email && !input.email.includes('noemail.')) {
+          // Provision auth account so tenant can sign in via magic link
+          await supabaseOwnerDataApi.provisionTenantAccount(input.email, input.name);
+          // Send the magic link invitation
+          await supabaseOwnerDataApi.sendTenantMagicLink(input.email);
+        }
+      } catch (provisionErr) {
+        // Non-blocking — provisioning failure doesn't block tenant creation
+        console.warn('Tenant auth provisioning failed (non-blocking):', provisionErr);
+      }
+    })();
+
     // Fire-and-forget agreement draft creation
     void (async () => {
       try {
@@ -695,6 +710,7 @@ export async function createTenantRecord(input: TenantCreateInput): Promise<Tena
     return created;
   });
 }
+
 
 export async function updateTenantRecord(tenantId: string, input: Partial<TenantCreateInput>): Promise<TenantRecord> {
   const mode = getAppMode();
