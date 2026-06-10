@@ -24,6 +24,8 @@ import {
   processVacateWorkflow,
   archiveTenantRecord,
   updateTenantRecord,
+  getOwnerTenantSnapshot,
+  getTenantFromCache,
 } from '../services/dataService';
 import type { TenantRecord, PaymentRecord, MaintenanceTicketRecord, AgreementRecord, TenantDocument } from '../services/supabaseData';
 import {
@@ -1491,10 +1493,13 @@ function DocumentsTab({
 
 export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
   const { properties } = useProperty();
-  const [tenant, setTenant] = useState<TenantRecord | null>(null);
+  const [tenant, setTenant] = useState<TenantRecord | null>(() => getTenantFromCache(tenantId));
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
   const [tickets, setTickets] = useState<MaintenanceTicketRecord[]>([]);
-  const [loading, setLoading] = useState(true);
+  
+  const [loading, setLoading] = useState(!tenant);
+  const [deferredLoading, setDeferredLoading] = useState(true);
+
   const [activeTab, setActiveTab] = useState('activity');
   const [vacateOpen, setVacateOpen] = useState(false);
   const [extendOpen, setExtendOpen] = useState(false);
@@ -1508,20 +1513,18 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
     properties.find((p) => p.id === propertyId)?.name ?? propertyId;
 
   const load = async () => {
-    setLoading(true);
+    if (!tenant) setLoading(true);
+    setDeferredLoading(true);
     try {
-      const [tenantData, paymentsData, ticketsData] = await Promise.all([
-        getTenantById(tenantId),
-        getPaymentsForTenant(tenantId),
-        getMaintenanceForTenant(tenantId),
-      ]);
-      setTenant(tenantData);
-      setPayments(paymentsData);
-      setTickets(ticketsData);
+      const snapshot = await getOwnerTenantSnapshot(tenantId);
+      setTenant(snapshot.tenant);
+      setPayments(snapshot.payments);
+      setTickets(snapshot.maintenance);
     } catch {
       // errors shown by empty state
     } finally {
       setLoading(false);
+      setDeferredLoading(false);
     }
   };
 
@@ -1548,12 +1551,7 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
     }
   };
 
-  useRealtimeRefresh({
-    key: `tenant-detail-${tenantId}`,
-    tables: ['tenants', 'payments', 'maintenance_tickets', 'agreements', 'agreement_events', 'owner_signature_profiles', 'agreement_templates', 'tenant_documents'],
-    onChange: () => void load(),
-    enabled: !isDemoModeEnabled(),
-  });
+
 
   if (loading) {
     return (
@@ -1771,7 +1769,9 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
               <CardTitle>Payment History</CardTitle>
             </CardHeader>
             <CardContent>
-              {payments.length === 0 ? (
+              {deferredLoading ? (
+                <div className="py-12 flex justify-center"><Loader2 className="w-6 h-6 text-indigo-400 animate-spin" /></div>
+              ) : payments.length === 0 ? (
                 <p className="text-center py-8 text-gray-400 text-sm">No payment records found</p>
               ) : (
                 <div className="overflow-x-auto">
@@ -1829,7 +1829,9 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
           <Card className="border-gray-200">
             <CardHeader><CardTitle>Maintenance Requests</CardTitle></CardHeader>
             <CardContent>
-              {tickets.length === 0 ? (
+              {deferredLoading ? (
+                <div className="py-12 flex justify-center"><Loader2 className="w-6 h-6 text-indigo-400 animate-spin" /></div>
+              ) : tickets.length === 0 ? (
                 <p className="text-center py-8 text-gray-400 text-sm">No maintenance tickets found</p>
               ) : (
                 <div className="overflow-x-auto">

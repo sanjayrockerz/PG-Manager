@@ -393,13 +393,63 @@ export async function getDashboardData(
   return runSupabase(mode, () => supabaseOwnerDataApi.getDashboardSnapshot(propertyId, dateRange));
 }
 
+// ─── Caches ───────────────────────────────────────────────────────────────────
+const tenantCache: Record<string, { ts: number; data: TenantRecord[] }> = {};
+const paymentCache: Record<string, { ts: number; data: PaymentRecord[] }> = {};
+const CACHE_TTL = 60_000 * 15; // 15 minutes
+
+export function invalidateTenantCache(propertyId?: string | 'all') {
+  if (propertyId) delete tenantCache[propertyId];
+  else for (const key in tenantCache) delete tenantCache[key];
+}
+
+export function invalidatePaymentCache(propertyId?: string | 'all') {
+  if (propertyId) delete paymentCache[propertyId];
+  else for (const key in paymentCache) delete paymentCache[key];
+}
+
+export function patchTenantCache(tenantId: string, patch: Partial<TenantRecord>) {
+  for (const key in tenantCache) {
+    const list = tenantCache[key].data;
+    const idx = list.findIndex(t => t.id === tenantId);
+    if (idx !== -1) {
+      list[idx] = { ...list[idx], ...patch };
+    }
+  }
+}
+
+export function getTenantFromCache(tenantId: string): TenantRecord | null {
+  for (const key in tenantCache) {
+    const found = tenantCache[key].data.find(t => t.id === tenantId);
+    if (found) return structuredClone(found);
+  }
+  return null;
+}
+
+export function patchPaymentCache(paymentId: string, patch: Partial<PaymentRecord>) {
+  for (const key in paymentCache) {
+    const list = paymentCache[key].data;
+    const idx = list.findIndex(p => p.id === paymentId);
+    if (idx !== -1) {
+      list[idx] = { ...list[idx], ...patch };
+    }
+  }
+}
+
 export async function getTenants(propertyId: string | 'all' = 'all'): Promise<TenantRecord[]> {
   const mode = getAppMode();
   if (mode === 'demo') {
     return clone(filterByProperty(readDemoStore().tenants, propertyId));
   }
 
-  return runSupabase(mode, () => supabaseOwnerDataApi.listTenants(propertyId));
+  const now = Date.now();
+  if (tenantCache[propertyId] && (now - tenantCache[propertyId].ts < CACHE_TTL)) {
+    return structuredClone(tenantCache[propertyId].data);
+  }
+
+  const data = await runSupabase(mode, () => supabaseOwnerDataApi.listTenants(propertyId));
+  tenantCache[propertyId] = { ts: now, data };
+  return structuredClone(data);
 }
 
 export async function getProperties(): Promise<Property[]> {
@@ -417,7 +467,14 @@ export async function getPayments(propertyId: string | 'all' = 'all'): Promise<P
     return clone(filterByProperty(readDemoStore().payments, propertyId));
   }
 
-  return runSupabase(mode, () => supabaseOwnerDataApi.listPayments(propertyId));
+  const now = Date.now();
+  if (paymentCache[propertyId] && (now - paymentCache[propertyId].ts < CACHE_TTL)) {
+    return structuredClone(paymentCache[propertyId].data);
+  }
+
+  const data = await runSupabase(mode, () => supabaseOwnerDataApi.listPayments(propertyId));
+  paymentCache[propertyId] = { ts: now, data };
+  return structuredClone(data);
 }
 
 export async function getSupportTickets(propertyId: string | 'all' = 'all'): Promise<SupportTicketRecord[]> {
@@ -1607,6 +1664,46 @@ export async function getTenantPortalSnapshot(): Promise<TenantPortalSnapshot> {
     };
   }
   return runSupabase(mode, () => supabaseTenantDataApi.getPortalSnapshot());
+}
+
+export interface OwnerTenantSnapshot {
+  tenant: TenantRecord;
+  payments: PaymentRecord[];
+  maintenance: import('./supabaseData').MaintenanceTicketRecord[];
+  agreements: import('./supabaseData').AgreementRecord[];
+  documents: import('./supabaseData').TenantDocument[];
+}
+
+export async function getOwnerTenantSnapshot(tenantId: string): Promise<OwnerTenantSnapshot> {
+  const mode = getAppMode();
+  if (mode === 'demo') {
+    const tenant = await getTenantById(tenantId);
+    const payments = await getPaymentsForTenant(tenantId);
+    const maintenance = await getMaintenanceForTenant(tenantId);
+    return {
+      tenant,
+      payments,
+      maintenance,
+      agreements: [],
+      documents: [],
+    };
+  }
+  return runSupabase(mode, async () => {
+    const [tenant, payments, maintenance, agreements, documents] = await Promise.all([
+      supabaseOwnerDataApi.getTenantById(tenantId),
+      supabaseOwnerDataApi.listPayments('all').then(list => list.filter(p => p.tenantId === tenantId)),
+      supabaseOwnerDataApi.listMaintenanceTickets('all').then(list => list.filter(m => m.tenant === tenantId || m.phone)), // Approximate for demo
+      import('./supabaseData').then(m => m.supabaseLifecycleApi.getAgreements(tenantId)).catch(() => []),
+      import('./supabaseData').then(m => m.supabaseLifecycleApi.getTenantDocuments(tenantId)).catch(() => []),
+    ]);
+    
+    // For maintenance, the API returns it by property or all, so filtering by phone/tenant name is done on client if needed,
+    // but a proper API call should filter by tenant_id. Since we don't have getMaintenanceForTenant in supabaseOwnerDataApi,
+    // we'll filter the list.
+    const actualMaintenance = maintenance.filter(m => m.tenant === tenant.name || m.phone === tenant.phone);
+
+    return { tenant, payments, maintenance: actualMaintenance, agreements, documents };
+  });
 }
 
 export async function submitTenantVacateRequest(input: { vacateDate: string; reason: string }): Promise<void> {

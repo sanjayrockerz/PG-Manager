@@ -10,8 +10,8 @@ import {
   Loader2, TrendingUp, ChevronDown, Filter, ChevronLeft, ChevronRight,
 } from 'lucide-react';
 import { useProperty } from '../contexts/PropertyContext';
-import { useRealtimeRefresh } from '../hooks/useRealtimeRefresh';
-import { isDemoModeEnabled, getPayments, updatePaymentStatusRecord, addPaymentChargeRecord, getTenantById } from '../services/dataService';
+import { supabase } from '../lib/supabase';
+import { isDemoModeEnabled, getPayments, updatePaymentStatusRecord, addPaymentChargeRecord, getTenantById, patchPaymentCache, invalidatePaymentCache } from '../services/dataService';
 import { supabaseOwnerDataApi } from '../services/supabaseData';
 import type { PaymentRecord, PaymentStatus } from '../services/supabaseData';
 import { openReceiptWindow, openInvoiceWindow } from '../services/receiptGenerator';
@@ -123,26 +123,53 @@ export function Payments({ onNavigate }: PaymentsProps) {
   const getPropertyName = (propertyId: string) =>
     properties.find((p) => p.id === propertyId)?.name ?? propertyId;
 
-  const load = async () => {
-    setLoading(true);
-    try {
-      const data = await getPayments(selectedProperty);
-      setPayments(data);
-    } catch {
-      toast.error('Failed to load payments');
-    } finally {
-      setLoading(false);
-    }
-  };
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      setLoading(true);
+      try {
+        const data = await getPayments(selectedProperty);
+        if (active) setPayments(data);
+      } catch {
+        if (active) toast.error('Failed to load payments');
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+    void load();
 
-  useEffect(() => { void load(); }, [selectedProperty]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (isDemoModeEnabled()) return;
 
-  useRealtimeRefresh({
-    key: 'payments',
-    tables: ['payments', 'payment_charges'],
-    onChange: () => void load(),
-    enabled: !isDemoModeEnabled(),
-  });
+    const channel = supabase.channel(`payments-rt-${selectedProperty}-${Date.now()}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, (payload) => {
+        if (payload.event === 'UPDATE') {
+          const row = payload.new as Record<string, unknown>;
+          if (selectedProperty !== 'all' && String(row.property_id) !== selectedProperty) return;
+          const patch = {
+            status: String(row.status) as PaymentStatus,
+            amount: Number(row.amount || 0),
+            paidDate: row.paid_date ? String(row.paid_date) : undefined
+          };
+          patchPaymentCache(String(row.id), patch);
+          setPayments((prev) => prev.map((p) => p.id === String(row.id) ? { ...p, ...patch } : p));
+        } else {
+          // INSERT or DELETE
+          invalidatePaymentCache(selectedProperty === 'all' ? undefined : selectedProperty);
+          void load();
+        }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'payment_charges' }, () => {
+        // If extra charges are added, reload to get aggregated amounts
+        invalidatePaymentCache(selectedProperty === 'all' ? undefined : selectedProperty);
+        void load();
+      })
+      .subscribe();
+
+    return () => {
+      active = false;
+      void supabase.removeChannel(channel);
+    };
+  }, [selectedProperty]);
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -215,6 +242,7 @@ export function Payments({ onNavigate }: PaymentsProps) {
     setPayments((ps) => ps.map((p) => p.id === paymentId ? { ...p, status: newStatus } : p));
     try {
       const updated = await updatePaymentStatusRecord(paymentId, newStatus);
+      patchPaymentCache(paymentId, updated);
       setPayments((ps) => ps.map((p) => p.id === paymentId ? updated : p));
       toast.success(`Payment marked as ${STATUS_LABEL[newStatus]}`);
     } catch (err) {
@@ -227,7 +255,6 @@ export function Payments({ onNavigate }: PaymentsProps) {
     if (!markPaidPayment) return;
     setMarkPaidSaving(true);
     const prev = payments;
-    setPayments((ps) => ps.map((p) => p.id === markPaidPayment.id ? { ...p, status: 'paid' as PaymentStatus } : p));
     try {
       const updated = await updatePaymentStatusRecord(markPaidPayment.id, 'paid', {
         paymentMode: markPaidForm.paymentMode,
@@ -235,6 +262,7 @@ export function Payments({ onNavigate }: PaymentsProps) {
         paidDate: markPaidForm.paidDate,
         paymentNotes: markPaidForm.paymentNotes || undefined,
       });
+      patchPaymentCache(markPaidPayment.id, updated);
       setPayments((ps) => ps.map((p) => p.id === markPaidPayment.id ? updated : p));
       setMarkPaidOpen(false);
       setMarkPaidPayment(null);

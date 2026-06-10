@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useRealtimeRefresh } from '../hooks/useRealtimeRefresh';
+import { supabase } from '../lib/supabase';
 import {
   Plus, Search, Eye, Edit, Trash, Phone, MapPin,
   IndianRupee, CheckCircle, XCircle, Save, AlertTriangle,
@@ -24,7 +24,7 @@ import { toast } from 'sonner';
 import { useProperty } from '../contexts/PropertyContext';
 import {
   getTenants, createTenantRecord, updateTenantRecord, deleteTenantRecord,
-  importTenantsFromCSV, isDemoModeEnabled,
+  importTenantsFromCSV, isDemoModeEnabled, patchTenantCache, invalidateTenantCache
 } from '../services/dataService';
 import type { TenantRecord, TenantCreateInput, TenantStatus } from '../services/supabaseData';
 import { TENANT_STATUS_LABELS, TENANT_STATUS_COLORS } from '../services/supabaseData';
@@ -128,28 +128,51 @@ export function Tenants({ onViewTenant }: TenantsProps) {
     properties.find((p) => p.id === propertyId)?.name ?? propertyId;
 
   useEffect(() => {
+    let active = true;
+
+    const loadTenants = async () => {
+      setLoading(true);
+      try {
+        const data = await getTenants(selectedProperty);
+        if (active) setTenants(data);
+      } catch {
+        if (active) toast.error('Failed to load tenants');
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+
     void loadTenants();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
+    if (isDemoModeEnabled()) return;
+
+    const channel = supabase.channel(`tenants-rt-${selectedProperty}-${Date.now()}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tenants' }, (payload) => {
+        if (payload.event === 'UPDATE') {
+          const row = payload.new as Record<string, unknown>;
+          if (selectedProperty !== 'all' && String(row.property_id) !== selectedProperty) return;
+          const patch = { 
+            status: String(row.status) as TenantStatus, 
+            rent: Number(row.monthly_rent || row.rent || 0),
+            room: String(row.room || '')
+          };
+          patchTenantCache(String(row.id), patch);
+          setTenants((prev) => prev.map((t) => t.id === String(row.id) ? { ...t, ...patch } : t));
+        } else {
+          // INSERT or DELETE
+          invalidateTenantCache(selectedProperty === 'all' ? undefined : selectedProperty);
+          void loadTenants();
+        }
+      })
+      .subscribe();
+
+    return () => {
+      active = false;
+      void supabase.removeChannel(channel);
+    };
   }, [selectedProperty]);
 
-  useRealtimeRefresh({
-    key: `tenants-${selectedProperty}`,
-    tables: ['tenants'],
-    onChange: () => void loadTenants(),
-    enabled: !isDemoModeEnabled(),
-  });
 
-  const loadTenants = async () => {
-    setLoading(true);
-    try {
-      const data = await getTenants(selectedProperty);
-      setTenants(data);
-    } catch {
-      toast.error('Failed to load tenants');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const activeInRoom = useMemo(() =>
     tenants.filter((t) => ['active', 'payment_overdue', 'notice_submitted', 'vacating'].includes(t.status)),
@@ -221,6 +244,7 @@ export function Tenants({ onViewTenant }: TenantsProps) {
     setAddLoading(true);
     try {
       const created = await createTenantRecord({ ...addForm, idDocument: idDocFile ?? undefined });
+      invalidateTenantCache(selectedProperty === 'all' ? undefined : selectedProperty);
       setTenants((prev) => [created, ...prev]);
       setAddOpen(false);
       setAddStep(1);
@@ -253,6 +277,7 @@ export function Tenants({ onViewTenant }: TenantsProps) {
     setEditLoading(true);
     try {
       const updated = await updateTenantRecord(editingId, editForm);
+      patchTenantCache(editingId, updated);
       setTenants((prev) => prev.map((t) => (t.id === editingId ? updated : t)));
       setEditOpen(false);
       setEditingId(null);
@@ -282,6 +307,7 @@ export function Tenants({ onViewTenant }: TenantsProps) {
     setDeleteLoading(true);
     try {
       await deleteTenantRecord(deletingTenant.id);
+      invalidateTenantCache(selectedProperty === 'all' ? undefined : selectedProperty);
       setTenants((prev) => prev.filter((t) => t.id !== deletingTenant.id));
       setDeleteOpen(false);
       setDeletingTenant(null);
