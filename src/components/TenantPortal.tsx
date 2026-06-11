@@ -1,10 +1,10 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle, ArrowLeft, ArrowRight, Bell, Building2, Calendar,
-  Check, CheckCircle2, ChevronRight, CreditCard,
+  Check, CheckCircle2, ChevronRight, ClipboardCheck, CreditCard, Copy,
   Download, FileText, Home, IndianRupee, LayoutDashboard, LogOut,
-  MapPin, MessageSquare, Phone, Plus, QrCode, Send, Upload, User,
-  Wrench, X, HelpCircle, Menu, Shield,
+  MapPin, MessageSquare, PanelLeftClose, PanelLeftOpen, Phone, Plus, QrCode,
+  Send, Upload, User, Wrench, X, HelpCircle, Menu, Shield,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
@@ -106,6 +106,356 @@ function statusBadge(status: string): string {
 
 // ─── Welcome Screen ───────────────────────────────────────────────────────────
 
+// ─── Onboarding Wizard ────────────────────────────────────────────────────────
+// Unified 4-step first-login wizard. Replaces the old separate WelcomeScreen
+// and MandatoryAgreementScreen. Steps:
+//   1 → Welcome  2 → Verify Info  3 → Review Agreement  4 → Sign Agreement
+// If no pending agreement, only steps 1-2 run.
+
+interface OnboardingState {
+  step: 1 | 2 | 3 | 4;
+  agreement: AgreementRecord | null;
+}
+
+function OnboardingWizard({
+  state,
+  snapshot,
+  onAdvance,
+  onSigned,
+  onDismiss,
+}: {
+  state: OnboardingState;
+  snapshot: TenantPortalSnapshot;
+  onAdvance: () => void;
+  onSigned: (updated: AgreementRecord) => void;
+  onDismiss: () => void;
+}) {
+  const { step, agreement } = state;
+  const { tenant, property, owner, ownerPaymentInfo } = snapshot;
+  const pgName = ownerPaymentInfo.pgName || property?.name || 'your property manager';
+  const totalSteps = agreement ? 4 : 2;
+
+  // Sign step state
+  const [signAccepted, setSignAccepted] = useState(false);
+  const [signName, setSignName] = useState(tenant.name);
+  const [signing, setSigning] = useState(false);
+
+  const handleDownload = () => {
+    if (!agreement?.htmlContent) return;
+    const blob = new Blob([agreement.htmlContent], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'rental-agreement.html';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleSign = async () => {
+    if (!agreement || !signName.trim() || !signAccepted) return;
+    setSigning(true);
+    try {
+      const ua = typeof navigator !== 'undefined' ? navigator.userAgent : undefined;
+      const updated = await supabaseLifecycleApi.signAgreement({
+        agreementId: agreement.id,
+        signatureName: signName.trim(),
+        role: 'tenant',
+        deviceMetadata: ua,
+      });
+      toast.success('Agreement signed! A copy has been saved to your Documents.');
+      onSigned(updated);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Signing failed. Please try again.');
+    } finally {
+      setSigning(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex overflow-hidden">
+      {/* Left brand panel */}
+      <div
+        className="hidden lg:flex flex-col justify-between w-[380px] flex-shrink-0 p-10 text-white"
+        style={{ background: 'linear-gradient(160deg, #5B21B6 0%, #4F46E5 55%, #0891B2 100%)' }}
+      >
+        <div>
+          <div className="flex items-center gap-3 mb-12">
+            <div className="w-9 h-9 bg-white/20 rounded-xl flex items-center justify-center">
+              <Building2 className="w-4 h-4 text-white" />
+            </div>
+            <span className="text-base font-bold tracking-tight">RentCare</span>
+          </div>
+
+          {step === 1 && (
+            <>
+              <CheckCircle2 className="w-10 h-10 text-white/60 mb-5" />
+              <h1 className="text-2xl font-bold leading-snug mb-3">Welcome to<br />{pgName}</h1>
+              <p className="text-white/70 text-sm leading-relaxed">Your account has been set up by your property manager. Let's get you onboarded.</p>
+            </>
+          )}
+          {step === 2 && (
+            <>
+              <User className="w-10 h-10 text-white/60 mb-5" />
+              <h1 className="text-2xl font-bold leading-snug mb-3">Verify Your<br />Information</h1>
+              <p className="text-white/70 text-sm leading-relaxed">Confirm your details are correct before accessing your portal. Contact your manager if anything needs updating.</p>
+            </>
+          )}
+          {step === 3 && (
+            <>
+              <FileText className="w-10 h-10 text-white/60 mb-5" />
+              <h1 className="text-2xl font-bold leading-snug mb-3">Review Your<br />Agreement</h1>
+              <p className="text-white/70 text-sm leading-relaxed">Please read your rental agreement carefully. Your property manager has already signed it.</p>
+            </>
+          )}
+          {step === 4 && (
+            <>
+              <Check className="w-10 h-10 text-white/60 mb-5" />
+              <h1 className="text-2xl font-bold leading-snug mb-3">Sign Your<br />Agreement</h1>
+              <p className="text-white/70 text-sm leading-relaxed">Complete your digital signature to activate your tenant account fully.</p>
+              {agreement?.ownerSignatureName && (
+                <div className="mt-6 bg-white/10 rounded-xl p-4">
+                  <p className="text-xs text-white/60 mb-1">Owner signed by</p>
+                  <p className="text-sm font-semibold text-white">{agreement.ownerSignatureName}</p>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Step progress */}
+        <div className="space-y-2">
+          <p className="text-xs text-white/50">Step {step} of {totalSteps}</p>
+          <div className="flex gap-1.5">
+            {Array.from({ length: totalSteps }, (_, i) => (
+              <div key={i} className={`h-1 flex-1 rounded-full transition-colors duration-300 ${i < step ? 'bg-white' : 'bg-white/25'}`} />
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Right content panel */}
+      <div className="flex-1 bg-white flex flex-col overflow-hidden">
+
+        {/* ── Step 1: Welcome ──────────────────────────────────────────────── */}
+        {step === 1 && (
+          <div className="flex-1 overflow-y-auto flex items-center justify-center p-6 lg:p-10">
+            <div className="w-full max-w-md space-y-6">
+              {/* Mobile heading */}
+              <div className="lg:hidden text-center">
+                <div className="w-14 h-14 rounded-2xl mx-auto mb-4 flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #5B21B6, #4F46E5)' }}>
+                  <Building2 className="w-7 h-7 text-white" />
+                </div>
+                <h2 className="text-xl font-bold text-gray-900">Welcome, {tenant.name.split(' ')[0]}!</h2>
+              </div>
+
+              <div className="hidden lg:block">
+                <h2 className="text-2xl font-bold text-gray-900 mb-1">Welcome, {tenant.name.split(' ')[0]}! 🎉</h2>
+                <p className="text-sm text-gray-500">Your account has been set up by {pgName}.</p>
+              </div>
+
+              <div className="bg-indigo-50 rounded-2xl p-6 space-y-4 border border-indigo-100">
+                <div className="grid grid-cols-2 gap-4">
+                  {[
+                    { label: 'Property', value: pgName },
+                    { label: 'Room', value: `Room ${tenant.room}${tenant.bed ? `, Bed ${tenant.bed}` : ''}` },
+                    { label: 'Monthly Rent', value: fmtAmount(tenant.rent) },
+                    { label: 'Move-in Date', value: fmtDate(tenant.joinDate) },
+                    { label: 'Rent Due', value: `${tenant.rentDueDate}th of every month` },
+                    ...(tenant.floor ? [{ label: 'Floor', value: `Floor ${tenant.floor}` }] : []),
+                  ].map(({ label, value }) => (
+                    <div key={label}>
+                      <p className="text-xs font-semibold text-indigo-600 mb-0.5">{label}</p>
+                      <p className="text-sm font-bold text-gray-900">{value}</p>
+                    </div>
+                  ))}
+                </div>
+                {(ownerPaymentInfo.ownerPhone || owner?.phone) && (
+                  <div className="pt-3 border-t border-indigo-100">
+                    <p className="text-xs font-semibold text-indigo-600 mb-1">Manager / Caretaker</p>
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-full bg-indigo-200 flex items-center justify-center text-xs font-bold text-indigo-700">
+                        {(owner?.name ?? 'M')[0]}
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold text-gray-900">{owner?.name ?? 'Property Manager'}</p>
+                        <p className="text-xs text-gray-500">{ownerPaymentInfo.ownerPhone || owner?.phone}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <button
+                onClick={onAdvance}
+                className="w-full py-3.5 rounded-2xl text-sm font-bold text-white flex items-center justify-center gap-2 transition-opacity hover:opacity-90"
+                style={{ background: 'linear-gradient(135deg, #5B21B6, #4F46E5)' }}
+              >
+                Continue <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Step 2: Verify Info ──────────────────────────────────────────── */}
+        {step === 2 && (
+          <div className="flex-1 overflow-y-auto flex items-center justify-center p-6 lg:p-10">
+            <div className="w-full max-w-md space-y-5">
+              <div>
+                <h2 className="text-2xl font-bold text-gray-900 mb-1">Confirm Your Details</h2>
+                <p className="text-sm text-gray-500">Review your information below. Contact your property manager if anything is incorrect.</p>
+              </div>
+
+              <div className="bg-white border border-gray-200 rounded-2xl divide-y divide-gray-100">
+                {[
+                  { label: 'Full Name', value: tenant.name },
+                  { label: 'Email', value: tenant.email || '—' },
+                  { label: 'Phone', value: tenant.phone || '—' },
+                  ...(tenant.alternatePhone ? [{ label: 'Alternate Phone', value: tenant.alternatePhone }] : []),
+                  ...(tenant.parentName ? [{ label: 'Emergency Contact', value: `${tenant.parentName}${tenant.parentPhone ? ` · ${tenant.parentPhone}` : ''}` }] : []),
+                  ...(tenant.dob ? [{ label: 'Date of Birth', value: fmtDate(tenant.dob) }] : []),
+                ].map(({ label, value }) => (
+                  <div key={label} className="flex items-start justify-between px-4 py-3 gap-4">
+                    <span className="text-xs text-gray-400 font-medium mt-0.5 flex-shrink-0">{label}</span>
+                    <span className="text-sm font-semibold text-gray-900 text-right">{value}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="bg-amber-50 border border-amber-100 rounded-xl px-4 py-3 flex items-start gap-2.5">
+                <AlertCircle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
+                <p className="text-xs text-amber-700 leading-relaxed">
+                  If any details are wrong, contact your property manager before proceeding.
+                  {owner?.phone && <> Call <a href={`tel:${owner.phone}`} className="font-semibold underline">{owner.phone}</a></>}
+                </p>
+              </div>
+
+              <div className="flex gap-3">
+                <button onClick={() => onAdvance()} className="flex-1 py-3 border border-gray-200 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors">
+                  Something is wrong
+                </button>
+                <button
+                  onClick={onAdvance}
+                  className="flex-1 py-3 rounded-xl text-sm font-bold text-white flex items-center justify-center gap-2 transition-opacity hover:opacity-90"
+                  style={{ background: 'linear-gradient(135deg, #5B21B6, #4F46E5)' }}
+                >
+                  Looks correct <ArrowRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Step 3: Review Agreement ─────────────────────────────────────── */}
+        {step === 3 && agreement && (
+          <>
+            <div className="px-6 lg:px-8 py-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
+              <div>
+                <h2 className="text-base lg:text-lg font-bold text-gray-900">Rental Agreement</h2>
+                <p className="text-xs text-gray-500 mt-0.5">{pgName} · From {fmtDate(agreement.startDate)}</p>
+              </div>
+              {agreement.htmlContent && (
+                <button onClick={handleDownload}
+                  className="flex items-center gap-1.5 px-3 py-2 border border-gray-200 rounded-xl text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors">
+                  <Download className="w-3.5 h-3.5" /> Download
+                </button>
+              )}
+            </div>
+            <div className="flex-1 overflow-auto">
+              {agreement.htmlContent ? (
+                <iframe srcDoc={agreement.htmlContent} className="w-full h-full border-0" title="Rental Agreement" sandbox="allow-same-origin" />
+              ) : (
+                <div className="flex items-center justify-center h-full text-gray-400">
+                  <div className="text-center">
+                    <FileText className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                    <p className="text-sm">Agreement preview not available.</p>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="px-6 lg:px-8 py-4 border-t border-gray-100 flex items-center justify-between flex-shrink-0">
+              <button onClick={onDismiss} className="text-sm text-gray-400 hover:text-gray-600 underline underline-offset-2 transition-colors">
+                I'll review later
+              </button>
+              <button
+                onClick={onAdvance}
+                className="px-5 py-2.5 rounded-xl text-sm font-bold text-white flex items-center gap-2 transition-opacity hover:opacity-90"
+                style={{ background: 'linear-gradient(135deg, #5B21B6, #4F46E5)' }}
+              >
+                Continue to Sign <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
+          </>
+        )}
+
+        {/* ── Step 4: Sign Agreement ───────────────────────────────────────── */}
+        {step === 4 && agreement && (
+          <div className="flex-1 overflow-y-auto flex items-center justify-center p-6 lg:p-10">
+            <div className="w-full max-w-md space-y-5">
+              <div>
+                <h2 className="text-2xl font-bold text-gray-900 mb-1">Sign Agreement</h2>
+                <p className="text-sm text-gray-500">Confirm your identity and accept the terms to complete signing.</p>
+              </div>
+
+              <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4 flex items-start gap-3">
+                <div className="w-9 h-9 bg-indigo-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                  <FileText className="w-4 h-4 text-indigo-600" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-indigo-900">
+                    {agreement.agreementType === 'license' ? 'License Agreement' : 'Rental Agreement'}
+                  </p>
+                  <p className="text-xs text-indigo-700 mt-0.5">{pgName} · {fmtAmount(agreement.monthlyRent)}/month</p>
+                  {agreement.ownerSignatureName && (
+                    <p className="text-xs text-green-700 mt-1 font-medium">✓ Owner signed by {agreement.ownerSignatureName}</p>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-gray-700 block mb-1.5">Your Full Name (E-Signature)</label>
+                <input
+                  value={signName}
+                  onChange={(e) => setSignName(e.target.value)}
+                  className="w-full h-11 px-3 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  placeholder="Type your full name to sign"
+                  autoFocus
+                />
+                <p className="text-xs text-gray-400 mt-1">This typed name serves as your electronic signature.</p>
+              </div>
+
+              <button type="button" className="flex items-start gap-3 text-left w-full" onClick={() => setSignAccepted((v) => !v)}>
+                <div className={`w-5 h-5 rounded-md border-2 flex-shrink-0 mt-0.5 flex items-center justify-center transition-colors ${signAccepted ? 'bg-indigo-600 border-indigo-600' : 'border-gray-300 hover:border-indigo-400'}`}>
+                  {signAccepted && <Check className="w-3 h-3 text-white" />}
+                </div>
+                <span className="text-sm text-gray-600 leading-relaxed">
+                  I have read and agree to all terms in the rental agreement. I understand this e-signature is legally binding.
+                </span>
+              </button>
+
+              <div className="flex gap-3 pt-1">
+                <button onClick={() => onAdvance()} className="flex-1 py-3 border border-gray-200 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors">
+                  ← Back
+                </button>
+                <button
+                  onClick={() => void handleSign()}
+                  disabled={signing || !signName.trim() || !signAccepted}
+                  className="flex-1 py-3 rounded-xl text-sm font-bold text-white disabled:opacity-50 transition-opacity hover:opacity-90"
+                  style={{ background: 'linear-gradient(135deg, #5B21B6, #4F46E5)' }}
+                >
+                  {signing ? 'Signing…' : 'Sign Agreement ✓'}
+                </button>
+              </div>
+
+              <p className="text-center text-xs text-gray-400">Your signature and timestamp will be recorded securely.</p>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Legacy shims (kept so callers compile while we migrate) ──────────────────
 function WelcomeScreen({ snapshot, onDone }: { snapshot: TenantPortalSnapshot; onDone: () => void }) {
   const { tenant, property, ownerPaymentInfo } = snapshot;
 
@@ -501,6 +851,31 @@ export function TenantPortal() {
   const [tenantSigning, setTenantSigning] = useState(false);
   const [mandatoryAgreement, setMandatoryAgreement] = useState<AgreementRecord | null>(null);
 
+  // Unified onboarding wizard (replaces showWelcome + mandatoryAgreement)
+  const [onboarding, setOnboarding] = useState<OnboardingState | null>(null);
+
+  // Sidebar collapse — persisted to localStorage
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return localStorage.getItem('tenant-sidebar-collapsed') === 'true';
+  });
+  const toggleSidebar = useCallback(() => {
+    setSidebarCollapsed((c) => {
+      const next = !c;
+      localStorage.setItem('tenant-sidebar-collapsed', String(next));
+      return next;
+    });
+  }, []);
+
+  // UPI copy state
+  const [upiCopied, setUpiCopied] = useState(false);
+  const copyUpiId = useCallback((id: string) => {
+    void navigator.clipboard.writeText(id).then(() => {
+      setUpiCopied(true);
+      setTimeout(() => setUpiCopied(false), 2000);
+    });
+  }, []);
+
   // Maintenance form state
   const [ticketForm, setTicketForm] = useState({
     category: '', issue: '', description: '',
@@ -527,18 +902,29 @@ export function TenantPortal() {
       const storedSeen = localStorage.getItem(notifSeenKey(data.tenant.id)) ?? new Date(0).toISOString();
       setNotifLastSeen(storedSeen);
 
-      // Welcome screen logic
+      // Onboarding wizard logic — only once per device+session
       const key = welcomeKey(data.tenant.id);
       const localSeen = typeof window !== 'undefined' && localStorage.getItem(key) === 'true';
+      const pendingAgreement = data.agreements.find((a) => a.status === 'pending_tenant_signature' && !a.tenantSignedAt) ?? null;
+
       if (!localSeen && !isDemo) {
         const { data: profileRow } = await supabase
           .from('profiles')
           .select('first_login_completed_at')
           .eq('id', user?.id ?? '')
           .maybeSingle<{ first_login_completed_at: string | null }>();
-        if (!profileRow?.first_login_completed_at) setShowWelcome(true);
-      } else if (!localSeen) {
-        setShowWelcome(true);
+        if (!profileRow?.first_login_completed_at) {
+          // Full onboarding: start from step 1
+          setOnboarding({ step: 1, agreement: pendingAgreement });
+        } else if (pendingAgreement) {
+          // First-login done but agreement arrived later — jump to review
+          setOnboarding({ step: 3, agreement: pendingAgreement });
+        }
+      } else if (!localSeen && isDemo) {
+        setOnboarding({ step: 1, agreement: null });
+      } else if (pendingAgreement) {
+        // Returning login with unsigned agreement
+        setOnboarding({ step: 3, agreement: pendingAgreement });
       }
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Unable to load portal data.');
@@ -548,6 +934,15 @@ export function TenantPortal() {
   }, [user?.id, isDemo]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { void load(); }, [load]);
+
+  // Ctrl+B → toggle sidebar
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'b') { e.preventDefault(); toggleSidebar(); }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [toggleSidebar]);
 
   // Guard inactive tenants
   useEffect(() => {
@@ -730,19 +1125,39 @@ export function TenantPortal() {
   );
   const paidPayments = useMemo(() => (snapshot?.payments ?? []).filter((p) => p.status === 'paid'), [snapshot]);
 
-  // ── Welcome done handler ───────────────────────────────────────────────────
-  const handleWelcomeDone = () => {
+  // ── Onboarding wizard advance / dismiss ────────────────────────────────────
+  const handleOnboardingAdvance = useCallback(() => {
+    setOnboarding((prev) => {
+      if (!prev) return null;
+      const { step, agreement } = prev;
+      const totalSteps: number = agreement ? 4 : 2;
+      if (step < totalSteps) {
+        // Skip step 3/4 if no agreement
+        const next = (step + 1) as 1 | 2 | 3 | 4;
+        return { ...prev, step: next };
+      }
+      return null; // done
+    });
+  }, []);
+
+  const handleOnboardingDismiss = useCallback(() => {
     if (snapshot) localStorage.setItem(welcomeKey(snapshot.tenant.id), 'true');
     if (user?.id && !isDemo) {
       (async () => { try { await supabase.from('profiles').update({ first_login_completed_at: new Date().toISOString() }).eq('id', user.id); } catch {} })();
     }
-    setShowWelcome(false);
-    // After welcome, show mandatory agreement review if there's a pending agreement
-    if (!isDemo && snapshot) {
-      const pending = snapshot.agreements.find((a) => a.status === 'pending_tenant_signature' && !a.tenantSignedAt);
-      if (pending) setMandatoryAgreement(pending);
+    setOnboarding(null);
+  }, [snapshot, user?.id, isDemo]);
+
+  // Fired when step 1 or 2 completes — mark first login done on step 2 exit
+  const handleOnboardingStepComplete = useCallback((step: number) => {
+    if (step === 2) {
+      if (snapshot) localStorage.setItem(welcomeKey(snapshot.tenant.id), 'true');
+      if (user?.id && !isDemo) {
+        (async () => { try { await supabase.from('profiles').update({ first_login_completed_at: new Date().toISOString() }).eq('id', user.id); } catch {} })();
+      }
     }
-  };
+    handleOnboardingAdvance();
+  }, [snapshot, user?.id, isDemo, handleOnboardingAdvance]);
 
   // ── Maintenance submit ─────────────────────────────────────────────────────
   const submitTicket = async (e: FormEvent) => {
@@ -1007,14 +1422,38 @@ export function TenantPortal() {
                 <p className="text-xl font-bold text-amber-600">{fmtAmount(currentPayment.totalAmount)}</p>
                 <p className="text-xs text-amber-600 mt-0.5">Due by {fmtDate(currentPayment.dueDate)}</p>
               </div>
+
+              {/* QR code (if owner uploaded one) */}
+              {ownerPaymentInfo.qrCodeUrl && (
+                <div className="mb-3 flex flex-col items-center gap-2">
+                  <img
+                    src={ownerPaymentInfo.qrCodeUrl}
+                    alt="Payment QR Code"
+                    className="w-36 h-36 rounded-xl border border-gray-200 object-contain"
+                  />
+                  <p className="text-xs text-gray-400">Scan with any UPI app</p>
+                </div>
+              )}
+
               {ownerPaymentInfo.upiId && (
-                <a
-                  href={buildUpiLink(ownerPaymentInfo.upiId, currentPayment.totalAmount, owner?.name ?? 'Manager', paymentMonth(currentPayment)) ?? '#'}
-                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
-                  style={{ background: 'linear-gradient(135deg, #4F46E5, #5B21B6)' }}
-                >
-                  Pay via UPI →
-                </a>
+                <div className="space-y-2">
+                  {/* UPI deep-link button (works on mobile) */}
+                  <a
+                    href={buildUpiLink(ownerPaymentInfo.upiId, currentPayment.totalAmount, owner?.name ?? 'Manager', paymentMonth(currentPayment)) ?? '#'}
+                    className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
+                    style={{ background: 'linear-gradient(135deg, #4F46E5, #5B21B6)' }}
+                  >
+                    <IndianRupee className="w-4 h-4" /> Pay via UPI
+                  </a>
+                  {/* Copy UPI ID */}
+                  <button
+                    onClick={() => copyUpiId(ownerPaymentInfo.upiId)}
+                    className="w-full flex items-center justify-center gap-2 py-2.5 border border-gray-200 rounded-xl text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+                  >
+                    {upiCopied ? <ClipboardCheck className="w-3.5 h-3.5 text-green-600" /> : <Copy className="w-3.5 h-3.5" />}
+                    {upiCopied ? 'Copied!' : `Copy UPI ID: ${ownerPaymentInfo.upiId}`}
+                  </button>
+                </div>
               )}
             </>
           ) : (
@@ -1990,19 +2429,19 @@ export function TenantPortal() {
   // ─────────────────────────────────────────────────────────────────────────────
   return (
     <>
-      {showWelcome && !isInactiveTenant && <WelcomeScreen snapshot={snapshot} onDone={handleWelcomeDone} />}
-      {mandatoryAgreement && !isInactiveTenant && (
-        <MandatoryAgreementScreen
-          agreement={mandatoryAgreement}
+      {onboarding && !isInactiveTenant && (
+        <OnboardingWizard
+          state={onboarding}
           snapshot={snapshot}
+          onAdvance={() => handleOnboardingStepComplete(onboarding.step)}
           onSigned={(updated) => {
             setSnapshot((prev) => prev ? {
               ...prev,
               agreements: prev.agreements.map((a) => a.id === updated.id ? updated : a),
             } : prev);
-            setMandatoryAgreement(null);
+            handleOnboardingDismiss();
           }}
-          onDismiss={() => setMandatoryAgreement(null)}
+          onDismiss={handleOnboardingDismiss}
         />
       )}
 
@@ -2040,64 +2479,108 @@ export function TenantPortal() {
       <div className="flex h-screen bg-[#F8FAFC] overflow-hidden">
 
         {/* Desktop Sidebar */}
-        <aside className="hidden lg:flex flex-col w-60 bg-white border-r border-gray-200 flex-shrink-0">
-          {/* Logo */}
-          <div className="px-5 py-5 border-b border-gray-100">
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #6D28D9, #4F46E5)' }}>
-                <Building2 className="w-4 h-4 text-white" />
-              </div>
-              <div>
-                <p className="text-sm font-bold text-gray-900">RentCare</p>
-                <p className="text-xs text-gray-500">Tenant Portal</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Tenant identity card — purple gradient block */}
-          <div className="px-3 pt-1 pb-3">
-            <div className="rounded-xl p-4 text-white" style={{ background: 'linear-gradient(135deg, #5B21B6 0%, #4F46E5 100%)' }}>
-              <div className="flex items-center gap-3 mb-2">
-                <div className="w-10 h-10 rounded-full bg-white/20 border border-white/30 flex items-center justify-center font-bold text-sm flex-shrink-0">
-                  {tenant.name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)}
+        <aside
+          className={`hidden lg:flex flex-col bg-white border-r border-gray-200 flex-shrink-0 transition-all duration-200 overflow-hidden ${sidebarCollapsed ? 'w-[72px]' : 'w-[240px]'}`}
+        >
+          {/* Header — logo + collapse toggle integrated */}
+          <div className={`border-b border-gray-100 flex items-center flex-shrink-0 ${sidebarCollapsed ? 'justify-center px-0 py-4' : 'justify-between px-4 py-4'}`}>
+            {!sidebarCollapsed && (
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'linear-gradient(135deg, #6D28D9, #4F46E5)' }}>
+                  <Building2 className="w-3.5 h-3.5 text-white" />
                 </div>
                 <div className="min-w-0">
-                  <p className="text-sm font-bold leading-tight truncate">{tenant.name}</p>
-                  <p className="text-xs text-white/70 truncate">Room {tenant.room}{tenant.bed ? `, Bed ${tenant.bed}` : ''}</p>
+                  <p className="text-sm font-bold text-gray-900 leading-tight">RentCare</p>
+                  <p className="text-[11px] text-gray-400 leading-tight">Tenant Portal</p>
                 </div>
               </div>
-              <p className="text-xs text-white/60">{ownerPaymentInfo.pgName || property?.name}</p>
-            </div>
+            )}
+            {sidebarCollapsed && (
+              <div className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #6D28D9, #4F46E5)' }}>
+                <Building2 className="w-3.5 h-3.5 text-white" />
+              </div>
+            )}
+            <button
+              onClick={toggleSidebar}
+              title="Toggle sidebar (Ctrl+B)"
+              className={`p-1.5 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-gray-700 transition-colors flex-shrink-0 ${sidebarCollapsed ? 'hidden' : ''}`}
+            >
+              <PanelLeftClose className="w-4 h-4" />
+            </button>
           </div>
 
+          {/* Expand button when collapsed */}
+          {sidebarCollapsed && (
+            <button
+              onClick={toggleSidebar}
+              title="Expand sidebar (Ctrl+B)"
+              className="mx-auto mt-2 p-1.5 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-gray-700 transition-colors"
+            >
+              <PanelLeftOpen className="w-4 h-4" />
+            </button>
+          )}
+
+          {/* Tenant identity */}
+          {!sidebarCollapsed ? (
+            <div className="px-3 pt-2 pb-2">
+              <div className="rounded-xl px-3 py-3 text-white" style={{ background: 'linear-gradient(135deg, #5B21B6 0%, #4F46E5 100%)' }}>
+                <div className="flex items-center gap-2.5 mb-1.5">
+                  <div className="w-8 h-8 rounded-full bg-white/20 border border-white/30 flex items-center justify-center font-bold text-xs flex-shrink-0">
+                    {tenant.name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs font-bold leading-tight truncate">{tenant.name}</p>
+                    <p className="text-[11px] text-white/70 truncate">Room {tenant.room}{tenant.bed ? `, Bed ${tenant.bed}` : ''}</p>
+                  </div>
+                </div>
+                <p className="text-[11px] text-white/60 truncate">{ownerPaymentInfo.pgName || property?.name}</p>
+              </div>
+            </div>
+          ) : (
+            <div className="flex justify-center pt-1 pb-2">
+              <div className="w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs text-white flex-shrink-0"
+                style={{ background: 'linear-gradient(135deg, #5B21B6, #4F46E5)' }}>
+                {tenant.name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)}
+              </div>
+            </div>
+          )}
+
           {/* Nav sections */}
-          <nav className="flex-1 overflow-y-auto px-3 py-3 space-y-4">
+          <nav className="flex-1 overflow-y-auto px-2 py-2 space-y-3">
             {visibleSidebarSections.map((section) => (
               <div key={section.heading}>
-                <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider px-2 mb-1">{section.heading}</p>
+                {!sidebarCollapsed && (
+                  <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider px-2 mb-1">{section.heading}</p>
+                )}
                 {section.items.map(({ id, label, icon: Icon }) => {
                   const isActive = activeNavTab === id;
+                  const badge = id === 'payments' && pendingPayments.length > 0
+                    ? pendingPayments.length
+                    : id === 'announcements' && tenantUnreadCount > 0
+                    ? tenantUnreadCount
+                    : null;
                   return (
                     <button
                       key={id}
                       onClick={() => setView(id)}
-                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all mb-0.5 ${
-                        isActive
-                          ? 'bg-indigo-600 text-white'
-                          : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
-                      }`}
+                      title={sidebarCollapsed ? label : undefined}
+                      className={`w-full flex items-center rounded-xl text-sm font-medium transition-all mb-0.5 ${
+                        sidebarCollapsed ? 'justify-center p-2.5' : 'gap-3 px-3 py-2.5'
+                      } ${isActive ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'}`}
                     >
                       <Icon className={`w-4 h-4 flex-shrink-0 ${isActive ? 'text-white' : 'text-gray-400'}`} />
-                      {label}
-                      {id === 'payments' && pendingPayments.length > 0 && (
-                        <span className={`ml-auto text-xs font-semibold px-1.5 py-0.5 rounded-full ${isActive ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-700'}`}>
-                          {pendingPayments.length}
-                        </span>
+                      {!sidebarCollapsed && (
+                        <>
+                          <span>{label}</span>
+                          {badge !== null && (
+                            <span className={`ml-auto text-xs font-semibold px-1.5 py-0.5 rounded-full ${isActive ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-700'}`}>
+                              {badge}
+                            </span>
+                          )}
+                        </>
                       )}
-                      {id === 'announcements' && tenantUnreadCount > 0 && (
-                        <span className={`ml-auto text-xs font-semibold px-1.5 py-0.5 rounded-full ${isActive ? 'bg-white/20 text-white' : 'bg-indigo-100 text-indigo-700'}`}>
-                          {tenantUnreadCount}
-                        </span>
+                      {sidebarCollapsed && badge !== null && (
+                        <span className="absolute top-0 right-0 w-1.5 h-1.5 rounded-full bg-amber-500" />
                       )}
                     </button>
                   );
@@ -2107,12 +2590,16 @@ export function TenantPortal() {
           </nav>
 
           {/* Sign out */}
-          <div className="px-4 py-4 border-t border-gray-100">
+          <div className={`border-t border-gray-100 p-2 ${sidebarCollapsed ? 'flex justify-center' : ''}`}>
             <button
               onClick={() => { void logout(); }}
-              className="w-full flex items-center gap-2.5 text-sm text-gray-500 hover:text-red-600 px-3 py-2.5 rounded-xl hover:bg-red-50 transition-colors"
+              title={sidebarCollapsed ? 'Sign Out' : undefined}
+              className={`flex items-center text-sm text-gray-500 hover:text-red-600 rounded-xl hover:bg-red-50 transition-colors ${
+                sidebarCollapsed ? 'p-2.5 justify-center' : 'gap-2.5 px-3 py-2.5 w-full'
+              }`}
             >
-              <LogOut className="w-4 h-4" /> Sign Out
+              <LogOut className="w-4 h-4 flex-shrink-0" />
+              {!sidebarCollapsed && 'Sign Out'}
             </button>
           </div>
         </aside>

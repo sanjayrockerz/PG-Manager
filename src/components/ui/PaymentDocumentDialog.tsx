@@ -70,7 +70,7 @@ export function PaymentDocumentDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[500px] p-0 overflow-hidden border border-zinc-200 shadow-2xl rounded-2xl bg-white no-print">
+      <DialogContent className="max-w-[500px] p-0 overflow-hidden border border-zinc-200 shadow-2xl rounded-2xl bg-white">
         {/* The Printable Container (marked with print-content) */}
         <div className="print-content flex flex-col w-full text-zinc-800 bg-white">
           {/* Header Banner */}
