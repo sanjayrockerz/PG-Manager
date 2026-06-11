@@ -399,6 +399,12 @@ function AppContent() {
         <div className="flex-1 flex flex-col overflow-hidden">
           <Header
             setSidebarOpen={setSidebarOpen}
+            sidebarCollapsed={sidebarCollapsed}
+            onToggleSidebar={() => {
+              const next = !sidebarCollapsed;
+              localStorage.setItem('sidebar_collapsed', String(next));
+              setSidebarCollapsed(next);
+            }}
             currentPage={activeTab}
             onNotificationClick={() => setActiveTabWithRoleGuard('notifications')}
           />

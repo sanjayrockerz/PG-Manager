@@ -1,7 +1,6 @@
 import {
   Activity, Bell, CreditCard, Home, LayoutGrid, LifeBuoy,
-  LogOut, Settings, Shield, Users, Wrench, X,
-  ChevronRight, Zap, UserCog,
+  LogOut, Settings, Shield, Users, Wrench, X, Zap, UserCog,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { isPlatformAdminRole } from '../utils/roles';
@@ -45,7 +44,7 @@ const ownerSections: { title: string; items: NavItem[] }[] = [
   {
     title: 'Team',
     items: [
-      { id: 'team',    label: 'Team Members', icon: UserCog },
+      { id: 'team', label: 'Team Members', icon: UserCog },
     ],
   },
   {
@@ -60,10 +59,13 @@ const adminSections: { title: string; items: NavItem[] }[] = [
   {
     title: 'Admin',
     items: [
-      { id: 'admin-section', label: 'Admin Panel',   icon: Shield },
+      { id: 'admin-section', label: 'Admin Panel', icon: Shield },
     ],
   },
 ];
+
+const EXPANDED_W = 256;
+const COLLAPSED_W = 72;
 
 export function Sidebar({
   activeTab,
@@ -81,7 +83,6 @@ export function Sidebar({
   const showSettings   = !isTenant && hasPermission(userRole, 'page:settings');
   const showUpgradePro = !isPlatformAdmin && !isTenant;
 
-  // Filter nav sections by permission — explicit guard per item
   const filteredOwnerSections = ownerSections.map((section) => ({
     ...section,
     items: section.items.filter((item) => {
@@ -106,41 +107,60 @@ export function Sidebar({
     setSidebarOpen(false);
   };
 
-  const toggleCollapse = () => {
-    const next = !sidebarCollapsed;
-    localStorage.setItem('sidebar_collapsed', String(next));
-    setSidebarCollapsed(next);
-  };
+  const userInitials = user?.name
+    ? user.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()
+    : user?.email?.slice(0, 2).toUpperCase() ?? 'U';
+
+  const portalLabel = isPlatformAdmin ? 'Admin' : isTenant ? 'Tenant' : 'Owner';
 
   const NavBtn = ({ item }: { item: NavItem }) => {
     const Icon = item.icon;
     const isActive = activeTab === item.id;
+
     return (
       <div className="relative group/nav">
         <button
           onClick={() => handleNav(item.id)}
-          className={`ds-nav-item ${isActive ? 'active' : ''} ${sidebarCollapsed ? 'justify-center px-0' : ''}`}
-          style={{ width: '100%' }}
-          title={sidebarCollapsed ? item.label : undefined}
+          aria-label={item.label}
+          aria-current={isActive ? 'page' : undefined}
+          className={`ds-nav-item ${isActive ? 'active' : ''}`}
+          style={{
+            width: '100%',
+            justifyContent: sidebarCollapsed ? 'center' : undefined,
+            paddingLeft: sidebarCollapsed ? 0 : undefined,
+            paddingRight: sidebarCollapsed ? 0 : undefined,
+          }}
         >
           <Icon
             className="flex-shrink-0"
             style={{
-              width: 15,
-              height: 15,
+              width: 16,
+              height: 16,
               strokeWidth: isActive ? 2 : 1.75,
               color: isActive ? 'var(--ds-accent)' : 'var(--ds-text-3)',
             }}
           />
-          {!sidebarCollapsed && (
-            <span style={{ fontSize: 13, letterSpacing: '-0.01em' }}>{item.label}</span>
-          )}
+          <span
+            style={{
+              fontSize: 13,
+              letterSpacing: '-0.01em',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              opacity: sidebarCollapsed ? 0 : 1,
+              maxWidth: sidebarCollapsed ? 0 : 160,
+              transition: 'opacity 180ms ease, max-width 250ms cubic-bezier(0.4,0,0.2,1)',
+              display: 'block',
+            }}
+          >
+            {item.label}
+          </span>
         </button>
 
-        {/* Collapsed tooltip */}
+        {/* Tooltip — only in collapsed mode */}
         {sidebarCollapsed && (
           <div
-            className="pointer-events-none absolute left-full top-1/2 -translate-y-1/2 ml-3 z-50
+            role="tooltip"
+            className="pointer-events-none absolute left-full top-1/2 -translate-y-1/2 ml-2.5 z-50
               px-2.5 py-1.5 rounded-md text-white whitespace-nowrap
               opacity-0 group-hover/nav:opacity-100 transition-opacity duration-150"
             style={{
@@ -151,17 +171,19 @@ export function Sidebar({
             }}
           >
             {item.label}
+            <div
+              className="absolute right-full top-1/2 -translate-y-1/2"
+              style={{
+                borderWidth: '4px 4px 4px 0',
+                borderStyle: 'solid',
+                borderColor: 'transparent #18181B transparent transparent',
+              }}
+            />
           </div>
         )}
       </div>
     );
   };
-
-  const userInitials = user?.name
-    ? user.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()
-    : user?.email?.slice(0, 2).toUpperCase() ?? 'U';
-
-  const portalLabel = isPlatformAdmin ? 'Admin' : isTenant ? 'Tenant' : 'Owner';
 
   return (
     <>
@@ -177,42 +199,28 @@ export function Sidebar({
       <aside
         className={`
           fixed lg:static inset-y-0 left-0 z-50
-          flex flex-col
-          transform transition-all duration-250 ease-in-out
+          flex flex-col flex-shrink-0
           ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
         `}
         style={{
-          width: sidebarCollapsed ? 52 : 220,
+          width: sidebarCollapsed ? COLLAPSED_W : EXPANDED_W,
+          transition: 'width 250ms cubic-bezier(0.4,0,0.2,1), transform 250ms ease',
           background: '#FFFFFF',
           borderRight: '1px solid #E4E4E7',
+          overflow: 'hidden',
         }}
       >
-        {/* Desktop collapse toggle (Premium floating button) */}
-        <button
-          onClick={toggleCollapse}
-          className="hidden lg:flex items-center justify-center absolute bg-white border border-gray-200 rounded-full shadow-sm hover:bg-gray-50 hover:text-gray-900 transition-all z-[60] text-gray-500"
-          style={{ 
-            width: 24, 
-            height: 24, 
-            top: 14,
-            right: -12,
-          }}
-          title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-        >
-          <ChevronRight style={{ width: 14, height: 14, transform: sidebarCollapsed ? 'none' : 'rotate(180deg)', transition: 'transform 0.2s ease-in-out' }} />
-        </button>
-
         {/* ── Logo ─────────────────────────────── */}
         <div
           className="flex items-center flex-shrink-0"
           style={{
             height: 52,
-            padding: sidebarCollapsed ? '0 10px' : '0 14px',
+            padding: '0 14px',
             borderBottom: '1px solid #F1F1F3',
             gap: 10,
+            overflow: 'hidden',
           }}
         >
-          {/* Mark */}
           <div
             className="flex-shrink-0 flex items-center justify-center rounded-lg"
             style={{
@@ -225,20 +233,28 @@ export function Sidebar({
             <LayoutGrid style={{ width: 14, height: 14, color: '#fff', strokeWidth: 2 }} />
           </div>
 
-          {/* Wordmark */}
-          {!sidebarCollapsed && (
-            <div className="flex-1 min-w-0 overflow-hidden">
-              <p style={{ fontSize: 14, fontWeight: 700, color: '#0A0A0B', letterSpacing: '-0.02em', lineHeight: 1 }}>
-                RentCare
-              </p>
-              <p style={{ fontSize: 11, color: '#A1A1AA', marginTop: 1 }}>{portalLabel} Portal</p>
-            </div>
-          )}
+          <div
+            style={{
+              flex: 1,
+              minWidth: 0,
+              overflow: 'hidden',
+              opacity: sidebarCollapsed ? 0 : 1,
+              transition: 'opacity 180ms ease',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <p style={{ fontSize: 14, fontWeight: 700, color: '#0A0A0B', letterSpacing: '-0.02em', lineHeight: 1 }}>
+              RentCare
+            </p>
+            <p style={{ fontSize: 11, color: '#A1A1AA', marginTop: 1 }}>{portalLabel} Portal</p>
+          </div>
 
           {/* Mobile close */}
           <button
             onClick={() => setSidebarOpen(false)}
-            className="lg:hidden p-1 rounded-md hover:bg-zinc-100 text-zinc-400 flex-shrink-0"
+            className="lg:hidden flex items-center justify-center rounded-md hover:bg-zinc-100 flex-shrink-0"
+            style={{ width: 28, height: 28, color: '#A1A1AA' }}
+            aria-label="Close sidebar"
           >
             <X style={{ width: 14, height: 14 }} />
           </button>
@@ -247,38 +263,48 @@ export function Sidebar({
         {/* ── Navigation ───────────────────────── */}
         <nav
           className="flex-1 overflow-y-auto overflow-x-hidden"
-          style={{ padding: sidebarCollapsed ? '10px 6px' : '10px 8px' }}
+          style={{ padding: '10px 8px' }}
+          aria-label="Main navigation"
         >
           {sections.map((section, si) => (
             <div key={section.title} style={{ marginBottom: si < sections.length - 1 ? 20 : 0 }}>
-              {!sidebarCollapsed && (
-                <p
-                  className="ds-section-label"
-                  style={{ padding: '0 10px', marginBottom: 4 }}
-                >
-                  {section.title}
-                </p>
-              )}
-              {sidebarCollapsed && si > 0 && (
-                <div style={{ height: 1, background: '#F1F1F3', margin: '8px 4px' }} />
-              )}
+              <p
+                className="ds-section-label"
+                style={{
+                  padding: '0 10px',
+                  marginBottom: 4,
+                  opacity: sidebarCollapsed ? 0 : 1,
+                  transition: 'opacity 150ms ease',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  height: sidebarCollapsed ? 0 : undefined,
+                  marginTop: sidebarCollapsed ? 0 : undefined,
+                }}
+              >
+                {section.title}
+              </p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                 {section.items.map(item => <NavBtn key={item.id} item={item} />)}
               </div>
             </div>
           ))}
 
-          {/* Settings */}
           {showSettings && (
             <div style={{ marginTop: 20 }}>
-              {!sidebarCollapsed && (
-                <p className="ds-section-label" style={{ padding: '0 10px', marginBottom: 4 }}>
-                  Preferences
-                </p>
-              )}
-              {sidebarCollapsed && (
-                <div style={{ height: 1, background: '#F1F1F3', margin: '8px 4px' }} />
-              )}
+              <p
+                className="ds-section-label"
+                style={{
+                  padding: '0 10px',
+                  marginBottom: 4,
+                  opacity: sidebarCollapsed ? 0 : 1,
+                  transition: 'opacity 150ms ease',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  height: sidebarCollapsed ? 0 : undefined,
+                }}
+              >
+                Preferences
+              </p>
               <NavBtn item={{ id: 'settings', label: 'Settings', icon: Settings }} />
             </div>
           )}
@@ -287,14 +313,14 @@ export function Sidebar({
         {/* ── Bottom ───────────────────────────── */}
         <div
           style={{
-            padding: sidebarCollapsed ? '10px 6px' : '10px 8px',
+            padding: '10px 8px',
             borderTop: '1px solid #F1F1F3',
             display: 'flex',
             flexDirection: 'column',
             gap: 4,
           }}
         >
-          {/* Upgrade to Pro — shown only expanded */}
+          {/* Upgrade to Pro — expanded only */}
           {showUpgradePro && !sidebarCollapsed && (
             <button
               onClick={() => handleNav('pricing')}
@@ -327,44 +353,54 @@ export function Sidebar({
             </button>
           )}
 
-          {/* User + Sign out */}
+          {/* Sign out */}
           <div className="relative group/signout">
             <button
               onClick={() => void logout()}
-              className={`ds-nav-item hover:bg-red-50 ${sidebarCollapsed ? 'justify-center px-0' : ''}`}
-              style={{ color: '#A1A1AA', width: '100%' }}
-              title={sidebarCollapsed ? 'Sign out' : undefined}
+              aria-label="Sign out"
+              className="ds-nav-item hover:bg-red-50 w-full"
+              style={{
+                color: '#A1A1AA',
+                justifyContent: sidebarCollapsed ? 'center' : undefined,
+                paddingLeft: sidebarCollapsed ? 0 : undefined,
+                paddingRight: sidebarCollapsed ? 0 : undefined,
+              }}
             >
-              {!sidebarCollapsed ? (
-                <>
-                  <div
-                    className="flex-shrink-0 flex items-center justify-center rounded-md text-white"
-                    style={{
-                      width: 22,
-                      height: 22,
-                      background: 'linear-gradient(135deg, #6366F1, #4F46E5)',
-                      fontSize: 10,
-                      fontWeight: 700,
-                    }}
-                  >
-                    {userInitials}
-                  </div>
-                  <span
-                    className="flex-1 min-w-0 truncate"
-                    style={{ fontSize: 13, color: '#52525B' }}
-                  >
-                    {user?.name || user?.email || 'Account'}
-                  </span>
-                  <LogOut style={{ width: 13, height: 13, color: '#A1A1AA', flexShrink: 0 }} />
-                </>
-              ) : (
-                <LogOut style={{ width: 15, height: 15, color: '#A1A1AA' }} />
+              <div
+                className="flex-shrink-0 flex items-center justify-center rounded-md text-white"
+                style={{
+                  width: 22,
+                  height: 22,
+                  background: 'linear-gradient(135deg, #6366F1, #4F46E5)',
+                  fontSize: 10,
+                  fontWeight: 700,
+                }}
+              >
+                {userInitials}
+              </div>
+              <span
+                style={{
+                  fontSize: 13,
+                  color: '#52525B',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  opacity: sidebarCollapsed ? 0 : 1,
+                  maxWidth: sidebarCollapsed ? 0 : 140,
+                  transition: 'opacity 180ms ease, max-width 250ms cubic-bezier(0.4,0,0.2,1)',
+                  display: 'block',
+                }}
+              >
+                {user?.name || user?.email || 'Account'}
+              </span>
+              {!sidebarCollapsed && (
+                <LogOut style={{ width: 13, height: 13, color: '#A1A1AA', flexShrink: 0 }} />
               )}
             </button>
 
             {sidebarCollapsed && (
               <div
-                className="pointer-events-none absolute left-full top-1/2 -translate-y-1/2 ml-3 z-50
+                role="tooltip"
+                className="pointer-events-none absolute left-full top-1/2 -translate-y-1/2 ml-2.5 z-50
                   px-2.5 py-1.5 rounded-md text-white whitespace-nowrap
                   opacity-0 group-hover/signout:opacity-100 transition-opacity duration-150"
                 style={{ fontSize: 12, fontWeight: 500, background: '#18181B' }}

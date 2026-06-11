@@ -46,6 +46,7 @@ import {
   supabaseAdminDataApi,
 } from '../services/supabaseData';
 import { isDemoModeEnabled } from '../services/dataService';
+import { supabase } from '../lib/supabase';
 import { buildDemoAdminSummary } from '../data/demoData';
 import { useRealtimeRefresh } from '../hooks/useRealtimeRefresh';
 import { LiveStatusBadge } from './LiveStatusBadge';
@@ -59,11 +60,14 @@ type AdminView =
   | 'support'
   | 'analytics'
   | 'audit-logs'
-  | 'platform-settings';
+  | 'platform-settings'
+  | 'team-management';
 
 type AdminSummary = Awaited<ReturnType<typeof supabaseAdminDataApi.getAdminSummary>>;
 type OwnerCard = AdminSummary['owners'][number];
 type AdminActivityEntry = Awaited<ReturnType<typeof supabaseAdminDataApi.getPlatformAuditLog>>[number];
+
+interface TeamInviteRow { id: string; owner_id: string; invited_email: string; display_role: string; status: string; invited_at: string; expires_at: string; }
 
 const PAGE_SIZE = 20;
 
@@ -329,7 +333,11 @@ export function AdminSection() {
   const [auditLogPage, setAuditLogPage] = useState(1);
   const [auditLogEventFilter, setAuditLogEventFilter] = useState('');
 
-
+  // Team management
+  const [teamInvites, setTeamInvites] = useState<TeamInviteRow[]>([]);
+  const [isLoadingTeam, setIsLoadingTeam] = useState(false);
+  const [teamSearch, setTeamSearch] = useState('');
+  const [teamStatusFilter, setTeamStatusFilter] = useState('');
 
   // Suspend dialog
   const [suspendTarget, setSuspendTarget] = useState<OwnerCard | null>(null);
@@ -483,11 +491,25 @@ export function AdminSection() {
     if (currentView === 'analytics') void loadAnalytics();
   }, [range]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const loadTeamInvites = useCallback(async () => {
+    setIsLoadingTeam(true);
+    try {
+      const { data } = await supabase
+        .from('owner_invites')
+        .select('id,owner_id,invited_email,display_role,status,invited_at,expires_at')
+        .order('invited_at', { ascending: false });
+      setTeamInvites((data as unknown as TeamInviteRow[]) ?? []);
+    } catch { /* best-effort */ } finally {
+      setIsLoadingTeam(false);
+    }
+  }, []);
+
   const navigateTo = (view: AdminView) => {
     setCurrentView(view);
     if (view === 'analytics') void loadAnalytics();
     if (view === 'transactions') void loadTransactions();
     if (view === 'audit-logs') void loadAuditLog();
+    if (view === 'team-management') void loadTeamInvites();
   };
 
   // ── Actions ──────────────────────────────────────────────────────────────
@@ -2400,6 +2422,94 @@ export function AdminSection() {
     );
   };
 
+  // ── Team Management view ──────────────────────────────────────────────────
+
+  const renderTeamManagement = () => {
+    const inviteStatusColor = (s: string) => {
+      if (s === 'accepted') return 'bg-green-100 text-green-700';
+      if (s === 'revoked') return 'bg-red-100 text-red-600';
+      if (s === 'expired') return 'bg-gray-100 text-gray-500';
+      return 'bg-amber-100 text-amber-700';
+    };
+
+    const filtered = teamInvites.filter((i) => {
+      const q = teamSearch.toLowerCase();
+      const matchQ = !q || i.invited_email.toLowerCase().includes(q) || i.owner_id.toLowerCase().includes(q);
+      const matchStatus = !teamStatusFilter || i.status === teamStatusFilter;
+      return matchQ && matchStatus;
+    });
+
+    return (
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">Team Invitations</h2>
+            <p className="text-sm text-slate-500">All workspace invitations across the platform</p>
+          </div>
+          <span className="text-sm text-slate-500">{filtered.length} invite{filtered.length !== 1 ? 's' : ''}</span>
+        </div>
+
+        <div className="flex gap-3">
+          <div className="relative flex-1 max-w-xs">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+            <input
+              className="w-full pl-8 pr-3 h-9 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 bg-white"
+              placeholder="Search email or owner…"
+              value={teamSearch}
+              onChange={(e) => setTeamSearch(e.target.value)}
+            />
+          </div>
+          <select
+            className="h-9 border border-slate-200 rounded-lg px-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 bg-white"
+            value={teamStatusFilter}
+            onChange={(e) => setTeamStatusFilter(e.target.value)}
+          >
+            <option value="">All statuses</option>
+            <option value="pending">Pending</option>
+            <option value="accepted">Accepted</option>
+            <option value="expired">Expired</option>
+            <option value="revoked">Revoked</option>
+          </select>
+        </div>
+
+        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+          {isLoadingTeam ? (
+            <div className="flex items-center justify-center h-32 text-sm text-slate-400">Loading invitations…</div>
+          ) : filtered.length === 0 ? (
+            <div className="flex items-center justify-center h-32 text-sm text-slate-400">No invitations found</div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-100 bg-slate-50">
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Invited Email</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Role</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Status</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Invited</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Expires</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((inv) => (
+                  <tr key={inv.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50 transition-colors">
+                    <td className="px-4 py-3 font-medium text-slate-900">{inv.invited_email}</td>
+                    <td className="px-4 py-3 text-slate-600 capitalize">{inv.display_role}</td>
+                    <td className="px-4 py-3">
+                      <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium capitalize ${inviteStatusColor(inv.status)}`}>
+                        {inv.status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-slate-500">{fmtDate(inv.invited_at)}</td>
+                    <td className="px-4 py-3 text-slate-500">{fmtDate(inv.expires_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   // ── Root render ───────────────────────────────────────────────────────────
 
   const renderView = () => {
@@ -2412,6 +2522,7 @@ export function AdminSection() {
       case 'audit-logs': return renderAuditLogs();
       case 'support': return renderSupport();
       case 'platform-settings': return renderPlatformSettings();
+      case 'team-management': return renderTeamManagement();
       default: return renderDashboard();
     }
   };

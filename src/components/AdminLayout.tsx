@@ -25,7 +25,8 @@ export type AdminNavId =
   | 'analytics'
   | 'support'
   | 'platform-settings'
-  | 'audit-logs';
+  | 'audit-logs'
+  | 'team-management';
 
 interface AdminNavItem {
   id: AdminNavId;
@@ -51,7 +52,13 @@ interface AdminLayoutProps {
 function buildGroups(notificationCount: number): AdminNavGroup[] {
   return [
     { label: 'OVERVIEW', items: [{ id: 'dashboard', label: 'Dashboard', icon: LayoutGrid }] },
-    { label: 'USERS', items: [{ id: 'owners', label: 'All Owners', icon: Users }] },
+    {
+      label: 'USERS',
+      items: [
+        { id: 'owners', label: 'All Owners', icon: Users },
+        { id: 'team-management', label: 'Team Invites', icon: Activity },
+      ],
+    },
     {
       label: 'REVENUE',
       items: [

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Building2, ChevronDown, HelpCircle, Menu, Search } from 'lucide-react';
+import { Building2, ChevronDown, HelpCircle, PanelLeft, Search } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { isPlatformAdminRole } from '../utils/roles';
 import { isDemoModeEnabled } from '../services/dataService';
@@ -8,11 +8,13 @@ import { WorkspaceSelector } from './WorkspaceSelector';
 
 interface HeaderProps {
   setSidebarOpen: (open: boolean) => void;
+  sidebarCollapsed?: boolean;
+  onToggleSidebar?: () => void;
   currentPage?: string;
   onNotificationClick?: () => void;
 }
 
-export function Header({ setSidebarOpen, currentPage, onNotificationClick }: HeaderProps) {
+export function Header({ setSidebarOpen, sidebarCollapsed, onToggleSidebar, currentPage, onNotificationClick }: HeaderProps) {
   const { user } = useAuth();
 
   const isPlatformAdmin = isPlatformAdminRole(user?.role);
@@ -33,6 +35,14 @@ export function Header({ setSidebarOpen, currentPage, onNotificationClick }: Hea
     ? user.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()
     : user?.email?.slice(0, 2).toUpperCase() ?? 'U';
 
+  const handleSidebarToggle = () => {
+    if (window.innerWidth >= 1024) {
+      onToggleSidebar?.();
+    } else {
+      setSidebarOpen(true);
+    }
+  };
+
   return (
     <>
       {impersonatedOwnerId && (
@@ -44,21 +54,26 @@ export function Header({ setSidebarOpen, currentPage, onNotificationClick }: Hea
         </div>
       )}
       <header
-        className="flex-shrink-0 flex items-center justify-between px-4 sticky top-0 z-30"
+        className="flex-shrink-0 flex items-center justify-between sticky top-0 z-30"
         style={{
           height: 52,
+          paddingLeft: 12,
+          paddingRight: 16,
           background: '#FFFFFF',
           borderBottom: '1px solid #E4E4E7',
           gap: 12,
         }}
       >
-      {/* ── Left: hamburger + property switcher ── */}
-      <div className="flex items-center gap-3 flex-shrink-0">
+      {/* ── Left: global sidebar toggle + workspace ── */}
+      <div className="flex items-center gap-2 flex-shrink-0">
+        {/* Global sidebar toggle — desktop toggles collapse, mobile opens drawer */}
         <button
-          onClick={() => setSidebarOpen(true)}
-          className="lg:hidden p-1.5 rounded-md hover:bg-zinc-100 text-zinc-500 transition-colors"
+          onClick={handleSidebarToggle}
+          aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          className="flex items-center justify-center rounded-md hover:bg-zinc-100 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+          style={{ width: 32, height: 32, color: '#71717A', flexShrink: 0 }}
         >
-          <Menu style={{ width: 16, height: 16 }} />
+          <PanelLeft style={{ width: 16, height: 16 }} />
         </button>
 
         {showPropertySelector ? (

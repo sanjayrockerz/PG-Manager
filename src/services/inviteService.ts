@@ -3,6 +3,60 @@ import { supabase } from '../lib/supabase';
 import { displayRoleToProfileRole } from '../utils/roles';
 import { domainEvents } from './eventBus';
 
+const supabaseUrl = String((import.meta as any).env?.VITE_SUPABASE_URL ?? '');
+
+async function sendTeamInviteEmail(email: string, inviteToken: string): Promise<void> {
+  const serviceRoleKey = String((import.meta as any).env?.VITE_SUPABASE_SERVICE_ROLE_KEY ?? '');
+  if (!serviceRoleKey) return;
+
+  const { createClient: createAdminClient } = await import('@supabase/supabase-js');
+  const adminClient = createAdminClient(supabaseUrl, serviceRoleKey, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+
+  const configuredSiteUrl = String((import.meta as any).env?.VITE_SITE_URL ?? '').trim();
+  const origin = typeof window !== 'undefined' && window.location?.origin ? window.location.origin : '';
+  const isLocal = origin.includes('localhost') || origin.includes('127.0.0.1');
+  const base = (isLocal ? origin : (configuredSiteUrl || origin)) || '';
+  const redirectTo = `${base}/accept-invite?token=${inviteToken}`;
+
+  // Ensure the auth account exists before generating the link
+  const { data: listData } = await (adminClient.auth.admin.listUsers() as unknown as Promise<{ data: { users: Array<{ id: string; email?: string }> } }>);
+  const existing = listData?.users?.find((u) => u.email?.toLowerCase() === email.toLowerCase());
+  if (!existing) {
+    await adminClient.auth.admin.createUser({
+      email: email.toLowerCase(),
+      email_confirm: true,
+      user_metadata: { role: 'staff' },
+    });
+  }
+
+  await adminClient.auth.admin.generateLink({
+    type: 'magiclink',
+    email: email.toLowerCase(),
+    options: { redirectTo },
+  });
+}
+
+async function createNotification(args: {
+  userId: string;
+  type: string;
+  title: string;
+  message: string;
+}): Promise<void> {
+  try {
+    await supabase.from('notifications').insert({
+      user_id: args.userId,
+      type: args.type,
+      title: args.title,
+      message: args.message,
+      read: false,
+    });
+  } catch {
+    // best-effort
+  }
+}
+
 export type DisplayRole = 'viewer' | 'editor' | 'manager';
 export type InviteStatus = 'pending' | 'accepted' | 'expired' | 'revoked';
 
@@ -211,6 +265,8 @@ export const inviteService = {
         propertyCount: record.propertyIds.length,
       },
     });
+    // Send the magic-link invitation email
+    void sendTeamInviteEmail(record.invitedEmail, record.token).catch(() => {});
     domainEvents.teamAccessChanged({
       ownerId: record.ownerId,
       targetEmail: record.invitedEmail,
@@ -301,6 +357,8 @@ export const inviteService = {
       detail: `Invite renewed for ${data.invited_email}`,
       metadata: { inviteId: data.id },
     });
+    // Resend the magic-link email with the (possibly new) token
+    void sendTeamInviteEmail(data.invited_email, data.token).catch(() => {});
 
     return mapInvite(data);
   },
@@ -361,6 +419,12 @@ export const inviteService = {
         event: 'TEAM_INVITE_ACCEPTED',
         detail: `Invite accepted by ${email.toLowerCase()}`,
         metadata: { userId, token },
+      });
+      void createNotification({
+        userId: result.owner_id,
+        type: 'team',
+        title: 'Team Member Joined',
+        message: `${email} accepted your team invitation and has access to their assigned properties.`,
       });
     }
 
@@ -536,6 +600,13 @@ export const teamService = {
         metadata: { userId },
       });
     }
+    // Notify the removed member
+    void createNotification({
+      userId,
+      type: 'team',
+      title: 'Workspace Access Revoked',
+      message: 'Your team access has been removed by the workspace owner.',
+    });
   },
 
   /**
@@ -660,6 +731,12 @@ export const teamService = {
       event: 'PROPERTY_SCOPE_UPDATED',
       detail: `Access updated for ${memberProfile?.email ?? userId} — role: ${displayRole}`,
       metadata: { userId, propertyId, displayRole, caps },
+    });
+    void createNotification({
+      userId,
+      type: 'team',
+      title: 'Your Access Was Updated',
+      message: `Your role has been updated to ${displayRole} for a property in your workspace.`,
     });
   },
 };
