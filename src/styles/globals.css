@@ -458,3 +458,35 @@
 .ds-progress-fill-success {
   background: var(--ds-success);
 }
+
+/* Shimmer animation for premium skeleton loaders */
+@keyframes premium-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.premium-shimmer {
+  background: linear-gradient(90deg, #f4f4f6 25%, #ececef 50%, #f4f4f6 75%);
+  background-size: 200% 100%;
+  animation: premium-shimmer 1.6s infinite linear;
+}
+
+@keyframes loading-bar {
+  0% {
+    transform: translateX(-100%);
+  }
+  50% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.animate-loading-bar {
+  animation: loading-bar 1.5s infinite ease-in-out;
+}

@@ -1,4 +1,4 @@
-import { supabase } from '../lib/supabase';
+import { supabase, supabaseUrl } from '../lib/supabase';
 import type { Property, Room } from '../contexts/PropertyContext';
 import { isPlatformAdminRole, isScopedOwnerRole } from '../utils/roles';
 import { isValidStoredPhoneNumber as isValidStoredPhoneFromUtils, parseStoredPhone } from '../utils/phone';
@@ -248,6 +248,7 @@ interface TenantRow {
   gender?: string | null;
   guardian_relationship?: string | null;
   billing_cycle?: string;
+  invitation_sent_at?: string | null;
 }
 
 interface PaymentRow {
@@ -437,6 +438,8 @@ export interface TenantRecord {
   gender?: string;
   guardianRelationship?: string;
   billingCycle?: string;
+  /** ISO timestamp of the most recent magic-link invitation email, or null if never sent. */
+  invitationSentAt?: string | null;
 }
 
 export interface VacateRequest {
@@ -1982,6 +1985,7 @@ function mapTenant(row: TenantRow): TenantRecord {
     gender: row.gender ?? undefined,
     guardianRelationship: row.guardian_relationship ?? undefined,
     billingCycle: row.billing_cycle ?? 'monthly',
+    invitationSentAt: row.invitation_sent_at ?? null,
   };
 }
 
@@ -5985,11 +5989,13 @@ export const supabaseNotificationApi = {
       throw error;
     }
   },
+};
 
-  // ── Tenant Account Provisioning ───────────────────────────────────────────────
-  // Creates the Supabase auth user and profiles row for a new tenant so they can
-  // sign in via magic link without ever manually registering an account.
-
+// ── Tenant Account Provisioning ─────────────────────────────────────────────────
+// Creates the Supabase auth user + profiles row for a new tenant so they can sign
+// in via magic link without ever manually registering, and sends/records the
+// invitation. The owner never has to create the tenant's auth account separately.
+export const supabaseTenantProvisioningApi = {
   async provisionTenantAccount(email: string, name: string): Promise<{ userId: string; isNew: boolean }> {
     const serviceRoleKey = String((import.meta as any).env?.VITE_SUPABASE_SERVICE_ROLE_KEY ?? '');
     if (!serviceRoleKey) {
@@ -6073,6 +6079,69 @@ export const supabaseNotificationApi = {
     // Supabase admin generateLink sends the email automatically when using the hosted platform.
     // If self-hosted, you must configure the SMTP settings.
   },
+
+  // ── One-shot tenant invitation ────────────────────────────────────────────────
+  // Provisions the auth identity (if missing), sends the magic-link invitation
+  // email, stamps tenants.invitation_sent_at, writes an audit log, and creates a
+  // welcome notification. Used on Add Tenant and on Resend Invitation. Returns the
+  // ISO timestamp recorded so callers can patch their local state immediately.
+  async inviteTenant(args: {
+    tenantId: string;
+    email: string;
+    name: string;
+    ownerId: string;
+    propertyId: string;
+  }): Promise<{ invitationSentAt: string }> {
+    const email = args.email.trim().toLowerCase();
+    if (!email || email.includes('noemail.') || email.includes(NO_EMAIL_MARKER)) {
+      throw new Error('This tenant has no email address on file. Add an email before sending an invitation.');
+    }
+
+    // Resolve the post-login redirect from VITE_SITE_URL, falling back to the
+    // current origin for local development.
+    const configuredSiteUrl = String((import.meta as any).env?.VITE_SITE_URL ?? '').trim();
+    const origin = typeof window !== 'undefined' && window.location?.origin ? window.location.origin : '';
+    const isLocal = origin.includes('localhost') || origin.includes('127.0.0.1');
+    const redirectTo = (isLocal ? origin : (configuredSiteUrl || origin)) || undefined;
+
+    // 1 + 2: create the auth identity if it does not already exist.
+    await this.provisionTenantAccount(email, args.name).catch((err) => {
+      console.warn('Tenant account provisioning failed (continuing to magic link):', err);
+    });
+
+    // 5 + 6: generate + send the magic-link invitation email.
+    await this.sendTenantMagicLink(email, redirectTo);
+
+    const invitationSentAt = new Date().toISOString();
+
+    // Stamp the invitation time on the tenant row (graceful — column may not exist yet).
+    const { error: stampError } = await supabase
+      .from('tenants')
+      .update({ invitation_sent_at: invitationSentAt })
+      .eq('id', args.tenantId);
+    if (stampError && !isMissingColumnError(stampError, ['invitation_sent_at'])) {
+      console.warn('Could not record invitation_sent_at:', stampError.message);
+    }
+
+    // 7: audit log.
+    void logActivity(
+      args.ownerId,
+      args.propertyId,
+      'TENANT_INVITED',
+      `Invitation email sent to ${args.name} (${email})`,
+      { tenantId: args.tenantId, email, invitationSentAt },
+    ).catch(() => {});
+
+    // 8: welcome notification for the owner's activity feed.
+    void createOwnerNotification(args.ownerId, {
+      type: 'tenant',
+      title: 'Tenant Invitation Sent',
+      message: `${args.name} has been invited to the Tenant Portal via ${email}.`,
+      propertyId: args.propertyId,
+    }).catch(() => {});
+
+    return { invitationSentAt };
+  },
 };
 
 export const supabaseTenantDataApi = {
@@ -6138,20 +6207,32 @@ export const supabaseTenantDataApi = {
           deposit_refund: number | null; deposit_deduction: number | null;
           deduction_reason: string | null; final_settlement_amount: number | null;
         }>>(),
-      supabase
-        .from('tenant_documents')
-        .select('*')
-        .eq('tenant_id', tenant.id)
-        .order('created_at')
-        .returns<TenantDocumentRow[]>()
-        .catch(() => ({ data: [] as TenantDocumentRow[], error: null })),
-      supabase
-        .from('agreements')
-        .select('*')
-        .eq('tenant_id', tenant.id)
-        .order('created_at', { ascending: false })
-        .returns<AgreementRow[]>()
-        .catch(() => ({ data: [] as AgreementRow[], error: null })),
+      (async () => {
+        try {
+          const res = await supabase
+            .from('tenant_documents')
+            .select('*')
+            .eq('tenant_id', tenant.id)
+            .order('created_at')
+            .returns<TenantDocumentRow[]>();
+          return res.error ? { data: [] as TenantDocumentRow[], error: null } : res;
+        } catch {
+          return { data: [] as TenantDocumentRow[], error: null };
+        }
+      })(),
+      (async () => {
+        try {
+          const res = await supabase
+            .from('agreements')
+            .select('*')
+            .eq('tenant_id', tenant.id)
+            .order('created_at', { ascending: false })
+            .returns<AgreementRow[]>();
+          return res.error ? { data: [] as AgreementRow[], error: null } : res;
+        } catch {
+          return { data: [] as AgreementRow[], error: null };
+        }
+      })(),
     ]);
 
     if (propertyError) {
@@ -7678,15 +7759,17 @@ export const supabaseAdminDataApi = {
     if (profileError) throw profileError;
 
     // Create default trialing subscription
-    await supabase.from('owner_subscriptions').insert({
-      owner_id: newId,
-      plan_code: 'starter',
-      status: 'trialing',
-      billing_cycle: 'monthly',
-      amount: 0,
-      currency: 'INR',
-      seats: 1,
-    }).then(() => {/* non-fatal if fails */}).catch(() => {});
+    try {
+      await supabase.from('owner_subscriptions').insert({
+        owner_id: newId,
+        plan_code: 'starter',
+        status: 'trialing',
+        billing_cycle: 'monthly',
+        amount: 0,
+        currency: 'INR',
+        seats: 1,
+      });
+    } catch {}
 
     await logActivity(context.userId, null, 'ADMIN_OWNER_CREATED',
       `New owner ${input.email} (${input.name}) created by admin`,

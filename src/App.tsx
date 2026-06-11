@@ -152,10 +152,24 @@ function AppContent() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-100">
-        <div className="text-center">
-          <div className="w-8 h-8 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin mx-auto mb-3"></div>
-          <p className="text-sm text-gray-600">Loading account...</p>
+      <div className="min-h-screen flex items-center justify-center bg-[#F8FAFC]">
+        <div className="text-center space-y-5">
+          <div className="relative w-16 h-16 mx-auto">
+            {/* Pulsing Outer Glow */}
+            <div className="absolute inset-0 rounded-2xl bg-indigo-500/20 blur-xl animate-pulse" />
+            {/* Logo box */}
+            <div className="relative w-16 h-16 rounded-2xl bg-gradient-to-tr from-indigo-600 to-indigo-500 flex items-center justify-center shadow-lg shadow-indigo-500/30">
+              <span className="text-2xl text-white font-black tracking-tight">RC</span>
+            </div>
+          </div>
+          <div className="space-y-1">
+            <h2 className="text-sm font-semibold text-zinc-800">RentCare</h2>
+            <p className="text-xs text-zinc-400 font-medium">Securing session...</p>
+          </div>
+          {/* Progress track */}
+          <div className="w-28 h-1 bg-zinc-200 rounded-full overflow-hidden mx-auto relative">
+            <div className="h-full bg-indigo-600 rounded-full w-12 animate-loading-bar" />
+          </div>
         </div>
       </div>
     );
@@ -354,6 +368,15 @@ function AppContent() {
           </PageGuard>
         </WorkspaceProvider>
       </PropertyProvider>
+    );
+  }
+
+  // Tenants get a full-screen tenant portal — no owner sidebar/header overlay
+  if (user.role === 'tenant' && activeTab === 'tenant-portal') {
+    return (
+      <PageGuard action="page:tenant-portal">
+        <TenantPortal />
+      </PageGuard>
     );
   }
 

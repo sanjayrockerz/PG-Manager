@@ -138,9 +138,10 @@ function TenantLogin({ onBack }: { onBack?: () => void }) {
                     <p className="text-xs text-gray-500">For Residents</p>
                   </div>
                 </div>
-                <h2 className="text-2xl font-bold text-gray-900 mb-2">Access Your Stay</h2>
+                <h2 className="text-3xl font-bold text-gray-900 mb-1">Welcome Back</h2>
+                <p className="text-lg font-medium text-gray-700 mb-4">Your Stay. Simplified.</p>
                 <p className="text-sm text-gray-500 leading-relaxed">
-                  Your account is automatically set up by your property manager.
+                  Your account is automatically created by your property manager.
                   Enter your registered email to receive a secure sign-in link.
                 </p>
               </div>
@@ -277,11 +278,7 @@ export function OTPLogin({ onSwitchToSignup, portalType, onBack }: OTPLoginProps
   const [error, setError] = useState('');
   const [isSent, setIsSent] = useState(false);
 
-  // ── Tenant portal uses the dedicated premium component ──────────────────────
-  if (portalType === 'tenant') {
-    return <TenantLogin onBack={onBack} />;
-  }
-
+  // Hooks must come before any conditional returns (Rules of Hooks)
   useEffect(() => { if (authError) setError(authError); }, [authError]);
 
   useEffect(() => {
@@ -290,6 +287,11 @@ export function OTPLogin({ onSwitchToSignup, portalType, onBack }: OTPLoginProps
     const pre = params.get('email')?.trim().toLowerCase() ?? '';
     if (pre && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(pre)) setEmail(pre);
   }, []);
+
+  // ── Tenant portal uses the dedicated premium component ──────────────────────
+  if (portalType === 'tenant') {
+    return <TenantLogin onBack={onBack} />;
+  }
 
   const handleEmailSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

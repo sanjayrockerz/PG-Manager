@@ -62,18 +62,19 @@ const relTime = (iso: string) => {
 function StatCard({
   label, value, prefix, suffix,
   trend, trendLabel, meta, icon: Icon, iconBg, iconColor,
-  tag, tagColor,
+  tag, tagColor, cardBg = '#ffffff', borderColor = '#E4E4E7'
 }: {
   label: string; value: string; prefix?: string; suffix?: string;
   trend?: number; trendLabel?: string; meta?: string;
   icon: typeof CreditCard; iconBg: string; iconColor: string;
   tag?: string; tagColor?: 'warning' | 'danger';
+  cardBg?: string; borderColor?: string;
 }) {
   const up = trend !== undefined && trend >= 0;
   return (
     <div
-      className="ds-card flex items-start justify-between"
-      style={{ padding: '10px 14px', gap: 10 }}
+      className="rounded-2xl border flex items-start justify-between shadow-xs"
+      style={{ padding: '16px 20px', gap: 10, background: cardBg, borderColor: borderColor }}
     >
       <div className="flex-1 min-w-0">
         <p style={{ fontSize: 10, fontWeight: 600, color: '#71717A', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 5 }}>
@@ -171,10 +172,10 @@ function ChartTooltip({ active, payload, label }: any) {
         boxShadow: '0 8px 24px rgb(0 0 0 / 0.2)',
       }}
     >
-      <p style={{ fontSize: 11, color: '#71717A', marginBottom: 4 }}>{label}</p>
+      <p style={{ fontSize: 11, color: '#A1A1AA', marginBottom: 4 }}>{label}</p>
       {payload.map((p: any) => (
-        <p key={p.name} style={{ fontSize: 13, fontWeight: 600, color: p.name === 'revenue' ? '#818CF8' : '#52525B' }}>
-          {p.name === 'revenue' ? 'Collected' : 'Expected'}: {fmtK(p.value)}
+        <p key={p.name} style={{ fontSize: 13, fontWeight: 600, color: p.name === 'revenue' ? '#818CF8' : '#A1A1AA' }}>
+          {p.name === 'revenue' ? 'Collected' : 'Expected'}: ₹{fmt(p.value)}
         </p>
       ))}
     </div>
@@ -499,6 +500,8 @@ export function Dashboard({ onNavigate }: DashboardProps) {
           trend={prevRev > 0 ? revDelta : undefined}
           trendLabel={prevRev > 0 ? `vs prior period` : undefined}
           meta={`${rangeLabel}`}
+          cardBg="#EFF6FF"
+          borderColor="#BFDBFE"
         />
         <StatCard
           label="Pending Payments"
@@ -510,25 +513,31 @@ export function Dashboard({ onNavigate }: DashboardProps) {
           meta={pendingCt > 0 ? `${pendingCt} invoices open` : 'All cleared'}
           tag={overdueCt > 0 ? `${overdueCt} Overdue` : undefined}
           tagColor="danger"
+          cardBg="#FEF2F2"
+          borderColor="#FECACA"
         />
         <StatCard
           label="Total Tenants"
           value={data.totalTenants.toString()}
           icon={Users}
-          iconBg="#ECFDF5"
-          iconColor="#059669"
+          iconBg="#FAF5FF"
+          iconColor="#9333EA"
           meta={`Across ${properties.length} ${properties.length === 1 ? 'property' : 'properties'}`}
+          cardBg="#FAF5FF"
+          borderColor="#F3E8FF"
         />
         <StatCard
           label="Occupancy Rate"
           value={occ.toString()}
           suffix="%"
           icon={Bed}
-          iconBg="#EFF6FF"
-          iconColor="#3B82F6"
+          iconBg="#ECFDF5"
+          iconColor="#059669"
           meta={`${data.occupiedRooms} / ${data.totalRooms} rooms occupied`}
           trend={occ > 50 ? occ - 50 : -(50 - occ)}
           trendLabel="vs 50% baseline"
+          cardBg="#ECFDF5"
+          borderColor="#A7F3D0"
         />
       </div>
 

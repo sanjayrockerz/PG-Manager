@@ -10,6 +10,9 @@ import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
 import {
   type MaintenancePriority,
+  type MaintenanceSource,
+  type MaintenanceTicketRecord,
+  type AnnouncementRecord,
   type NotificationRecord,
   type PaymentRecord,
   type TenantPortalSnapshot,
@@ -23,7 +26,7 @@ import {
   submitTenantVacateRequest,
   createTenantMaintenanceTicket,
 } from '../services/dataService';
-import { openReceiptWindow, openInvoiceWindow } from '../services/receiptGenerator';
+import { PaymentDocumentDialog } from './ui/PaymentDocumentDialog';
 import { getAppMode } from '../config/appMode';
 import { supabase } from '../lib/supabase';
 
@@ -264,6 +267,15 @@ export function TenantPortal() {
   const [showWelcome, setShowWelcome] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
+  // In-app Receipt/Invoice Dialog state
+  const [docDialogOpen, setDocDialogOpen] = useState(false);
+  const [selectedDocPayment, setSelectedDocPayment] = useState<PaymentRecord | null>(null);
+
+  const handleOpenDocument = (payment: PaymentRecord) => {
+    setSelectedDocPayment(payment);
+    setDocDialogOpen(true);
+  };
+
   const [notifLastSeen, setNotifLastSeen] = useState<string>(() => {
     if (typeof window === 'undefined') return new Date(0).toISOString();
     return localStorage.getItem(notifSeenKey('__init')) ?? new Date(0).toISOString();
@@ -345,26 +357,35 @@ export function TenantPortal() {
         const updated = payload.new as Record<string, unknown>;
         setSnapshot((prev) => {
           if (!prev) return prev;
-          const exists = prev.payments.some((p) => p.id === updated.id);
-          const mappedPayment: PaymentRecord = {
-            id: String(updated.id ?? ''),
-            tenantId: String(updated.tenant_id ?? ''),
-            propertyId: String(updated.property_id ?? ''),
-            ownerId: String(updated.owner_id ?? ''),
-            dueDate: String(updated.due_date ?? ''),
-            paidDate: updated.paid_date ? String(updated.paid_date) : undefined,
-            amount: Number(updated.amount ?? 0),
-            charges: [],
-            totalAmount: Number(updated.amount ?? 0),
+          const id = String(updated.id ?? '');
+          const existing = prev.payments.find((p) => p.id === id);
+          const amount = Number(updated.amount ?? existing?.totalAmount ?? 0);
+          // Delta-patch: preserve canonical fields (tenant/room/charges) from the
+          // existing snapshot record and only overwrite the slices the realtime
+          // payload actually carries.
+          const patched: PaymentRecord = {
+            ...(existing ?? {
+              id,
+              tenantId: String(updated.tenant_id ?? prev.tenant.id),
+              tenant: prev.tenant.name,
+              propertyId: String(updated.property_id ?? prev.tenant.propertyId),
+              room: prev.tenant.room,
+              monthlyRent: amount,
+              extraCharges: 0,
+              ownerId: String(updated.owner_id ?? ''),
+            } as PaymentRecord),
+            id,
+            totalAmount: amount,
+            dueDate: String(updated.due_date ?? existing?.dueDate ?? ''),
+            paidDate: updated.paid_date ? String(updated.paid_date) : (existing?.paidDate ?? ''),
             status: String(updated.status ?? 'pending') as PaymentRecord['status'],
-            paymentMode: updated.payment_mode ? String(updated.payment_mode) : undefined,
-            referenceNumber: updated.reference_number ? String(updated.reference_number) : undefined,
-            notes: updated.notes ? String(updated.notes) : undefined,
-            createdAt: String(updated.created_at ?? ''),
+            paymentMode: updated.payment_mode ? String(updated.payment_mode) : existing?.paymentMode,
+            referenceNumber: updated.reference_number ? String(updated.reference_number) : existing?.referenceNumber,
+            createdAt: String(updated.created_at ?? existing?.createdAt ?? ''),
           };
-          const payments = exists
-            ? prev.payments.map((p) => p.id === mappedPayment.id ? mappedPayment : p)
-            : [mappedPayment, ...prev.payments];
+          const payments = existing
+            ? prev.payments.map((p) => p.id === id ? patched : p)
+            : [patched, ...prev.payments];
           return { ...prev, payments };
         });
       })
@@ -382,18 +403,23 @@ export function TenantPortal() {
             if (!data) return;
             setSnapshot((prev) => {
               if (!prev) return prev;
-              return { ...prev, maintenance: data.map((row: Record<string, unknown>) => ({
+              const maintenance: MaintenanceTicketRecord[] = data.map((row: Record<string, unknown>, idx: number) => ({
                 id: String(row.id ?? ''),
-                tenantId: String(row.tenant_id ?? ''),
-                propertyId: String(row.property_id ?? ''),
-                ownerId: String(row.owner_id ?? ''),
+                ticketId: String(row.ticket_id ?? `TKT-${String(idx + 1).padStart(3, '0')}`),
+                tenant: prev.tenant.name,
+                propertyId: String(row.property_id ?? prev.tenant.propertyId),
+                room: prev.tenant.room,
                 issue: String(row.issue ?? ''),
                 description: String(row.description ?? ''),
-                status: String(row.status ?? 'open') as 'open' | 'in-progress' | 'resolved' | 'closed' | 'pending' | 'waiting',
+                source: String(row.source ?? 'portal') as MaintenanceSource,
+                status: String(row.status ?? 'open') as MaintenanceTicketRecord['status'],
                 priority: String(row.priority ?? 'medium') as MaintenancePriority,
                 date: String(row.created_at ?? ''),
+                phone: prev.tenant.phone,
+                notes: [],
                 threads: [],
-              })) };
+              }));
+              return { ...prev, maintenance };
             });
           });
       })
@@ -404,15 +430,16 @@ export function TenantPortal() {
         if (String(row.property_id ?? '') !== propertyId && row.property_id !== null) return;
         setSnapshot((prev) => {
           if (!prev) return prev;
-          const newAnn = {
+          const newAnn: AnnouncementRecord = {
             id: String(row.id ?? ''),
             title: String(row.title ?? ''),
             content: String(row.content ?? ''),
-            category: String(row.category ?? 'general') as 'general' | 'maintenance' | 'payment' | 'rules' | 'event',
+            category: String(row.category ?? 'general') as AnnouncementRecord['category'],
             date: String(row.created_at ?? ''),
             isPinned: Boolean(row.is_pinned ?? false),
+            views: Number(row.views ?? 0),
+            sentViaWhatsApp: Boolean(row.sent_via_whatsapp ?? false),
             propertyId: row.property_id ? String(row.property_id) : null,
-            ownerId: String(row.owner_id ?? ''),
           };
           return { ...prev, announcements: [newAnn, ...prev.announcements] };
         });
@@ -458,8 +485,7 @@ export function TenantPortal() {
 
       .subscribe((status) => {
         if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          // Silent fallback: reload data if realtime fails
-          void load();
+          // Silent fallback: do not trigger reload on connection issues
         }
       });
 
@@ -493,7 +519,7 @@ export function TenantPortal() {
   const handleWelcomeDone = () => {
     if (snapshot) localStorage.setItem(welcomeKey(snapshot.tenant.id), 'true');
     if (user?.id && !isDemo) {
-      void supabase.from('profiles').update({ first_login_completed_at: new Date().toISOString() }).eq('id', user.id).catch(() => {});
+      (async () => { try { await supabase.from('profiles').update({ first_login_completed_at: new Date().toISOString() }).eq('id', user.id); } catch {} })();
     }
     setShowWelcome(false);
   };
@@ -542,8 +568,8 @@ export function TenantPortal() {
     if (!vacateForm.date || !vacateForm.confirm) return;
     setVacateForm((f) => ({ ...f, submitting: true }));
     try {
-      const vr = await submitTenantVacateRequest({ vacateDate: vacateForm.date, reason: vacateForm.reason });
-      setSnapshot((prev) => prev ? { ...prev, vacateRequest: vr } : prev);
+      await submitTenantVacateRequest({ vacateDate: vacateForm.date, reason: vacateForm.reason });
+      await load();
       setView('profile');
       toast.success('Vacate notice submitted. Your manager has been notified.');
     } catch (e) {
@@ -644,320 +670,438 @@ export function TenantPortal() {
 
   const viewHome = (
     <div className="space-y-5 pb-8">
-      {/* Greeting */}
+      {/* Page title */}
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">
-          {greeting()}, {tenant.name.split(' ')[0]} 👋
-        </h1>
-        <p className="text-sm text-gray-500 mt-0.5">
-          {ownerPaymentInfo.pgName || property?.name} · Room {tenant.room}{tenant.bed ? `, Bed ${tenant.bed}` : ''}
-          {property?.name ? ` · Floor ${tenant.floor}` : ''}
+        <h1 className="text-2xl font-bold text-gray-900">{greeting()}, {tenant.name.split(' ')[0]} 👋</h1>
+        <p className="text-sm text-gray-500 mt-1">
+          {ownerPaymentInfo.pgName || property?.name} · Room {tenant.room}{tenant.bed ? `, Bed ${tenant.bed}` : ''}{tenant.floor ? ` · Floor ${tenant.floor}` : ''}
         </p>
       </div>
 
-      {/* Stat cards */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        {[
-          { label: 'Monthly Rent', value: fmtAmount(tenant.rent), sub: `Due on ${tenant.rentDueDate}th`, icon: IndianRupee, color: 'text-purple-600 bg-purple-50' },
-          {
-            label: currentPayment ? `${new Date().toLocaleString('en-IN', { month: 'long' })} Status` : 'Payment Status',
-            value: currentPayment ? `${fmtAmount(currentPayment.totalAmount)} Due` : 'All Paid',
-            sub: currentPayment ? `Due by ${fmtDate(currentPayment.dueDate)}` : 'No pending dues',
-            icon: CreditCard,
-            color: currentPayment ? 'text-amber-600 bg-amber-50' : 'text-green-600 bg-green-50',
-          },
-          { label: 'Security Deposit', value: fmtAmount(tenant.securityDeposit), sub: 'Active tenancy', icon: Shield, color: 'text-blue-600 bg-blue-50' },
-          { label: 'Staying Since', value: fmtDate(tenant.joinDate).split(' ')[2] ? `${fmtDate(tenant.joinDate).split(' ')[1]} ${fmtDate(tenant.joinDate).split(' ')[2]}` : fmtDate(tenant.joinDate), sub: stayingSince(tenant.joinDate), icon: Calendar, color: 'text-teal-600 bg-teal-50' },
-        ].map(({ label, value, sub, icon: Icon, color }) => (
-          <div key={label} className="bg-white rounded-2xl border border-gray-200 p-4">
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-xs text-gray-500 font-medium">{label}</p>
-              <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${color}`}>
-                <Icon className="w-4 h-4" />
-              </div>
+      {/* 4 KPI stat cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="bg-white border border-gray-100 rounded-xl p-4 border-l-4 border-l-purple-500">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-xs text-gray-500 mb-1">Monthly Rent</p>
+              <p className="text-xl font-bold text-gray-900">{fmtAmount(tenant.rent)}</p>
+              <p className="text-xs text-gray-400 mt-1">Due on {tenant.rentDueDate}th every month</p>
             </div>
-            <p className="text-lg font-bold text-gray-900 leading-tight">{value}</p>
-            <p className="text-xs text-gray-400 mt-0.5">{sub}</p>
+            <div className="w-9 h-9 rounded-lg bg-rose-50 flex items-center justify-center flex-shrink-0">
+              <Home className="w-4 h-4 text-rose-500" />
+            </div>
           </div>
-        ))}
+        </div>
+
+        <div className="bg-white border border-gray-100 rounded-xl p-4 border-l-4 border-l-amber-400">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-xs text-gray-500 mb-1">
+                {new Date().toLocaleDateString('en-IN', { month: 'long' })} Status
+              </p>
+              {currentPayment ? (
+                <>
+                  <p className="text-xl font-bold text-amber-600">{fmtAmount(currentPayment.totalAmount)} Due</p>
+                  <p className="text-xs text-gray-400 mt-1">Due by {fmtDate(currentPayment.dueDate)}</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-xl font-bold text-green-600">All Clear</p>
+                  <p className="text-xs text-gray-400 mt-1">No pending payments</p>
+                </>
+              )}
+            </div>
+            <div className="w-9 h-9 rounded-lg bg-amber-50 flex items-center justify-center flex-shrink-0">
+              <CreditCard className="w-4 h-4 text-amber-500" />
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white border border-gray-100 rounded-xl p-4 border-l-4 border-l-green-500">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-xs text-gray-500 mb-1">Security Deposit</p>
+              <p className="text-xl font-bold text-gray-900">{fmtAmount(tenant.securityDeposit)}</p>
+              <p className="text-xs text-gray-400 mt-1">Active tenancy</p>
+            </div>
+            <div className="w-9 h-9 rounded-lg bg-green-50 flex items-center justify-center flex-shrink-0">
+              <Shield className="w-4 h-4 text-green-500" />
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white border border-gray-100 rounded-xl p-4 border-l-4 border-l-blue-400">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-xs text-gray-500 mb-1">Staying Since</p>
+              <p className="text-xl font-bold text-gray-900">
+                {new Date(tenant.joinDate).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}
+              </p>
+              <p className="text-xs text-gray-400 mt-1">{stayingSince(tenant.joinDate)}</p>
+            </div>
+            <div className="w-9 h-9 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
+              <Calendar className="w-4 h-4 text-blue-500" />
+            </div>
+          </div>
+        </div>
       </div>
 
+      {/* Rent Status + Caretaker Contact */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Rent Status */}
-        {currentPayment && (
-          <div className="bg-white border border-gray-200 rounded-2xl p-5">
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-sm font-semibold text-gray-900">Rent Status</p>
-              <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-100 text-amber-700">Pending</span>
-            </div>
-            <p className="text-2xl font-bold text-amber-700 mb-0.5">{fmtAmount(currentPayment.totalAmount)}</p>
-            <p className="text-sm text-amber-600 mb-4">Due by {fmtDate(currentPayment.dueDate)}</p>
-            {ownerPaymentInfo.upiId && (
-              <a
-                href={buildUpiLink(ownerPaymentInfo.upiId, currentPayment.totalAmount, owner?.name ?? 'Manager', paymentMonth(currentPayment)) ?? '#'}
-                className="flex items-center justify-center gap-2 w-full py-3 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
-                style={{ background: 'linear-gradient(135deg, #6D28D9, #4F46E5)' }}
-              >
-                <QrCode className="w-4 h-4" />
-                Pay via UPI →
-              </a>
+        <div className="bg-white border border-gray-100 rounded-xl p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-base font-semibold text-gray-900">Rent Status</h3>
+            {currentPayment ? (
+              <span className="text-xs font-semibold px-2.5 py-1 bg-amber-100 text-amber-700 rounded-full">Pending</span>
+            ) : (
+              <span className="text-xs font-semibold px-2.5 py-1 bg-green-100 text-green-700 rounded-full">Paid</span>
             )}
           </div>
-        )}
+          {currentPayment ? (
+            <>
+              <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 mb-4">
+                <p className="text-xl font-bold text-amber-600">{fmtAmount(currentPayment.totalAmount)}</p>
+                <p className="text-xs text-amber-600 mt-0.5">Due by {fmtDate(currentPayment.dueDate)}</p>
+              </div>
+              {ownerPaymentInfo.upiId && (
+                <a
+                  href={buildUpiLink(ownerPaymentInfo.upiId, currentPayment.totalAmount, owner?.name ?? 'Manager', paymentMonth(currentPayment)) ?? '#'}
+                  className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold text-white transition-opacity hover:opacity-90"
+                  style={{ background: 'linear-gradient(135deg, #4F46E5, #5B21B6)' }}
+                >
+                  Pay via UPI →
+                </a>
+              )}
+            </>
+          ) : (
+            <div className="py-6 text-center">
+              <CheckCircle2 className="w-10 h-10 text-green-500 mx-auto mb-2" />
+              <p className="text-sm text-gray-600 font-medium">No pending payments</p>
+            </div>
+          )}
+        </div>
 
-        {/* Caretaker Contact */}
-        {(ownerPaymentInfo.ownerPhone || owner?.phone) && (
-          <div className="bg-white border border-gray-200 rounded-2xl p-5">
-            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Caretaker Contact</p>
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center flex-shrink-0">
-                <span className="text-indigo-700 font-bold text-sm">
-                  {(owner?.name || 'M').split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()}
-                </span>
+        {(ownerPaymentInfo.ownerPhone || owner?.phone) ? (
+          <div className="bg-white border border-gray-100 rounded-xl p-5">
+            <h3 className="text-base font-semibold text-gray-900 mb-4">Caretaker Contact</h3>
+            <div className="flex items-center gap-3 mb-5">
+              <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center font-bold text-sm text-indigo-700 flex-shrink-0">
+                {(owner?.name ?? 'M').split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2)}
               </div>
               <div>
-                <p className="text-sm font-semibold text-gray-900">{owner?.name || 'Property Manager'}</p>
-                <p className="text-sm text-gray-500">{ownerPaymentInfo.ownerPhone || owner?.phone}</p>
+                <p className="text-sm font-semibold text-gray-900">{owner?.name ?? 'Property Manager'}</p>
+                <p className="text-xs text-gray-500">{ownerPaymentInfo.ownerPhone || owner?.phone}</p>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-3">
               <a
                 href={`tel:${ownerPaymentInfo.ownerPhone || owner?.phone}`}
-                className="flex items-center justify-center gap-1.5 py-2.5 border border-gray-200 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                className="flex items-center justify-center gap-2 py-2.5 border border-gray-200 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
               >
                 <Phone className="w-4 h-4" /> Call
               </a>
               <a
                 href={`https://wa.me/${(ownerPaymentInfo.ownerPhone || owner?.phone || '').replace(/\D/g, '')}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-medium text-white transition-opacity hover:opacity-90"
-                style={{ background: '#25D366' }}
+                target="_blank" rel="noopener noreferrer"
+                className="flex items-center justify-center gap-2 py-2.5 border border-green-200 rounded-xl text-sm font-medium text-green-700 hover:bg-green-50 transition-colors"
               >
                 <MessageSquare className="w-4 h-4" /> WhatsApp
               </a>
             </div>
           </div>
+        ) : (
+          <div className="bg-white border border-gray-100 rounded-xl p-5 flex flex-col items-center justify-center text-gray-400">
+            <Phone className="w-8 h-8 mb-2 opacity-30" />
+            <p className="text-sm">No contact info available</p>
+          </div>
         )}
       </div>
 
-      {/* Recent Announcements */}
-      {announcements.length > 0 && (
-        <div className="bg-white border border-gray-200 rounded-2xl">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-            <p className="text-sm font-semibold text-gray-900">Recent Announcements</p>
-            <button onClick={() => setView('announcements')} className="text-xs text-indigo-600 font-medium flex items-center gap-1">
-              View all <ArrowRight className="w-3 h-3" />
+      {/* Recent Announcements + Quick Access */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="bg-white border border-gray-100 rounded-xl p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-base font-semibold text-gray-900">Recent Announcements</h3>
+            <button onClick={() => setView('announcements')} className="text-sm font-medium text-indigo-600 hover:text-indigo-700 flex items-center gap-1">
+              View all <ChevronRight className="w-3.5 h-3.5" />
             </button>
           </div>
-          <div className="divide-y divide-gray-100">
-            {announcements.slice(0, 3).map((a) => (
-              <div key={a.id} className="px-5 py-3.5 flex items-start gap-3">
-                <span className={`mt-1.5 w-2 h-2 rounded-full flex-shrink-0 ${
-                  a.category === 'maintenance' ? 'bg-orange-400'
-                  : a.category === 'payment' ? 'bg-red-400'
-                  : a.isPinned ? 'bg-red-500'
-                  : 'bg-blue-400'
-                }`} />
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-gray-900 truncate">{a.title}</p>
-                  <p className="text-xs text-gray-500 mt-0.5 truncate">{a.content}</p>
+          {announcements.length > 0 ? (
+            <div className="space-y-3">
+              {announcements.slice(0, 3).map((a) => (
+                <div key={a.id} className="border-l-2 border-indigo-200 pl-3">
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <span className={`text-xs font-semibold px-1.5 py-0.5 rounded capitalize ${
+                      a.category === 'payment' ? 'bg-green-100 text-green-700'
+                      : a.category === 'maintenance' ? 'bg-orange-100 text-orange-700'
+                      : a.category === 'rules' ? 'bg-purple-100 text-purple-700'
+                      : 'bg-blue-100 text-blue-700'
+                    }`}>{a.category}</span>
+                    <span className="text-xs text-gray-400">{fmtDate(a.date)}</span>
+                  </div>
+                  <p className="text-sm font-semibold text-gray-900">{a.title}</p>
+                  <p className="text-xs text-gray-500 line-clamp-1">{a.content}</p>
                 </div>
-                <span className="text-xs text-gray-400 flex-shrink-0">{fmtDate(a.date).split(' ')[0]} {fmtDate(a.date).split(' ')[1]}</span>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-6 text-gray-400">
+              <Bell className="w-8 h-8 mx-auto mb-2 opacity-30" />
+              <p className="text-sm">No announcements yet.</p>
+            </div>
+          )}
+        </div>
+
+        <div className="bg-white border border-gray-100 rounded-xl p-5">
+          <h3 className="text-base font-semibold text-gray-900 mb-4">Quick Access</h3>
+          <div className="grid grid-cols-2 gap-3">
+            <button onClick={() => setView('payments')} className="flex flex-col items-center gap-2 p-4 rounded-xl border border-gray-100 hover:bg-gray-50 transition-colors">
+              <div className="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center">
+                <CreditCard className="w-5 h-5 text-indigo-600" />
               </div>
-            ))}
+              <span className="text-sm font-medium text-gray-700">Payments</span>
+              {pendingPayments.length > 0 && <span className="text-xs text-amber-600 font-medium">{pendingPayments.length} pending</span>}
+            </button>
+            <button onClick={() => setView('documents')} className="flex flex-col items-center gap-2 p-4 rounded-xl border border-gray-100 hover:bg-gray-50 transition-colors">
+              <div className="w-10 h-10 rounded-xl bg-green-50 flex items-center justify-center">
+                <FileText className="w-5 h-5 text-green-600" />
+              </div>
+              <span className="text-sm font-medium text-gray-700">Documents</span>
+              <span className="text-xs text-gray-400 font-medium">{documents.length} files</span>
+            </button>
+            <button onClick={() => setView('maintenance-new')} className="flex flex-col items-center gap-2 p-4 rounded-xl border border-gray-100 hover:bg-gray-50 transition-colors">
+              <div className="w-10 h-10 rounded-xl bg-orange-50 flex items-center justify-center">
+                <Wrench className="w-5 h-5 text-orange-600" />
+              </div>
+              <span className="text-sm font-medium text-gray-700">New Request</span>
+              {openTickets.length > 0 && <span className="text-xs text-orange-600 font-medium">{openTickets.length} open</span>}
+            </button>
+            <button onClick={() => setView('announcements')} className="flex flex-col items-center gap-2 p-4 rounded-xl border border-gray-100 hover:bg-gray-50 transition-colors">
+              <div className="w-10 h-10 rounded-xl bg-purple-50 flex items-center justify-center">
+                <Bell className="w-5 h-5 text-purple-600" />
+              </div>
+              <span className="text-sm font-medium text-gray-700">Announcements</span>
+              {tenantUnreadCount > 0 && <span className="text-xs text-indigo-600 font-medium">{tenantUnreadCount} new</span>}
+            </button>
           </div>
         </div>
-      )}
-
-      {/* Quick Access */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {[
-          { id: 'payments' as TenantView, icon: CreditCard, label: 'Payments', sub: `${pendingPayments.length} pending`, color: 'text-green-600 bg-green-50' },
-          { id: 'documents' as TenantView, icon: FileText, label: 'Documents', sub: `${agreements.length} agreements`, color: 'text-purple-600 bg-purple-50' },
-          { id: 'maintenance' as TenantView, icon: Wrench, label: 'Maintenance', sub: `${openTickets.length} open`, color: 'text-orange-600 bg-orange-50' },
-          ...(ownerPaymentInfo.ownerPhone || owner?.phone ? [{
-            id: null as null, icon: Phone, label: 'Contact Manager', sub: ownerPaymentInfo.ownerPhone || owner?.phone || '',
-            color: 'text-blue-600 bg-blue-50',
-          }] : []),
-        ].map(({ id, icon: Icon, label, sub, color }) => (
-          id !== null ? (
-            <button
-              key={id}
-              onClick={() => setView(id)}
-              className="bg-white border border-gray-200 rounded-xl p-4 text-left hover:shadow-sm hover:border-gray-300 transition-all active:scale-[0.98]"
-            >
-              <div className={`w-9 h-9 rounded-xl flex items-center justify-center mb-2 ${color}`}>
-                <Icon className="w-5 h-5" />
-              </div>
-              <p className="text-sm font-semibold text-gray-900">{label}</p>
-              <p className="text-xs text-gray-500 mt-0.5">{sub}</p>
-            </button>
-          ) : (
-            <a
-              key="contact"
-              href={`tel:${ownerPaymentInfo.ownerPhone || owner?.phone}`}
-              className="bg-white border border-gray-200 rounded-xl p-4 text-left hover:shadow-sm hover:border-gray-300 transition-all"
-            >
-              <div className={`w-9 h-9 rounded-xl flex items-center justify-center mb-2 ${color}`}>
-                <Icon className="w-5 h-5" />
-              </div>
-              <p className="text-sm font-semibold text-gray-900">{label}</p>
-              <p className="text-xs text-gray-500 mt-0.5 truncate">{sub}</p>
-            </a>
-          )
-        ))}
       </div>
     </div>
   );
 
   // ── View: Payments ─────────────────────────────────────────────────────────
   const viewPayments = (
-    <div className="space-y-4 pb-8">
-      <div className="flex items-center gap-3">
-        <button onClick={() => setView('home')} className="p-1.5 hover:bg-gray-100 rounded-lg lg:hidden">
-          <ArrowLeft className="w-4 h-4 text-gray-600" />
-        </button>
-        <h1 className="text-xl font-bold text-gray-900 flex-1">Payments</h1>
+    <div className="space-y-5 pb-8">
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">Payments</h1>
+        <p className="text-sm text-gray-500 mt-1">View your payment history and manage pending payments</p>
       </div>
 
-      {pendingPayments.length > 0 && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-          <p className="text-sm font-semibold text-amber-900">
-            {fmtAmount(pendingPayments.reduce((s, p) => s + p.totalAmount, 0))} pending
+      {/* Stat cards */}
+      <div className="grid grid-cols-3 gap-4">
+        <div className="bg-white border border-gray-100 rounded-xl p-4">
+          <div className="w-9 h-9 rounded-lg bg-green-50 flex items-center justify-center mb-3">
+            <CreditCard className="w-4 h-4 text-green-600" />
+          </div>
+          <p className="text-xs text-gray-500">Total Paid</p>
+          <p className="text-xl font-bold text-gray-900 mt-0.5">
+            {fmtAmount(paidPayments.reduce((s, p) => s + p.totalAmount, 0))}
           </p>
-          <p className="text-xs text-amber-700 mt-0.5">{pendingPayments.length} payment(s) outstanding</p>
         </div>
-      )}
-
-      {ownerPaymentInfo.upiId && (
-        <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-3">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Pay Now</p>
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 min-w-0">
-              <IndianRupee className="w-4 h-4 text-gray-400 flex-shrink-0" />
-              <span className="text-sm font-mono text-gray-700 truncate">{ownerPaymentInfo.upiId}</span>
-            </div>
-            {pendingPayments[0] && (
-              <a
-                href={buildUpiLink(ownerPaymentInfo.upiId, pendingPayments[0].totalAmount, owner?.name ?? 'Manager', paymentMonth(pendingPayments[0])) ?? '#'}
-                className="flex-shrink-0 px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-semibold hover:bg-green-700 transition-colors"
-              >
-                Pay ₹{pendingPayments[0].totalAmount.toLocaleString('en-IN')}
-              </a>
-            )}
+        <div className="bg-white border border-gray-100 rounded-xl p-4">
+          <div className="w-9 h-9 rounded-lg bg-amber-50 flex items-center justify-center mb-3">
+            <IndianRupee className="w-4 h-4 text-amber-600" />
           </div>
-          {ownerPaymentInfo.qrCodeUrl && (
-            <div className="flex justify-center pt-1">
-              <img src={ownerPaymentInfo.qrCodeUrl} alt="Payment QR" className="w-36 h-36 border border-gray-200 rounded-xl object-contain p-2" />
-            </div>
-          )}
+          <p className="text-xs text-gray-500">Pending</p>
+          <p className="text-xl font-bold text-gray-900 mt-0.5">
+            {fmtAmount(pendingPayments.reduce((s, p) => s + p.totalAmount, 0))}
+          </p>
         </div>
-      )}
+        <div className="bg-white border border-gray-100 rounded-xl p-4">
+          <div className="w-9 h-9 rounded-lg bg-purple-50 flex items-center justify-center mb-3">
+            <Shield className="w-4 h-4 text-purple-600" />
+          </div>
+          <p className="text-xs text-gray-500">Security Deposit</p>
+          <p className="text-xl font-bold text-gray-900 mt-0.5">{fmtAmount(tenant.securityDeposit)}</p>
+        </div>
+      </div>
 
-      <div className="space-y-3">
-        {payments.length === 0 && (
-          <div className="text-center py-12 text-gray-400">
-            <CreditCard className="w-10 h-10 mx-auto mb-2 opacity-30" />
-            <p className="text-sm">No payment records yet.</p>
-          </div>
-        )}
-        {payments.map((p) => (
-          <div key={p.id} className="bg-white border border-gray-200 rounded-xl p-4">
-            <div className="flex items-start justify-between gap-2 mb-2">
-              <div>
-                <p className="text-sm font-semibold text-gray-900">{paymentMonth(p)}</p>
-                <p className="text-xs text-gray-500">Due {fmtDate(p.dueDate)}</p>
-              </div>
-              <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${statusBadge(p.status)}`}>{p.status}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <p className="text-lg font-bold text-gray-900">{fmtAmount(p.totalAmount)}</p>
-              <div className="flex items-center gap-2">
-                {p.status === 'paid' && (
-                  <button
-                    onClick={() => openReceiptWindow({ payment: p, propertyName: property?.name ?? '', ownerName: owner?.name })}
-                    className="flex items-center gap-1 px-3 py-1.5 border border-green-200 rounded-lg text-xs text-green-700 hover:bg-green-50 transition-colors"
-                  >
-                    <Download className="w-3.5 h-3.5" /> Receipt
-                  </button>
-                )}
-                {p.status !== 'paid' && (
-                  <button
-                    onClick={() => openInvoiceWindow({ payment: p, propertyName: property?.name ?? '', ownerName: owner?.name })}
-                    className="flex items-center gap-1 px-3 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-600 hover:bg-gray-50 transition-colors"
-                  >
-                    <FileText className="w-3.5 h-3.5" /> Invoice
-                  </button>
-                )}
-                {p.status !== 'paid' && ownerPaymentInfo.upiId && (
-                  <a
-                    href={buildUpiLink(ownerPaymentInfo.upiId, p.totalAmount, owner?.name ?? 'Manager', paymentMonth(p)) ?? '#'}
-                    className="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs hover:bg-green-700 transition-colors"
-                  >
-                    <QrCode className="w-3.5 h-3.5" /> Pay
-                  </a>
-                )}
-              </div>
-            </div>
-            {p.paidDate && <p className="text-xs text-gray-400 mt-1.5">Paid on {fmtDate(p.paidDate)}</p>}
-          </div>
-        ))}
+      {/* Payments table */}
+      <div className="bg-white border border-gray-100 rounded-xl overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-100 bg-gray-50/50">
+                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Month</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Base Rent</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Extra Charges</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Total</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Due Date</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Paid On</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Method</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Status</th>
+                <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {payments.length === 0 && (
+                <tr>
+                  <td colSpan={9} className="py-14 text-center">
+                    <CreditCard className="w-10 h-10 mx-auto mb-2 text-gray-300" />
+                    <p className="text-sm text-gray-400">No payment records yet.</p>
+                  </td>
+                </tr>
+              )}
+              {payments.map((p) => {
+                // Base rent + extras derived from fields present on every PaymentRecord
+                // (demo and live). Avoids depending on the partial `amount` field that
+                // only the realtime delta-patch populates.
+                const baseRent = p.monthlyRent ?? p.totalAmount;
+                const extras = p.totalAmount - baseRent;
+                return (
+                  <tr key={p.id} className="hover:bg-gray-50/50 transition-colors">
+                    <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">{paymentMonth(p)}</td>
+                    <td className="px-4 py-3 text-gray-700">{fmtAmount(baseRent)}</td>
+                    <td className="px-4 py-3 text-gray-500">{extras > 0 ? fmtAmount(extras) : '—'}</td>
+                    <td className="px-4 py-3 font-semibold text-gray-900">{fmtAmount(p.totalAmount)}</td>
+                    <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{fmtDate(p.dueDate)}</td>
+                    <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{p.paidDate ? fmtDate(p.paidDate) : '—'}</td>
+                    <td className="px-4 py-3 text-gray-600">{p.paymentMode?.toUpperCase() || '—'}</td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${statusBadge(p.status)}`}>
+                        {p.status === 'paid' ? 'Paid' : p.status.charAt(0).toUpperCase() + p.status.slice(1)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      {p.status !== 'paid' && ownerPaymentInfo.upiId ? (
+                        <a
+                          href={buildUpiLink(ownerPaymentInfo.upiId, p.totalAmount, owner?.name ?? 'Manager', paymentMonth(p)) ?? '#'}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-opacity hover:opacity-90"
+                          style={{ background: 'linear-gradient(135deg, #4F46E5, #5B21B6)' }}
+                        >
+                          Pay Now
+                        </a>
+                      ) : p.status === 'paid' ? (
+                        <button
+                          onClick={() => handleOpenDocument(p)}
+                          className="flex items-center gap-1 text-xs text-gray-500 hover:text-indigo-600 font-medium transition-colors"
+                        >
+                          <Download className="w-3.5 h-3.5" /> Receipt
+                        </button>
+                      ) : null}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
 
   // ── View: Maintenance list ─────────────────────────────────────────────────
   const viewMaintenance = (
-    <div className="space-y-4 pb-8">
-      <div className="flex items-center gap-3">
-        <button onClick={() => setView('home')} className="p-1.5 hover:bg-gray-100 rounded-lg lg:hidden">
-          <ArrowLeft className="w-4 h-4 text-gray-600" />
-        </button>
-        <h1 className="text-xl font-bold text-gray-900 flex-1">Maintenance</h1>
+    <div className="space-y-5 pb-8">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Maintenance</h1>
+          <p className="text-sm text-gray-500 mt-1">Track and manage your maintenance requests</p>
+        </div>
         <button
           onClick={() => setView('maintenance-new')}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 transition-colors"
+          className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold text-white flex-shrink-0 transition-opacity hover:opacity-90"
+          style={{ background: 'linear-gradient(135deg, #4F46E5, #5B21B6)' }}
         >
-          <Plus className="w-4 h-4" /> New
+          <Plus className="w-4 h-4" /> New Request
         </button>
       </div>
 
-      {maintenance.length === 0 && (
-        <div className="text-center py-12 text-gray-400">
-          <Wrench className="w-10 h-10 mx-auto mb-2 opacity-30" />
-          <p className="text-sm">No maintenance requests yet.</p>
-          <button onClick={() => setView('maintenance-new')} className="mt-3 text-indigo-600 text-sm font-medium">
-            Raise your first request →
-          </button>
+      {/* Stat cards */}
+      <div className="grid grid-cols-3 gap-4">
+        <div className="bg-white border border-gray-100 rounded-xl p-4">
+          <div className="w-9 h-9 rounded-lg bg-purple-50 flex items-center justify-center mb-3">
+            <Wrench className="w-4 h-4 text-purple-600" />
+          </div>
+          <p className="text-xs text-gray-500">Total</p>
+          <p className="text-2xl font-bold text-gray-900 mt-0.5">{maintenance.length}</p>
         </div>
-      )}
+        <div className="bg-white border border-gray-100 rounded-xl p-4">
+          <div className="w-9 h-9 rounded-lg bg-amber-50 flex items-center justify-center mb-3">
+            <Wrench className="w-4 h-4 text-amber-600" />
+          </div>
+          <p className="text-xs text-gray-500">Active</p>
+          <p className="text-2xl font-bold text-gray-900 mt-0.5">{openTickets.length}</p>
+        </div>
+        <div className="bg-white border border-gray-100 rounded-xl p-4">
+          <div className="w-9 h-9 rounded-lg bg-green-50 flex items-center justify-center mb-3">
+            <CheckCircle2 className="w-4 h-4 text-green-600" />
+          </div>
+          <p className="text-xs text-gray-500">Resolved</p>
+          <p className="text-2xl font-bold text-gray-900 mt-0.5">
+            {maintenance.filter((t) => t.status === 'resolved' || t.status === 'closed').length}
+          </p>
+        </div>
+      </div>
 
-      <div className="space-y-3">
-        {maintenance.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => { setDetailTicketId(t.id); setView('maintenance-detail'); }}
-            className="w-full bg-white border border-gray-200 rounded-xl p-4 text-left hover:shadow-sm transition-shadow active:scale-[0.99]"
-          >
-            <div className="flex items-start justify-between gap-2 mb-1">
-              <p className="text-sm font-semibold text-gray-900 flex-1">{t.issue}</p>
-              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full flex-shrink-0 ${statusBadge(t.status)}`}>{t.status}</span>
-            </div>
-            <p className="text-xs text-gray-500 line-clamp-2">{t.description}</p>
-            <div className="flex items-center justify-between mt-2 text-xs text-gray-400">
-              <span className={`font-medium ${t.priority === 'high' ? 'text-red-600' : t.priority === 'medium' ? 'text-amber-600' : 'text-gray-500'}`}>
-                {t.priority} priority
-              </span>
-              <span>{fmtDate(t.date)}</span>
-            </div>
-            {(t.threads?.length ?? 0) > 0 && (
-              <p className="text-xs text-indigo-600 mt-1.5 flex items-center gap-1">
-                <MessageSquare className="w-3 h-3" /> {t.threads!.length} update{t.threads!.length !== 1 ? 's' : ''}
-              </p>
-            )}
-          </button>
-        ))}
+      {/* Maintenance table */}
+      <div className="bg-white border border-gray-100 rounded-xl overflow-hidden">
+        {maintenance.length === 0 ? (
+          <div className="text-center py-14">
+            <Wrench className="w-10 h-10 mx-auto mb-2 text-gray-300" />
+            <p className="text-sm text-gray-400 mb-3">No maintenance requests yet.</p>
+            <button onClick={() => setView('maintenance-new')} className="text-indigo-600 text-sm font-medium">
+              Raise your first request →
+            </button>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-gray-100 bg-gray-50/50">
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Ticket ID</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Issue</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Description</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Priority</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Status</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Date</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {maintenance.map((t, idx) => (
+                  <tr
+                    key={t.id}
+                    onClick={() => { setDetailTicketId(t.id); setView('maintenance-detail'); }}
+                    className="hover:bg-gray-50/50 transition-colors cursor-pointer"
+                  >
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <span className="text-indigo-600 font-semibold text-xs">TKT{String(idx + 1).padStart(4, '0')}</span>
+                    </td>
+                    <td className="px-4 py-3 font-medium text-gray-900">{t.issue}</td>
+                    <td className="px-4 py-3 text-gray-500 max-w-xs">
+                      <p className="line-clamp-1">{t.description}</p>
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                        t.priority === 'high' ? 'bg-red-100 text-red-700'
+                        : t.priority === 'medium' ? 'bg-amber-100 text-amber-700'
+                        : 'bg-gray-100 text-gray-600'
+                      }`}>
+                        {t.priority.charAt(0).toUpperCase() + t.priority.slice(1)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 whitespace-nowrap">
+                      <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${statusBadge(t.status)}`}>
+                        {t.status === 'in-progress' ? 'In Progress' : t.status.charAt(0).toUpperCase() + t.status.slice(1)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{fmtDate(t.date)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1016,78 +1160,82 @@ export function TenantPortal() {
 
   // ── View: New Maintenance Form ─────────────────────────────────────────────
   const viewMaintenanceNew = (
-    <div className="space-y-4 pb-8">
-      <div className="flex items-center gap-3">
-        <button onClick={() => setView('maintenance')} className="p-1.5 hover:bg-gray-100 rounded-lg">
-          <ArrowLeft className="w-4 h-4 text-gray-600" />
+    <div className="space-y-5 pb-8">
+      <div>
+        <button onClick={() => setView('maintenance')} className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700 mb-4 transition-colors">
+          <ArrowLeft className="w-4 h-4" /> Back
         </button>
-        <h1 className="text-xl font-bold text-gray-900">New Request</h1>
+        <h1 className="text-2xl font-bold text-gray-900">New Maintenance Request</h1>
       </div>
-      <form onSubmit={(e) => void submitTicket(e)} className="space-y-4">
-        <div className="space-y-1.5">
-          <label className="text-sm font-medium text-gray-700">Category</label>
-          <select value={ticketForm.category} onChange={(e) => setTicketForm((f) => ({ ...f, category: e.target.value }))}
-            className="w-full h-10 px-3 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white">
-            <option value="">Select a category…</option>
-            {MAINTENANCE_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-          </select>
-        </div>
-        <div className="space-y-1.5">
-          <label className="text-sm font-medium text-gray-700">Issue title *</label>
-          <input value={ticketForm.issue} onChange={(e) => setTicketForm((f) => ({ ...f, issue: e.target.value }))}
-            className="w-full h-10 px-3 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            placeholder="e.g. AC not cooling in my room" maxLength={120} required />
-        </div>
-        <div className="space-y-1.5">
-          <label className="text-sm font-medium text-gray-700">Description *</label>
-          <textarea value={ticketForm.description} onChange={(e) => setTicketForm((f) => ({ ...f, description: e.target.value }))}
-            className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            placeholder="Describe the issue clearly." rows={4} maxLength={800} required />
-        </div>
-        <div className="space-y-1.5">
-          <label className="text-sm font-medium text-gray-700">Priority</label>
-          <div className="flex gap-2">
-            {(['low', 'medium', 'high'] as MaintenancePriority[]).map((p) => (
-              <button key={p} type="button" onClick={() => setTicketForm((f) => ({ ...f, priority: p }))}
-                className={`flex-1 py-2 rounded-xl text-sm font-medium transition-colors border ${
-                  ticketForm.priority === p
-                    ? p === 'high' ? 'border-red-500 bg-red-50 text-red-700'
-                      : p === 'medium' ? 'border-amber-500 bg-amber-50 text-amber-700'
-                      : 'border-gray-400 bg-gray-100 text-gray-700'
-                    : 'border-gray-200 text-gray-500 hover:border-gray-300'
-                }`}>
-                {p}
-              </button>
-            ))}
+
+      <div className="bg-white border border-gray-100 rounded-xl p-6">
+        <form onSubmit={(e) => void submitTicket(e)} className="space-y-5">
+          <div className="space-y-1.5">
+            <label className="text-sm font-semibold text-gray-800">Issue Title *</label>
+            <input value={ticketForm.issue} onChange={(e) => setTicketForm((f) => ({ ...f, issue: e.target.value }))}
+              className="w-full h-11 px-4 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+              placeholder="e.g., AC not cooling properly" maxLength={120} required />
           </div>
-        </div>
-        <div className="space-y-1.5">
-          <label className="text-sm font-medium text-gray-700">Photo (optional)</label>
-          {ticketForm.imageUrl ? (
-            <div className="flex items-center gap-3">
-              <img src={ticketForm.imageUrl} alt="" className="w-20 h-20 rounded-xl object-cover border border-gray-200" />
-              <button type="button" onClick={() => setTicketForm((f) => ({ ...f, imageUrl: '', imageFile: null }))} className="p-1.5 hover:bg-red-50 rounded-lg">
-                <X className="w-4 h-4 text-red-500" />
-              </button>
+
+          <div className="space-y-1.5">
+            <label className="text-sm font-semibold text-gray-800">Description *</label>
+            <textarea value={ticketForm.description} onChange={(e) => setTicketForm((f) => ({ ...f, description: e.target.value }))}
+              className="w-full px-4 py-3 border border-gray-200 rounded-xl text-sm resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+              placeholder="Describe the issue in detail..." rows={4} maxLength={800} required />
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-sm font-semibold text-gray-800">Priority *</label>
+            <div className="flex gap-3">
+              {(['low', 'medium', 'high'] as MaintenancePriority[]).map((p) => (
+                <button key={p} type="button" onClick={() => setTicketForm((f) => ({ ...f, priority: p }))}
+                  className={`flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all border-2 ${
+                    ticketForm.priority === p
+                      ? p === 'high' ? 'border-red-500 bg-red-500 text-white'
+                        : p === 'medium' ? 'border-amber-500 bg-amber-500 text-white'
+                        : 'border-gray-600 bg-gray-700 text-white'
+                      : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+                  }`}>
+                  {p.charAt(0).toUpperCase() + p.slice(1)}
+                </button>
+              ))}
             </div>
-          ) : (
-            <button type="button" disabled={ticketForm.imageUploading} onClick={() => imageInputRef.current?.click()}
-              className="w-full h-20 border-2 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center gap-1 text-gray-500 hover:border-indigo-400 hover:text-indigo-600 transition-colors disabled:opacity-50">
-              {ticketForm.imageUploading
-                ? <><div className="w-4 h-4 border-2 border-indigo-300 border-t-indigo-600 rounded-full animate-spin" /><span className="text-xs">Uploading…</span></>
-                : <><Upload className="w-5 h-5" /><span className="text-xs">Tap to add photo</span></>}
-            </button>
-          )}
-          <input ref={imageInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => void handleImageChange(e)} />
-        </div>
-        <button type="submit" disabled={ticketForm.submitting || ticketForm.imageUploading}
-          className="w-full py-3 rounded-xl font-semibold text-white hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center justify-center gap-2"
-          style={{ background: 'linear-gradient(135deg, #6D28D9, #4F46E5)' }}>
-          {ticketForm.submitting
-            ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Submitting…</>
-            : <><Send className="w-4 h-4" /> Submit Request</>}
-        </button>
-      </form>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-sm font-semibold text-gray-800">Photo (Optional)</label>
+            {ticketForm.imageUrl ? (
+              <div className="flex items-center gap-3">
+                <img src={ticketForm.imageUrl} alt="" className="w-20 h-20 rounded-xl object-cover border border-gray-200" />
+                <button type="button" onClick={() => setTicketForm((f) => ({ ...f, imageUrl: '', imageFile: null }))} className="p-1.5 hover:bg-red-50 rounded-lg">
+                  <X className="w-4 h-4 text-red-500" />
+                </button>
+              </div>
+            ) : (
+              <button type="button" disabled={ticketForm.imageUploading} onClick={() => imageInputRef.current?.click()}
+                className="w-full py-8 border-2 border-dashed border-gray-200 rounded-xl flex flex-col items-center justify-center gap-2 text-gray-400 hover:border-indigo-300 hover:text-indigo-500 transition-colors disabled:opacity-50">
+                {ticketForm.imageUploading
+                  ? <><div className="w-5 h-5 border-2 border-indigo-300 border-t-indigo-600 rounded-full animate-spin" /><span className="text-sm">Uploading…</span></>
+                  : <><Upload className="w-6 h-6" /><span className="text-sm font-medium">Click to upload or drag and drop</span><span className="text-xs">Optional — add a photo of the issue</span></>}
+              </button>
+            )}
+            <input ref={imageInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => void handleImageChange(e)} />
+          </div>
+
+          <div className="flex items-start gap-3 p-4 bg-blue-50 border border-blue-100 rounded-xl">
+            <AlertCircle className="w-4 h-4 text-blue-500 flex-shrink-0 mt-0.5" />
+            <p className="text-sm text-blue-700">We typically respond within 24 hours. You'll get a WhatsApp update when status changes.</p>
+          </div>
+
+          <button type="submit" disabled={ticketForm.submitting || ticketForm.imageUploading}
+            className="w-full py-3.5 rounded-xl font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
+            style={{ background: 'linear-gradient(135deg, #4F46E5, #5B21B6)' }}>
+            {ticketForm.submitting
+              ? <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Submitting…</>
+              : 'Submit Request →'}
+          </button>
+        </form>
+      </div>
     </div>
   );
 
@@ -1252,7 +1400,7 @@ export function TenantPortal() {
                   <p className="text-xs text-gray-500">{fmtAmount(p.totalAmount)} · {fmtDate(p.paidDate)}</p>
                 </div>
                 <button
-                  onClick={() => openReceiptWindow({ payment: p, propertyName: property?.name ?? '', ownerName: owner?.name })}
+                  onClick={() => handleOpenDocument(p)}
                   className="flex items-center gap-1 px-3 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-600 hover:bg-gray-50"
                 >
                   <Download className="w-3.5 h-3.5" /> Receipt
@@ -1322,17 +1470,19 @@ export function TenantPortal() {
 
   // ── View: Profile ──────────────────────────────────────────────────────────
   const viewProfile = (
-    <div className="space-y-4 pb-8">
-      <h1 className="text-xl font-bold text-gray-900">My Profile</h1>
-      <p className="text-sm text-gray-500 -mt-2">View your personal and tenancy information</p>
+    <div className="space-y-5 pb-8">
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">My Profile</h1>
+        <p className="text-sm text-gray-500 mt-1">View your personal and tenancy information</p>
+      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Personal Information */}
-        <div className="bg-white border border-gray-200 rounded-2xl p-5">
-          <h3 className="text-sm font-semibold text-gray-900 mb-4">Personal Information</h3>
+        <div className="bg-white border border-gray-100 rounded-xl p-5">
+          <h3 className="text-base font-semibold text-gray-900 mb-4">Personal Information</h3>
           <div className="flex items-center gap-3 mb-5">
-            <div className="w-14 h-14 rounded-full flex items-center justify-center text-white font-bold text-xl"
-              style={{ background: 'linear-gradient(135deg, #6D28D9, #4F46E5)' }}>
+            <div className="w-12 h-12 rounded-full flex items-center justify-center text-white font-bold text-base flex-shrink-0"
+              style={{ background: 'linear-gradient(135deg, #5B21B6, #4F46E5)' }}>
               {tenant.name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)}
             </div>
             <div>
@@ -1345,35 +1495,35 @@ export function TenantPortal() {
               <Phone className="w-4 h-4 text-gray-400" />
               <div>
                 <p className="text-xs text-indigo-600 font-medium">Phone Number</p>
-                <p className="text-sm text-gray-900">{tenant.phone || '—'}</p>
+                <p className="text-sm text-indigo-600 font-medium">{tenant.phone ? `+${tenant.phone.replace(/^\+/, '')}` : '—'}</p>
               </div>
             </div>
             <div className="flex items-center gap-3">
               <FileText className="w-4 h-4 text-gray-400" />
               <div>
                 <p className="text-xs text-indigo-600 font-medium">Email Address</p>
-                <p className="text-sm text-gray-900">{user?.email || tenant.email || '—'}</p>
+                <p className="text-sm text-indigo-600 font-medium">{user?.email || tenant.email || '—'}</p>
               </div>
             </div>
           </div>
         </div>
 
         {/* Room & Tenancy */}
-        <div className="bg-white border border-gray-200 rounded-2xl p-5">
-          <h3 className="text-sm font-semibold text-gray-900 mb-4">Room & Tenancy Details</h3>
-          <div className="grid grid-cols-2 gap-4 text-sm">
+        <div className="bg-white border border-gray-100 rounded-xl p-5">
+          <h3 className="text-base font-semibold text-gray-900 mb-4">Room & Tenancy Details</h3>
+          <div className="grid grid-cols-2 gap-x-6 gap-y-4 text-sm">
             {[
               { label: 'Property', value: property?.name },
               { label: 'Room', value: tenant.room },
-              { label: 'Bed', value: tenant.bed || '—' },
-              { label: 'Floor', value: `Floor ${tenant.floor}` },
+              { label: 'Bed', value: tenant.bed ? `Bed ${tenant.bed}` : '—' },
+              { label: 'Floor', value: tenant.floor ? `Floor ${tenant.floor}` : '—' },
               { label: 'Monthly Rent', value: fmtAmount(tenant.rent) },
               { label: 'Security Deposit', value: fmtAmount(tenant.securityDeposit) },
               { label: 'Due Date', value: `${tenant.rentDueDate}th of every month` },
               { label: 'Joined', value: fmtDate(tenant.joinDate) },
             ].map(({ label, value }) => (
               <div key={label}>
-                <p className="text-xs text-indigo-600 font-medium mb-0.5">{label}</p>
+                <p className="text-xs text-gray-400 mb-0.5">{label}</p>
                 <p className="font-semibold text-gray-900">{value ?? '—'}</p>
               </div>
             ))}
@@ -1381,38 +1531,50 @@ export function TenantPortal() {
         </div>
 
         {/* Emergency Contact */}
-        {(tenant.parentName || tenant.parentPhone) && (
-          <div className="bg-white border border-gray-200 rounded-2xl p-5">
-            <h3 className="text-sm font-semibold text-gray-900 mb-4">Emergency Contact</h3>
-            <div className="space-y-2 text-sm">
-              {tenant.parentName && <p className="text-gray-700">Contact Name: <span className="font-semibold">{tenant.parentName} ({tenant.guardianRelationship || 'Guardian'})</span></p>}
-              {tenant.parentPhone && <p className="text-gray-700">Contact Number: <a href={`tel:${tenant.parentPhone}`} className="font-semibold text-indigo-600">+{tenant.parentPhone.replace(/^\+/, '')}</a></p>}
+        <div className="bg-white border border-gray-100 rounded-xl p-5">
+          <h3 className="text-base font-semibold text-gray-900 mb-4">Emergency Contact</h3>
+          {(tenant.parentName || tenant.parentPhone) ? (
+            <div className="space-y-3 text-sm">
+              <div>
+                <p className="text-xs text-gray-400 mb-0.5">Contact Name</p>
+                <p className="font-semibold text-gray-900">{tenant.parentName} {tenant.guardianRelationship ? `(${tenant.guardianRelationship})` : ''}</p>
+              </div>
+              {tenant.parentPhone && (
+                <div>
+                  <p className="text-xs text-gray-400 mb-0.5">Contact Number</p>
+                  <a href={`tel:${tenant.parentPhone}`} className="font-semibold text-gray-900">+{tenant.parentPhone.replace(/^\+/, '')}</a>
+                </div>
+              )}
             </div>
-          </div>
-        )}
+          ) : (
+            <p className="text-sm text-gray-400">No emergency contact added.</p>
+          )}
+        </div>
 
         {/* Verification */}
-        {(tenant.idType || tenant.idNumber) && (
-          <div className="bg-white border border-gray-200 rounded-2xl p-5">
-            <h3 className="text-sm font-semibold text-gray-900 mb-4">Verification</h3>
+        <div className="bg-white border border-gray-100 rounded-xl p-5">
+          <h3 className="text-base font-semibold text-gray-900 mb-4">Verification</h3>
+          {(tenant.idType || tenant.idNumber) ? (
             <div className="grid grid-cols-2 gap-4 text-sm">
               {tenant.idType && (
                 <div>
-                  <p className="text-xs text-indigo-600 font-medium mb-0.5">ID Type</p>
+                  <p className="text-xs text-gray-400 mb-0.5">ID Type</p>
                   <p className="font-semibold text-gray-900">{tenant.idType}</p>
                 </div>
               )}
               {tenant.idNumber && (
                 <div>
-                  <p className="text-xs text-indigo-600 font-medium mb-0.5">ID Number</p>
-                  <p className="font-semibold text-gray-900 font-mono tracking-wide">
+                  <p className="text-xs text-gray-400 mb-0.5">ID Number</p>
+                  <p className="font-semibold text-gray-900 font-mono tracking-wider">
                     XXXX XXXX {tenant.idNumber.slice(-4)}
                   </p>
                 </div>
               )}
             </div>
-          </div>
-        )}
+          ) : (
+            <p className="text-sm text-gray-400">No verification documents uploaded.</p>
+          )}
+        </div>
       </div>
 
       {/* Vacate section */}
@@ -1626,18 +1788,19 @@ export function TenantPortal() {
             </div>
           </div>
 
-          {/* Tenant identity card */}
-          <div className="px-4 py-4 border-b border-gray-100">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold text-sm flex-shrink-0"
-                style={{ background: 'linear-gradient(135deg, #6D28D9, #4F46E5)' }}>
-                {tenant.name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)}
+          {/* Tenant identity card — purple gradient block */}
+          <div className="px-3 pt-1 pb-3">
+            <div className="rounded-xl p-4 text-white" style={{ background: 'linear-gradient(135deg, #5B21B6 0%, #4F46E5 100%)' }}>
+              <div className="flex items-center gap-3 mb-2">
+                <div className="w-10 h-10 rounded-full bg-white/20 border border-white/30 flex items-center justify-center font-bold text-sm flex-shrink-0">
+                  {tenant.name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)}
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-bold leading-tight truncate">{tenant.name}</p>
+                  <p className="text-xs text-white/70 truncate">Room {tenant.room}{tenant.bed ? `, Bed ${tenant.bed}` : ''}</p>
+                </div>
               </div>
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-gray-900 truncate">{tenant.name}</p>
-                <p className="text-xs text-gray-500 truncate">Room {tenant.room}{tenant.bed ? `, Bed ${tenant.bed}` : ''}</p>
-                <p className="text-xs text-gray-400 truncate">{ownerPaymentInfo.pgName || property?.name}</p>
-              </div>
+              <p className="text-xs text-white/60">{ownerPaymentInfo.pgName || property?.name}</p>
             </div>
           </div>
 
@@ -1654,19 +1817,19 @@ export function TenantPortal() {
                       onClick={() => setView(id)}
                       className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all mb-0.5 ${
                         isActive
-                          ? 'bg-indigo-50 text-indigo-700'
-                          : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                          ? 'bg-indigo-600 text-white'
+                          : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
                       }`}
                     >
-                      <Icon className={`w-4 h-4 flex-shrink-0 ${isActive ? 'text-indigo-600' : 'text-gray-400'}`} />
+                      <Icon className={`w-4 h-4 flex-shrink-0 ${isActive ? 'text-white' : 'text-gray-400'}`} />
                       {label}
                       {id === 'payments' && pendingPayments.length > 0 && (
-                        <span className="ml-auto text-xs bg-amber-100 text-amber-700 font-semibold px-1.5 py-0.5 rounded-full">
+                        <span className={`ml-auto text-xs font-semibold px-1.5 py-0.5 rounded-full ${isActive ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-700'}`}>
                           {pendingPayments.length}
                         </span>
                       )}
                       {id === 'announcements' && tenantUnreadCount > 0 && (
-                        <span className="ml-auto text-xs bg-indigo-100 text-indigo-700 font-semibold px-1.5 py-0.5 rounded-full">
+                        <span className={`ml-auto text-xs font-semibold px-1.5 py-0.5 rounded-full ${isActive ? 'bg-white/20 text-white' : 'bg-indigo-100 text-indigo-700'}`}>
                           {tenantUnreadCount}
                         </span>
                       )}
@@ -1715,10 +1878,10 @@ export function TenantPortal() {
                           key={id}
                           onClick={() => { setView(id); setSidebarOpen(false); }}
                           className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all mb-0.5 ${
-                            isActive ? 'bg-indigo-50 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'
+                            isActive ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-50'
                           }`}
                         >
-                          <Icon className={`w-4 h-4 flex-shrink-0 ${isActive ? 'text-indigo-600' : 'text-gray-400'}`} />
+                          <Icon className={`w-4 h-4 flex-shrink-0 ${isActive ? 'text-white' : 'text-gray-400'}`} />
                           {label}
                         </button>
                       );
@@ -1758,11 +1921,16 @@ export function TenantPortal() {
           </header>
 
           {/* Desktop top bar */}
-          <header className="hidden lg:flex bg-white border-b border-gray-200 px-6 py-3 items-center justify-between flex-shrink-0">
+          <header className="hidden lg:flex bg-white border-b border-gray-100 px-6 py-3.5 items-center justify-between flex-shrink-0">
             <div className="flex items-center gap-2 text-sm text-gray-600">
               <Building2 className="w-4 h-4 text-gray-400" />
-              <span className="font-medium">{ownerPaymentInfo.pgName || property?.name}</span>
-              {tenant.room && <><span className="text-gray-300">·</span><span>Room {tenant.room}</span></>}
+              <span className="font-medium text-gray-800">{ownerPaymentInfo.pgName || property?.name}</span>
+              {tenant.room && (
+                <>
+                  <span className="text-gray-300 mx-1">·</span>
+                  <span className="text-gray-600">Room {tenant.room}</span>
+                </>
+              )}
             </div>
             <div className="flex items-center gap-3">
               <button
@@ -1776,18 +1944,28 @@ export function TenantPortal() {
                   </span>
                 )}
               </button>
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold"
-                  style={{ background: 'linear-gradient(135deg, #6D28D9, #4F46E5)' }}>
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold"
+                  style={{ background: 'linear-gradient(135deg, #5B21B6, #4F46E5)' }}>
                   {tenant.name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)}
                 </div>
-                <div>
-                  <p className="text-xs font-semibold text-gray-900">{tenant.name}</p>
-                  <p className="text-xs text-indigo-600 font-medium">tenant</p>
+                <div className="text-right">
+                  <p className="text-sm font-semibold text-gray-900 leading-tight">{tenant.name}</p>
+                  <p className="text-xs text-indigo-500 font-medium leading-tight">tenant</p>
                 </div>
               </div>
             </div>
           </header>
+
+          {/* Demo Mode banner */}
+          {isDemo && (
+            <div className="bg-amber-100 border-b border-amber-300 px-4 py-2 flex items-center justify-center gap-2 flex-shrink-0">
+              <Shield className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+              <p className="text-xs text-amber-800 font-semibold">
+                Demo Mode — sample data only. Nothing you do here is saved to any database.
+              </p>
+            </div>
+          )}
 
           {/* Inactive banner */}
           {isInactiveTenant && (
@@ -1842,6 +2020,13 @@ export function TenantPortal() {
           </nav>
         </div>
       </div>
+      <PaymentDocumentDialog
+        open={docDialogOpen}
+        onOpenChange={setDocDialogOpen}
+        payment={selectedDocPayment}
+        propertyName={property?.name ?? ''}
+        ownerName={owner?.name}
+      />
     </>
   );
 }

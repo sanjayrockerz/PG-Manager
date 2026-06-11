@@ -334,8 +334,8 @@ function IntegrationsTab({
         </CardContent>
       </Card>
 
-      <Button onClick={() => void handleSave()} disabled={saving} className="bg-indigo-600 hover:bg-indigo-700 text-white">
-        {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+      <Button onClick={() => void handleSave()} loading={saving} className="bg-indigo-600 hover:bg-indigo-700 text-white">
+        {!saving && <Save className="w-4 h-4 mr-2" />}
         Save Integrations
       </Button>
     </div>
@@ -893,8 +893,8 @@ export function Settings() {
                   </div>
                 </div>
 
-                <Button onClick={() => void saveProfile()} disabled={profileSaving} className="bg-indigo-600 hover:bg-indigo-700 text-white">
-                  {profileSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+                <Button onClick={() => void saveProfile()} loading={profileSaving} className="bg-indigo-600 hover:bg-indigo-700 text-white">
+                  {!profileSaving && <Save className="w-4 h-4 mr-2" />}
                   Save Profile
                 </Button>
               </CardContent>
@@ -981,8 +981,7 @@ export function Settings() {
                       <CheckCircle2 className="w-4 h-4" /> Link sent
                     </div>
                   ) : (
-                    <Button variant="outline" size="sm" onClick={() => void handleSendPasswordReset()} disabled={passwordResetLoading}>
-                      {passwordResetLoading ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : null}
+                    <Button variant="outline" size="sm" onClick={() => void handleSendPasswordReset()} loading={passwordResetLoading}>
                       Send Reset Link
                     </Button>
                   )}
@@ -1136,8 +1135,8 @@ export function Settings() {
                       )}
                     </div>
 
-                    <Button onClick={() => void saveOwnerSettings(ownerSettings, 'PAYMENT_SETTINGS_UPDATED', 'Payment details saved')} disabled={settingsSaving} className="bg-indigo-600 hover:bg-indigo-700 text-white">
-                      {settingsSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+                    <Button onClick={() => void saveOwnerSettings(ownerSettings, 'PAYMENT_SETTINGS_UPDATED', 'Payment details saved')} loading={settingsSaving} className="bg-indigo-600 hover:bg-indigo-700 text-white">
+                      {!settingsSaving && <Save className="w-4 h-4 mr-2" />}
                       Save Payment Details
                     </Button>
                   </CardContent>
@@ -1185,8 +1184,8 @@ export function Settings() {
                       <p className="text-xs text-gray-400">Shown on overdue payment records. Enforcement is manual.</p>
                     </div>
 
-                    <Button onClick={() => void saveOwnerSettings(ownerSettings, 'PAYMENT_SETTINGS_UPDATED', 'Reminder settings saved')} disabled={settingsSaving} className="bg-indigo-600 hover:bg-indigo-700 text-white">
-                      {settingsSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+                    <Button onClick={() => void saveOwnerSettings(ownerSettings, 'PAYMENT_SETTINGS_UPDATED', 'Reminder settings saved')} loading={settingsSaving} className="bg-indigo-600 hover:bg-indigo-700 text-white">
+                      {!settingsSaving && <Save className="w-4 h-4 mr-2" />}
                       Save Reminder Settings
                     </Button>
                   </CardContent>
@@ -1288,8 +1287,8 @@ export function Settings() {
                         </div>
                       );
                     })}
-                    <Button onClick={() => void saveOwnerSettings(ownerSettings, 'WHATSAPP_SETTINGS_UPDATED', 'WhatsApp templates saved')} disabled={settingsSaving} className="bg-indigo-600 hover:bg-indigo-700 text-white">
-                      {settingsSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+                    <Button onClick={() => void saveOwnerSettings(ownerSettings, 'WHATSAPP_SETTINGS_UPDATED', 'WhatsApp templates saved')} loading={settingsSaving} className="bg-indigo-600 hover:bg-indigo-700 text-white">
+                      {!settingsSaving && <Save className="w-4 h-4 mr-2" />}
                       Save Templates
                     </Button>
                   </CardContent>
@@ -1306,8 +1305,8 @@ export function Settings() {
                       onChange={(e) => setOwnerSettings({ ...ownerSettings, whatsappSettings: { ...ownerSettings.whatsappSettings, customFooter: e.target.value } })}
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500"
                     />
-                    <Button onClick={() => void saveOwnerSettings(ownerSettings, 'WHATSAPP_SETTINGS_UPDATED', 'Custom footer saved')} disabled={settingsSaving} className="bg-indigo-600 hover:bg-indigo-700 text-white">
-                      {settingsSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+                    <Button onClick={() => void saveOwnerSettings(ownerSettings, 'WHATSAPP_SETTINGS_UPDATED', 'Custom footer saved')} loading={settingsSaving} className="bg-indigo-600 hover:bg-indigo-700 text-white">
+                      {!settingsSaving && <Save className="w-4 h-4 mr-2" />}
                       Save Footer
                     </Button>
                   </CardContent>
@@ -1646,10 +1645,11 @@ export function Settings() {
                     )}
                     <Button
                       onClick={() => void handleSaveSignature()}
-                      disabled={sigSaving || !sigTypedText.trim()}
+                      loading={sigSaving}
+                      disabled={!sigTypedText.trim()}
                       className="bg-indigo-600 hover:bg-indigo-700 text-white"
                     >
-                      {sigSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+                      {!sigSaving && <Save className="w-4 h-4 mr-2" />}
                       Save as Active Signature
                     </Button>
                   </div>
@@ -1670,10 +1670,10 @@ export function Settings() {
                           </Button>
                           <Button
                             onClick={() => void handleSaveSignature()}
-                            disabled={sigSaving}
+                            loading={sigSaving}
                             className="bg-indigo-600 hover:bg-indigo-700 text-white"
                           >
-                            {sigSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+                            {!sigSaving && <Save className="w-4 h-4 mr-2" />}
                             Save as Active Signature
                           </Button>
                         </div>
@@ -1706,10 +1706,10 @@ export function Settings() {
                           </Button>
                           <Button
                             onClick={() => void handleSaveSignature()}
-                            disabled={sigSaving}
+                            loading={sigSaving}
                             className="bg-indigo-600 hover:bg-indigo-700 text-white"
                           >
-                            {sigSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+                            {!sigSaving && <Save className="w-4 h-4 mr-2" />}
                             Save as Active Signature
                           </Button>
                         </div>
@@ -1785,10 +1785,10 @@ export function Settings() {
 
                 <Button
                   onClick={() => void handleSaveTemplate()}
-                  disabled={templateSaving}
+                  loading={templateSaving}
                   className="bg-indigo-600 hover:bg-indigo-700 text-white"
                 >
-                  {templateSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+                  {!templateSaving && <Save className="w-4 h-4 mr-2" />}
                   Save Template {activeTemplate ? `(creates v${activeTemplate.version + 1})` : '(creates v1)'}
                 </Button>
               </CardContent>

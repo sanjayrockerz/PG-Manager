@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import {
   Plus, Search, Eye, Edit, Trash, Phone, MapPin,
@@ -127,32 +127,30 @@ export function Tenants({ onViewTenant }: TenantsProps) {
   const getPropertyName = (propertyId: string) =>
     properties.find((p) => p.id === propertyId)?.name ?? propertyId;
 
+  const loadTenants = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await getTenants(selectedProperty);
+      setTenants(data);
+    } catch {
+      toast.error('Failed to load tenants');
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedProperty]);
+
   useEffect(() => {
-    let active = true;
-
-    const loadTenants = async () => {
-      setLoading(true);
-      try {
-        const data = await getTenants(selectedProperty);
-        if (active) setTenants(data);
-      } catch {
-        if (active) toast.error('Failed to load tenants');
-      } finally {
-        if (active) setLoading(false);
-      }
-    };
-
     void loadTenants();
 
     if (isDemoModeEnabled()) return;
 
     const channel = supabase.channel(`tenants-rt-${selectedProperty}-${Date.now()}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'tenants' }, (payload) => {
-        if (payload.event === 'UPDATE') {
+        if (payload.eventType === 'UPDATE') {
           const row = payload.new as Record<string, unknown>;
           if (selectedProperty !== 'all' && String(row.property_id) !== selectedProperty) return;
-          const patch = { 
-            status: String(row.status) as TenantStatus, 
+          const patch = {
+            status: String(row.status) as TenantStatus,
             rent: Number(row.monthly_rent || row.rent || 0),
             room: String(row.room || '')
           };
@@ -167,10 +165,9 @@ export function Tenants({ onViewTenant }: TenantsProps) {
       .subscribe();
 
     return () => {
-      active = false;
       void supabase.removeChannel(channel);
     };
-  }, [selectedProperty]);
+  }, [selectedProperty, loadTenants]);
 
 
 
@@ -845,6 +842,48 @@ export function Tenants({ onViewTenant }: TenantsProps) {
         </div>
       </div>
 
+      {/* ── KPI Cards ───────────────────────── */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="bg-[#FAF5FF] rounded-2xl border border-[#F3E8FF] p-4 flex items-center justify-between shadow-xs">
+          <div>
+            <p className="text-xs text-gray-500 font-medium">Total Tenants</p>
+            <p className="text-xl font-bold text-gray-900 mt-1">{filterCounts.all}</p>
+          </div>
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-purple-100 text-purple-600">
+            <Users className="w-5 h-5" />
+          </div>
+        </div>
+
+        <div className="bg-[#ECFDF5] rounded-2xl border border-[#A7F3D0] p-4 flex items-center justify-between shadow-xs">
+          <div>
+            <p className="text-xs text-gray-500 font-medium">Active</p>
+            <p className="text-xl font-bold text-gray-900 mt-1">{activeInRoom.length}</p>
+          </div>
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-emerald-100 text-emerald-600">
+            <CheckCircle className="w-5 h-5" />
+          </div>
+        </div>
+
+        <div className="bg-[#FEF2F2] rounded-2xl border border-[#FECACA] p-4 flex items-center justify-between shadow-xs">
+          <div>
+            <p className="text-xs text-gray-500 font-medium">Inactive</p>
+            <p className="text-xl font-bold text-gray-900 mt-1">{filterCounts.inactive + filterCounts.archived}</p>
+          </div>
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-rose-100 text-rose-600">
+            <XCircle className="w-5 h-5" />
+          </div>
+        </div>
+
+        <div className="bg-[#EFF6FF] rounded-2xl border border-[#BFDBFE] p-4 flex items-center justify-between shadow-xs">
+          <div>
+            <p className="text-xs text-gray-500 font-medium">Monthly Revenue</p>
+            <p className="text-xl font-bold text-gray-900 mt-1">{fmt(activeInRoom.reduce((s, t) => s + t.rent, 0))}</p>
+          </div>
+          <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-blue-100 text-blue-600">
+            <IndianRupee className="w-5 h-5" />
+          </div>
+        </div>
+      </div>
 
       {/* ── Operational alerts (compact single-line) ───── */}
       {(overdueTenants.length > 0 || vacatingTenants.length > 0) && (
@@ -1149,8 +1188,8 @@ export function Tenants({ onViewTenant }: TenantsProps) {
                 Next <ChevronRight className="w-3.5 h-3.5 ml-1" />
               </Button>
             ) : (
-              <Button onClick={() => void handleAdd()} disabled={addLoading} className="ds-btn ds-btn-primary">
-                {addLoading ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Save className="w-3.5 h-3.5 mr-1.5" />}
+              <Button onClick={() => void handleAdd()} loading={addLoading} className="ds-btn ds-btn-primary">
+                {!addLoading && <Save className="w-3.5 h-3.5 mr-1.5" />}
                 Add Tenant
               </Button>
             )}
@@ -1211,8 +1250,8 @@ export function Tenants({ onViewTenant }: TenantsProps) {
           </div>
           <DialogFooter style={{ gap: 8 }}>
             <Button variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button>
-            <Button onClick={() => void handleEdit()} disabled={editLoading} className="ds-btn ds-btn-primary">
-              {editLoading ? <Loader2 style={{ width: 14, height: 14, marginRight: 6 }} className="animate-spin" /> : <Save style={{ width: 14, height: 14, marginRight: 6 }} />}
+            <Button onClick={() => void handleEdit()} loading={editLoading} className="ds-btn ds-btn-primary">
+              {!editLoading && <Save style={{ width: 14, height: 14, marginRight: 6 }} />}
               Update Tenant
             </Button>
           </DialogFooter>
@@ -1308,8 +1347,8 @@ export function Tenants({ onViewTenant }: TenantsProps) {
           <DialogFooter style={{ gap: 8 }}>
             <Button variant="outline" onClick={() => { resetImport(); setImportOpen(false); }}>Close</Button>
             {!importResult && (
-              <Button onClick={() => void handleImportCSV()} disabled={!importFile || importLoading} className="ds-btn ds-btn-primary">
-                {importLoading ? <Loader2 style={{ width: 14, height: 14, marginRight: 6 }} className="animate-spin" /> : <Upload style={{ width: 14, height: 14, marginRight: 6 }} />}
+              <Button onClick={() => void handleImportCSV()} loading={importLoading} disabled={!importFile} className="ds-btn ds-btn-primary">
+                {!importLoading && <Upload style={{ width: 14, height: 14, marginRight: 6 }} />}
                 {importLoading ? 'Importing…' : 'Import Tenants'}
               </Button>
             )}

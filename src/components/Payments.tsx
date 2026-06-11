@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
@@ -14,7 +14,7 @@ import { supabase } from '../lib/supabase';
 import { isDemoModeEnabled, getPayments, updatePaymentStatusRecord, addPaymentChargeRecord, getTenantById, patchPaymentCache, invalidatePaymentCache } from '../services/dataService';
 import { supabaseOwnerDataApi } from '../services/supabaseData';
 import type { PaymentRecord, PaymentStatus } from '../services/supabaseData';
-import { openReceiptWindow, openInvoiceWindow } from '../services/receiptGenerator';
+import { PaymentDocumentDialog } from './ui/PaymentDocumentDialog';
 
 // ── Period helpers ──────────────────────────────────────────────────────────
 type PeriodMode = 'all' | 'last-month' | 'this-month' | 'next-month';
@@ -120,56 +120,58 @@ export function Payments({ onNavigate }: PaymentsProps) {
   const [bulkMarkPaidForm, setBulkMarkPaidForm] = useState({ paymentMode: 'upi', referenceNumber: '', paidDate: new Date().toISOString().split('T')[0], paymentNotes: '' });
   const [bulkMarkPaidSaving, setBulkMarkPaidSaving] = useState(false);
 
+  // In-app Receipt/Invoice Dialog state
+  const [docDialogOpen, setDocDialogOpen] = useState(false);
+  const [selectedDocPayment, setSelectedDocPayment] = useState<PaymentRecord | null>(null);
+
   const getPropertyName = (propertyId: string) =>
     properties.find((p) => p.id === propertyId)?.name ?? propertyId;
 
+  const reload = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await getPayments(selectedProperty);
+      setPayments(data);
+    } catch {
+      toast.error('Failed to load payments');
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedProperty]);
+
   useEffect(() => {
-    let active = true;
-    const load = async () => {
-      setLoading(true);
-      try {
-        const data = await getPayments(selectedProperty);
-        if (active) setPayments(data);
-      } catch {
-        if (active) toast.error('Failed to load payments');
-      } finally {
-        if (active) setLoading(false);
-      }
-    };
-    void load();
+    void reload();
 
     if (isDemoModeEnabled()) return;
 
     const channel = supabase.channel(`payments-rt-${selectedProperty}-${Date.now()}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'payments' }, (payload) => {
-        if (payload.event === 'UPDATE') {
+        if (payload.eventType === 'UPDATE') {
           const row = payload.new as Record<string, unknown>;
           if (selectedProperty !== 'all' && String(row.property_id) !== selectedProperty) return;
-          const patch = {
+          const patch: Partial<PaymentRecord> = {
             status: String(row.status) as PaymentStatus,
-            amount: Number(row.amount || 0),
-            paidDate: row.paid_date ? String(row.paid_date) : undefined
           };
+          if (row.paid_date) patch.paidDate = String(row.paid_date);
           patchPaymentCache(String(row.id), patch);
           setPayments((prev) => prev.map((p) => p.id === String(row.id) ? { ...p, ...patch } : p));
         } else {
           // INSERT or DELETE
           invalidatePaymentCache(selectedProperty === 'all' ? undefined : selectedProperty);
-          void load();
+          void reload();
         }
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'payment_charges' }, () => {
         // If extra charges are added, reload to get aggregated amounts
         invalidatePaymentCache(selectedProperty === 'all' ? undefined : selectedProperty);
-        void load();
+        void reload();
       })
       .subscribe();
 
     return () => {
-      active = false;
       void supabase.removeChannel(channel);
     };
-  }, [selectedProperty]);
+  }, [selectedProperty, reload]);
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -191,7 +193,7 @@ export function Payments({ onNavigate }: PaymentsProps) {
   const markAllOverdue = async () => {
     try {
       await Promise.all(unstampedOverdue.map((p) => updatePaymentStatusRecord(p.id, 'overdue')));
-      await load();
+      await reload();
       toast.success(`${unstampedOverdue.length} payment${unstampedOverdue.length > 1 ? 's' : ''} marked as overdue`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to update payments');
@@ -293,12 +295,8 @@ export function Payments({ onNavigate }: PaymentsProps) {
   };
 
   const handleOpenReceipt = (payment: PaymentRecord) => {
-    const data = { payment, propertyName: getPropertyName(payment.propertyId), ownerName: authorityName };
-    if (payment.status === 'paid') {
-      openReceiptWindow(data);
-    } else {
-      openInvoiceWindow(data);
-    }
+    setSelectedDocPayment(payment);
+    setDocDialogOpen(true);
   };
 
   const handleWhatsAppReminder = async (payment: PaymentRecord) => {
@@ -335,11 +333,11 @@ export function Payments({ onNavigate }: PaymentsProps) {
       })));
       setSelectedPaymentIds(new Set());
       setBulkMarkPaidOpen(false);
-      await load();
+      await reload();
       toast.success(`${toUpdate.length} payment${toUpdate.length > 1 ? 's' : ''} marked as paid`);
     } catch {
       toast.error('Some updates failed — please retry');
-      await load();
+      await reload();
     } finally {
       setBulkMarkPaidSaving(false);
     }
@@ -974,6 +972,14 @@ export function Payments({ onNavigate }: PaymentsProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <PaymentDocumentDialog
+        open={docDialogOpen}
+        onOpenChange={setDocDialogOpen}
+        payment={selectedDocPayment}
+        propertyName={selectedDocPayment ? getPropertyName(selectedDocPayment.propertyId) : ''}
+        ownerName={authorityName}
+      />
     </div>
   );
 }

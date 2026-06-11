@@ -125,11 +125,10 @@ export function useRealtimeRefresh({
       if (status === 'SUBSCRIBED') {
         // Connected successfully
       } else if (status === 'CHANNEL_ERROR') {
-        // Disconnected or error - trigger a manual fetch so we don't miss data
-        // while the socket tries to reconnect in the background
-        runRefresh();
+        // Disconnected or error - let it reconnect in the background silently.
+        // Do not call runRefresh() in a loop to avoid hammering the database.
       } else if (status === 'TIMED_OUT') {
-        runRefresh();
+        // Let it reconnect silently.
       }
     });
 

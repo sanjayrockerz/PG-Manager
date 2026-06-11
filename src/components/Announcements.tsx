@@ -305,8 +305,42 @@ export function Announcements() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-24">
-        <Loader2 className="w-8 h-8 animate-spin" style={{ color: '#6366F1' }} />
+      <div className="space-y-6">
+        {/* Header Skeleton */}
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 pb-2">
+          <div className="space-y-2">
+            <div className="h-6 w-40 premium-shimmer rounded-lg" />
+            <div className="h-4 w-64 premium-shimmer rounded-md" />
+          </div>
+          <div className="flex gap-2">
+            <div className="h-9 w-28 premium-shimmer rounded-lg" />
+            <div className="h-9 w-32 premium-shimmer rounded-lg" />
+          </div>
+        </div>
+
+        {/* Filter Chips Skeleton */}
+        <div className="flex gap-2 overflow-x-auto">
+          {[1, 2, 3, 4, 5].map((i) => (
+            <div key={i} className="h-7 w-20 premium-shimmer rounded-lg flex-shrink-0" />
+          ))}
+        </div>
+
+        {/* Announcement list Skeletons */}
+        <div className="space-y-4">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="ds-card p-4 space-y-3">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div className="flex gap-2">
+                  <div className="h-4 w-20 premium-shimmer rounded-full" />
+                  <div className="h-3.5 w-12 premium-shimmer rounded" />
+                </div>
+                <div className="h-3 w-16 premium-shimmer rounded ml-auto" />
+              </div>
+              <div className="h-4 w-3/4 premium-shimmer rounded" />
+              <div className="h-10 w-full premium-shimmer rounded-lg" />
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
@@ -607,8 +641,8 @@ export function Announcements() {
               <Button type="button" variant="outline" onClick={() => { setCreateOpen(false); resetCreateForm(); }}>
                 Cancel
               </Button>
-              <Button type="submit" disabled={createSaving} style={{ background: '#4F46E5', color: '#fff' }}>
-                {createSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Send className="w-4 h-4 mr-2" />}
+              <Button type="submit" loading={createSaving} style={{ background: '#4F46E5', color: '#fff' }}>
+                {!createSaving && <Send className="w-4 h-4 mr-2" />}
                 {createForm.sendViaWhatsApp ? 'Publish & Broadcast' : 'Publish'}
               </Button>
             </DialogFooter>
@@ -667,8 +701,8 @@ export function Announcements() {
               </label>
               <DialogFooter className="gap-2 pt-1">
                 <Button type="button" variant="outline" onClick={() => setEditOpen(false)}>Cancel</Button>
-                <Button type="submit" disabled={editSaving} style={{ background: '#4F46E5', color: '#fff' }}>
-                  {editSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+                <Button type="submit" loading={editSaving} style={{ background: '#4F46E5', color: '#fff' }}>
+                  {!editSaving && <Save className="w-4 h-4 mr-2" />}
                   Save Changes
                 </Button>
               </DialogFooter>

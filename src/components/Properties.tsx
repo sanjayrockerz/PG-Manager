@@ -276,12 +276,55 @@ export function Properties({ onNavigate }: PropertiesV2Props) {
 
   if (isLoading) {
     return (
-      <div className="space-y-4 animate-pulse">
+      <div className="space-y-6">
+        {/* Header Skeleton */}
+        <div className="flex items-center justify-between pb-2">
+          <div className="space-y-2">
+            <div className="h-6 w-36 premium-shimmer rounded-lg" />
+            <div className="h-4 w-56 premium-shimmer rounded-md" />
+          </div>
+          <div className="h-9 w-28 premium-shimmer rounded-lg" />
+        </div>
+
+        {/* Portfolio KPIs Skeleton */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
           {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="ds-card" style={{ height: 86, padding: 16 }}>
-              <div style={{ height: 10, background: '#F4F4F6', borderRadius: 4, width: '50%', marginBottom: 8 }} />
-              <div style={{ height: 22, background: '#F4F4F6', borderRadius: 4, width: '65%' }} />
+            <div key={i} className="ds-card flex items-center justify-between" style={{ padding: '12px 14px', gap: 10 }}>
+              <div className="flex-1 space-y-2.5">
+                <div className="h-3 w-16 premium-shimmer rounded" />
+                <div className="h-5 w-10 premium-shimmer rounded" />
+              </div>
+              <div className="w-8 h-8 premium-shimmer rounded-lg flex-shrink-0" />
+            </div>
+          ))}
+        </div>
+
+        {/* Shimmering Property List */}
+        <div className="space-y-4">
+          {[1, 2].map((i) => (
+            <div key={i} className="ds-card p-5 space-y-4">
+              <div className="flex justify-between items-start gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 premium-shimmer rounded-xl flex-shrink-0" />
+                  <div className="space-y-2">
+                    <div className="h-4 w-40 premium-shimmer rounded" />
+                    <div className="h-3.5 w-60 premium-shimmer rounded" />
+                  </div>
+                </div>
+                <div className="h-7 w-20 premium-shimmer rounded-lg" />
+              </div>
+              <div className="h-px bg-zinc-100" />
+              <div className="grid grid-cols-4 gap-3">
+                {[1, 2, 3, 4].map((x) => (
+                  <div key={x} className="h-14 premium-shimmer rounded-lg" />
+                ))}
+              </div>
+              <div className="h-1 bg-zinc-100 rounded-full" />
+              <div className="flex gap-2">
+                <div className="h-7 w-24 premium-shimmer rounded-lg" />
+                <div className="h-7 w-20 premium-shimmer rounded-lg" />
+                <div className="h-7 w-20 premium-shimmer rounded-lg" />
+              </div>
             </div>
           ))}
         </div>
@@ -759,8 +802,8 @@ export function Properties({ onNavigate }: PropertiesV2Props) {
             ) : (
               <>
                 <Button variant="outline" onClick={() => setAddStep(1)}>← Back</Button>
-                <Button onClick={() => void handleAddProperty()} disabled={addSaving} className="bg-indigo-600 hover:bg-indigo-700 text-white">
-                  {addSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+                <Button onClick={() => void handleAddProperty()} loading={addSaving} className="bg-indigo-600 hover:bg-indigo-700 text-white">
+                  {!addSaving && <Save className="w-4 h-4 mr-2" />}
                   Add Property
                 </Button>
               </>
@@ -844,8 +887,8 @@ export function Properties({ onNavigate }: PropertiesV2Props) {
           )}
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setEditPropertyOpen(false)}>Cancel</Button>
-            <Button onClick={() => void handleEditProperty()} disabled={editSaving} className="bg-indigo-600 hover:bg-indigo-700 text-white">
-              {editSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+            <Button onClick={() => void handleEditProperty()} loading={editSaving} className="bg-indigo-600 hover:bg-indigo-700 text-white">
+              {!editSaving && <Save className="w-4 h-4 mr-2" />}
               Update Property
             </Button>
           </DialogFooter>

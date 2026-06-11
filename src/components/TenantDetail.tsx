@@ -26,6 +26,7 @@ import {
   updateTenantRecord,
   getOwnerTenantSnapshot,
   getTenantFromCache,
+  resendTenantInvitation,
 } from '../services/dataService';
 import type { TenantRecord, PaymentRecord, MaintenanceTicketRecord, AgreementRecord, TenantDocument } from '../services/supabaseData';
 import {
@@ -44,7 +45,7 @@ import {
   createDeductionItem,
 } from '../services/depositSettlementService';
 import { printAgreement, downloadAgreementHtml } from '../services/agreementService';
-import { openReceiptWindow, openInvoiceWindow } from '../services/receiptGenerator';
+import { PaymentDocumentDialog } from './ui/PaymentDocumentDialog';
 
 interface TenantDetailProps {
   tenantId: string;
@@ -1402,12 +1403,14 @@ function DocumentsTab({
   property,
   receiptOwnerName,
   onTenantUpdate,
+  onOpenDocument,
 }: {
   tenant: TenantRecord;
   payments: PaymentRecord[];
   property?: { name: string; address: string; city: string; state: string } | null;
   receiptOwnerName?: string;
   onTenantUpdate: (updated: TenantRecord) => void;
+  onOpenDocument: (payment: PaymentRecord) => void;
 }) {
   const [category, setCategory] = useState<DocCategory>('agreements');
   const paidPayments = payments.filter((p) => p.status === 'paid');
@@ -1463,7 +1466,7 @@ function DocumentsTab({
                       size="sm"
                       variant="outline"
                       className="h-7 text-xs gap-1"
-                      onClick={() => openReceiptWindow({ payment: p, propertyName: property?.name ?? '', ownerName: receiptOwnerName })}
+                      onClick={() => onOpenDocument(p)}
                     >
                       <Printer className="w-3.5 h-3.5" /> Receipt
                     </Button>
@@ -1507,6 +1510,42 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
   // Receipt/invoice authority is always the registered property owner — fetched
   // by tenant.ownerId, never the logged-in user (who may be a manager/staff).
   const [receiptOwnerName, setReceiptOwnerName] = useState<string | undefined>(undefined);
+
+  // Invitation (magic-link) resend state
+  const [resendingInvite, setResendingInvite] = useState(false);
+
+  const handleResendInvitation = async () => {
+    if (!tenant) return;
+    if (!tenant.email || tenant.email.includes('noemail.')) {
+      toast.error('Add an email address for this tenant before sending an invitation.');
+      return;
+    }
+    setResendingInvite(true);
+    try {
+      const { invitationSentAt } = await resendTenantInvitation({
+        id: tenant.id,
+        email: tenant.email,
+        name: tenant.name,
+        ownerId: tenant.ownerId,
+        propertyId: tenant.propertyId,
+      });
+      setTenant((prev) => (prev ? { ...prev, invitationSentAt } : prev));
+      toast.success(`Invitation sent to ${tenant.email}.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to send invitation.');
+    } finally {
+      setResendingInvite(false);
+    }
+  };
+
+  // In-app Receipt/Invoice Dialog state
+  const [docDialogOpen, setDocDialogOpen] = useState(false);
+  const [selectedDocPayment, setSelectedDocPayment] = useState<PaymentRecord | null>(null);
+
+  const handleOpenDocument = (payment: PaymentRecord) => {
+    setSelectedDocPayment(payment);
+    setDocDialogOpen(true);
+  };
 
   const property = properties.find((p) => p.id === tenant?.propertyId);
   const getPropertyName = (propertyId: string) =>
@@ -1718,6 +1757,47 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
                   </div>
                 )}
               </div>
+
+              {/* Portal invitation status */}
+              <div className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5">
+                {(() => {
+                  const hasEmail = Boolean(tenant.email && !tenant.email.includes('noemail.'));
+                  const sentAt = tenant.invitationSentAt;
+                  return (
+                    <>
+                      {sentAt ? (
+                        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-green-700 bg-green-100 px-2 py-1 rounded-full">
+                          <CheckCircle className="w-3.5 h-3.5" /> Invitation Sent
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-700 bg-amber-100 px-2 py-1 rounded-full">
+                          <Clock className="w-3.5 h-3.5" /> Invitation Pending
+                        </span>
+                      )}
+                      <span className="text-xs text-gray-500">
+                        {sentAt
+                          ? `Last sent: ${new Date(sentAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`
+                          : hasEmail
+                            ? 'No portal invitation has been sent yet.'
+                            : 'No email on file — add one to enable portal access.'}
+                      </span>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={resendingInvite || !hasEmail}
+                        onClick={() => void handleResendInvitation()}
+                        className="ml-auto h-8 text-xs border-indigo-300 text-indigo-600 hover:bg-indigo-50 hover:border-indigo-400"
+                        title={hasEmail ? 'Send a fresh magic-link sign-in email' : 'Add an email address first'}
+                      >
+                        {resendingInvite
+                          ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                          : <Mail className="w-3.5 h-3.5 mr-1.5" />}
+                        {sentAt ? 'Resend Invitation' : 'Send Invitation'}
+                      </Button>
+                    </>
+                  );
+                })()}
+              </div>
             </div>
           </div>
         </CardContent>
@@ -1804,12 +1884,12 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
                           <td className="py-3 px-4">
                             {p.status === 'paid' ? (
                               <Button size="sm" variant="outline" className="h-7 text-xs gap-1 text-green-700 border-green-200"
-                                onClick={() => openReceiptWindow({ payment: p, propertyName: property?.name ?? '', ownerName: receiptOwnerName })}>
+                                onClick={() => handleOpenDocument(p)}>
                                 <Receipt className="w-3 h-3" /> Receipt
                               </Button>
                             ) : (
                               <Button size="sm" variant="outline" className="h-7 text-xs gap-1"
-                                onClick={() => openInvoiceWindow({ payment: p, propertyName: property?.name ?? '', ownerName: receiptOwnerName })}>
+                                onClick={() => handleOpenDocument(p)}>
                                 <CreditCard className="w-3 h-3" /> Invoice
                               </Button>
                             )}
@@ -1918,6 +1998,7 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
             property={property}
             receiptOwnerName={receiptOwnerName}
             onTenantUpdate={(updated) => setTenant(updated)}
+            onOpenDocument={handleOpenDocument}
           />
         </TabsContent>
 
@@ -1998,6 +2079,14 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
           }}
         />
       )}
+
+      <PaymentDocumentDialog
+        open={docDialogOpen}
+        onOpenChange={setDocDialogOpen}
+        payment={selectedDocPayment}
+        propertyName={property?.name ?? ''}
+        ownerName={receiptOwnerName}
+      />
     </div>
   );
 }

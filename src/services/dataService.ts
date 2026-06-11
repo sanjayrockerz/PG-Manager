@@ -31,6 +31,7 @@ import {
   supabaseOwnerDataApi,
   supabasePropertyApi,
   supabaseTenantDataApi,
+  supabaseTenantProvisioningApi,
   type TenantCreateInput,
   type TenantRecord,
   type VacateRequest,
@@ -704,18 +705,22 @@ export async function createTenantRecord(input: TenantCreateInput): Promise<Tena
   return runSupabase(mode, async () => {
     const created = await supabaseOwnerDataApi.createTenant(input);
 
-    // Auto-provision tenant auth account + send magic link (fire-and-forget, non-blocking)
+    // Auto-provision tenant auth account + send magic-link invitation (fire-and-forget,
+    // non-blocking). The owner never has to create the tenant's account separately.
     void (async () => {
       try {
         if (input.email && !input.email.includes('noemail.')) {
-          // Provision auth account so tenant can sign in via magic link
-          await supabaseOwnerDataApi.provisionTenantAccount(input.email, input.name);
-          // Send the magic link invitation
-          await supabaseOwnerDataApi.sendTenantMagicLink(input.email);
+          await supabaseTenantProvisioningApi.inviteTenant({
+            tenantId: created.id,
+            email: input.email,
+            name: created.name,
+            ownerId: created.ownerId,
+            propertyId: created.propertyId,
+          });
         }
       } catch (provisionErr) {
-        // Non-blocking — provisioning failure doesn't block tenant creation
-        console.warn('Tenant auth provisioning failed (non-blocking):', provisionErr);
+        // Non-blocking — invitation failure doesn't block tenant creation.
+        console.warn('Tenant invitation failed (non-blocking):', provisionErr);
       }
     })();
 
@@ -766,6 +771,34 @@ export async function createTenantRecord(input: TenantCreateInput): Promise<Tena
 
     return created;
   });
+}
+
+/**
+ * Re-send the magic-link invitation for an existing tenant and record the new
+ * send time. Returns the ISO timestamp of the invitation just sent.
+ */
+export async function resendTenantInvitation(tenant: {
+  id: string;
+  email: string;
+  name: string;
+  ownerId: string;
+  propertyId: string;
+}): Promise<{ invitationSentAt: string }> {
+  const mode = getAppMode();
+  if (mode === 'demo') {
+    // Demo mode never touches Supabase Auth — just simulate a successful send.
+    return { invitationSentAt: new Date().toISOString() };
+  }
+  if (!tenant.email || tenant.email.includes('noemail.')) {
+    throw new Error('This tenant has no email address on file. Add an email before sending an invitation.');
+  }
+  return runSupabase(mode, () => supabaseTenantProvisioningApi.inviteTenant({
+    tenantId: tenant.id,
+    email: tenant.email,
+    name: tenant.name,
+    ownerId: tenant.ownerId,
+    propertyId: tenant.propertyId,
+  }));
 }
 
 
@@ -1661,6 +1694,11 @@ export async function getTenantPortalSnapshot(): Promise<TenantPortalSnapshot> {
         pgName: 'Singhania PG Network',
       },
       vacateRequest,
+      // Demo personas carry no real agreements/documents. These MUST be present
+      // (even as empty arrays) — TenantPortal destructures and iterates them at
+      // render time, so omitting them crashes the portal in demo mode.
+      documents: [],
+      agreements: [],
     };
   }
   return runSupabase(mode, () => supabaseTenantDataApi.getPortalSnapshot());
@@ -1700,6 +1738,7 @@ export async function getOwnerTenantSnapshot(tenantId: string): Promise<OwnerTen
     // For maintenance, the API returns it by property or all, so filtering by phone/tenant name is done on client if needed,
     // but a proper API call should filter by tenant_id. Since we don't have getMaintenanceForTenant in supabaseOwnerDataApi,
     // we'll filter the list.
+    if (!tenant) throw new Error('Tenant not found');
     const actualMaintenance = maintenance.filter(m => m.tenant === tenant.name || m.phone === tenant.phone);
 
     return { tenant, payments, maintenance: actualMaintenance, agreements, documents };
