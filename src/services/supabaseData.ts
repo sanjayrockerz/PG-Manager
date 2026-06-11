@@ -8187,6 +8187,40 @@ export const supabaseLifecycleApi = {
         message: `Both parties have signed. Agreement is now locked and executed.`,
         propertyId: current.property_id,
       }).catch(() => {});
+
+      // Store executed agreement HTML in tenant_documents (best-effort)
+      const executedHtml = (patch.html_content as string | undefined) ?? current.html_content;
+      if (executedHtml) {
+        void (async () => {
+          try {
+            const fileName = `agreement-${input.agreementId.slice(-8)}.html`;
+            const path = `tenant-docs/${current.tenant_id}/agreements/${fileName}`;
+            const blob = new Blob([executedHtml], { type: 'text/html' });
+            const { error: uploadError } = await supabase.storage
+              .from(TENANT_FILES_BUCKET)
+              .upload(path, new File([blob], fileName, { type: 'text/html' }), { upsert: true, contentType: 'text/html' });
+            if (uploadError) {
+              const msg = String(uploadError.message ?? '').toLowerCase();
+              if (msg.includes('bucket') || msg.includes('not found')) return;
+              return;
+            }
+            const { data: { publicUrl } } = supabase.storage.from(TENANT_FILES_BUCKET).getPublicUrl(path);
+            await supabase.from('tenant_documents')
+              .delete()
+              .eq('tenant_id', current.tenant_id)
+              .eq('doc_type', 'agreement')
+              .eq('label', 'Executed Rental Agreement');
+            await supabase.from('tenant_documents').insert({
+              tenant_id: current.tenant_id,
+              owner_id: current.owner_id,
+              doc_type: 'agreement',
+              label: 'Executed Rental Agreement',
+              file_url: publicUrl,
+              verified: true,
+            });
+          } catch {}
+        })();
+      }
     }
 
     const { data, error } = await supabase

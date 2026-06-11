@@ -212,6 +212,220 @@ function WelcomeScreen({ snapshot, onDone }: { snapshot: TenantPortalSnapshot; o
   );
 }
 
+// ─── Mandatory Agreement Review Screen ───────────────────────────────────────
+
+function MandatoryAgreementScreen({
+  agreement,
+  snapshot,
+  onSigned,
+  onDismiss,
+}: {
+  agreement: AgreementRecord;
+  snapshot: TenantPortalSnapshot;
+  onSigned: (updated: AgreementRecord) => void;
+  onDismiss: () => void;
+}) {
+  const [step, setStep] = useState<'read' | 'sign'>('read');
+  const [accepted, setAccepted] = useState(false);
+  const [signName, setSignName] = useState(snapshot.tenant.name);
+  const [signing, setSigning] = useState(false);
+  const { ownerPaymentInfo, property } = snapshot;
+
+  const handleDownload = () => {
+    if (!agreement.htmlContent) return;
+    const blob = new Blob([agreement.htmlContent], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'rental-agreement.html';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleSign = async () => {
+    const name = signName.trim();
+    if (!name || !accepted) return;
+    setSigning(true);
+    try {
+      const ua = typeof navigator !== 'undefined' ? navigator.userAgent : undefined;
+      const updated = await supabaseLifecycleApi.signAgreement({
+        agreementId: agreement.id,
+        signatureName: name,
+        role: 'tenant',
+        deviceMetadata: ua,
+      });
+      toast.success('Agreement signed! A copy has been saved to your Documents.');
+      onSigned(updated);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Signing failed. Please try again.');
+    } finally {
+      setSigning(false);
+    }
+  };
+
+  const pgName = ownerPaymentInfo.pgName || property?.name || 'your property manager';
+
+  return (
+    <div className="fixed inset-0 z-50 flex overflow-hidden">
+      {/* Left gradient panel */}
+      <div
+        className="hidden lg:flex flex-col justify-between w-[420px] flex-shrink-0 p-12 text-white"
+        style={{ background: 'linear-gradient(135deg, #6D28D9 0%, #4F46E5 50%, #0891B2 100%)' }}
+      >
+        <div>
+          <div className="flex items-center gap-3 mb-14">
+            <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
+              <Building2 className="w-5 h-5 text-white" />
+            </div>
+            <span className="text-lg font-bold">RentCare</span>
+          </div>
+          <FileText className="w-10 h-10 text-white/60 mb-5" />
+          <h1 className="text-3xl font-bold leading-snug mb-4">Review Your<br />Agreement</h1>
+          <p className="text-white/75 text-sm leading-relaxed mb-10">
+            Please read and sign your rental agreement with {pgName}. This is a legally binding document.
+          </p>
+          <ul className="space-y-4">
+            {['Review all terms carefully', 'Your e-signature is legally valid', 'A copy is saved to your Documents'].map((f) => (
+              <li key={f} className="flex items-start gap-3 text-sm text-white/85">
+                <span className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center flex-shrink-0 mt-0.5">
+                  <Check className="w-3 h-3 text-white" />
+                </span>
+                {f}
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div className="space-y-2">
+          <p className="text-xs text-white/50">Step {step === 'read' ? '1' : '2'} of 2 — {step === 'read' ? 'Read Agreement' : 'Sign Agreement'}</p>
+          <div className="flex gap-2">
+            <div className="h-1 flex-1 rounded-full bg-white/80" />
+            <div className={`h-1 flex-1 rounded-full transition-colors ${step === 'sign' ? 'bg-white/80' : 'bg-white/25'}`} />
+          </div>
+        </div>
+      </div>
+
+      {/* Right panel */}
+      <div className="flex-1 bg-white overflow-hidden flex flex-col">
+        {step === 'read' ? (
+          <>
+            <div className="px-6 lg:px-8 py-4 lg:py-5 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
+              <div>
+                <h2 className="text-base lg:text-lg font-bold text-gray-900">Rental Agreement</h2>
+                <p className="text-xs text-gray-500 mt-0.5">{pgName} · From {fmtDate(agreement.startDate)}</p>
+              </div>
+              {agreement.htmlContent && (
+                <button onClick={handleDownload}
+                  className="flex items-center gap-1.5 px-3 py-2 border border-gray-200 rounded-xl text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors">
+                  <Download className="w-3.5 h-3.5" /> Download
+                </button>
+              )}
+            </div>
+
+            <div className="flex-1 overflow-auto">
+              {agreement.htmlContent ? (
+                <iframe
+                  srcDoc={agreement.htmlContent}
+                  className="w-full h-full border-0"
+                  title="Rental Agreement"
+                  sandbox="allow-same-origin"
+                />
+              ) : (
+                <div className="flex items-center justify-center h-full text-gray-400">
+                  <div className="text-center">
+                    <FileText className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                    <p className="text-sm">Agreement document not available for preview.</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="px-6 lg:px-8 py-4 border-t border-gray-100 flex items-center justify-between flex-shrink-0">
+              <button onClick={onDismiss} className="text-sm text-gray-400 hover:text-gray-600 underline underline-offset-2 transition-colors">
+                I'll review later
+              </button>
+              <button
+                onClick={() => setStep('sign')}
+                className="px-5 lg:px-6 py-2.5 lg:py-3 rounded-xl text-sm font-bold text-white flex items-center gap-2 transition-opacity hover:opacity-90"
+                style={{ background: 'linear-gradient(135deg, #6D28D9, #4F46E5)' }}
+              >
+                Continue to Sign <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
+          </>
+        ) : (
+          <div className="flex-1 overflow-y-auto flex flex-col items-center justify-center p-6 lg:p-8">
+            <div className="w-full max-w-md space-y-5">
+              <div>
+                <h2 className="text-2xl font-bold text-gray-900 mb-1">Sign Agreement</h2>
+                <p className="text-sm text-gray-500">Confirm your identity and accept the terms to complete signing.</p>
+              </div>
+
+              <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4 flex items-start gap-3">
+                <div className="w-9 h-9 bg-indigo-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                  <FileText className="w-4 h-4 text-indigo-600" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-indigo-900">
+                    {agreement.agreementType === 'license' ? 'License Agreement' : 'Rental Agreement'}
+                  </p>
+                  <p className="text-xs text-indigo-700 mt-0.5">
+                    {pgName} · {fmtAmount(agreement.monthlyRent)}/month · From {fmtDate(agreement.startDate)}
+                  </p>
+                  {agreement.ownerSignatureName && (
+                    <p className="text-xs text-green-700 mt-1 font-medium">✓ Owner signed by {agreement.ownerSignatureName}</p>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <label className="text-sm font-medium text-gray-700 block mb-1.5">Your Full Name (E-Signature)</label>
+                <input
+                  value={signName}
+                  onChange={(e) => setSignName(e.target.value)}
+                  className="w-full h-11 px-3 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  placeholder="Type your full name to sign"
+                  autoFocus
+                />
+                <p className="text-xs text-gray-400 mt-1">This typed name serves as your electronic signature.</p>
+              </div>
+
+              <button
+                type="button"
+                className="flex items-start gap-3 text-left w-full"
+                onClick={() => setAccepted((v) => !v)}
+              >
+                <div className={`w-5 h-5 rounded-md border-2 flex-shrink-0 mt-0.5 flex items-center justify-center transition-colors ${accepted ? 'bg-indigo-600 border-indigo-600' : 'border-gray-300 hover:border-indigo-400'}`}>
+                  {accepted && <Check className="w-3 h-3 text-white" />}
+                </div>
+                <span className="text-sm text-gray-600 leading-relaxed">
+                  I have read and agree to all terms and conditions in the rental agreement. I understand this e-signature is legally binding.
+                </span>
+              </button>
+
+              <div className="flex gap-3 pt-1">
+                <button onClick={() => setStep('read')}
+                  className="flex-1 py-3 border border-gray-200 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors">
+                  ← Back
+                </button>
+                <button
+                  onClick={() => void handleSign()}
+                  disabled={signing || !signName.trim() || !accepted}
+                  className="flex-1 py-3 rounded-xl text-sm font-bold text-white disabled:opacity-50 transition-opacity hover:opacity-90"
+                  style={{ background: 'linear-gradient(135deg, #6D28D9, #4F46E5)' }}
+                >
+                  {signing ? 'Signing…' : 'Sign Agreement ✓'}
+                </button>
+              </div>
+
+              <p className="text-center text-xs text-gray-400">Your signature and timestamp will be recorded securely.</p>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Sidebar Navigation ────────────────────────────────────────────────────────
 
 const SIDEBAR_SECTIONS = [
@@ -285,6 +499,7 @@ export function TenantPortal() {
   const [tenantSignModal, setTenantSignModal] = useState<{ agreement: AgreementRecord } | null>(null);
   const [tenantSignatureName, setTenantSignatureName] = useState('');
   const [tenantSigning, setTenantSigning] = useState(false);
+  const [mandatoryAgreement, setMandatoryAgreement] = useState<AgreementRecord | null>(null);
 
   // Maintenance form state
   const [ticketForm, setTicketForm] = useState({
@@ -522,6 +737,11 @@ export function TenantPortal() {
       (async () => { try { await supabase.from('profiles').update({ first_login_completed_at: new Date().toISOString() }).eq('id', user.id); } catch {} })();
     }
     setShowWelcome(false);
+    // After welcome, show mandatory agreement review if there's a pending agreement
+    if (!isDemo && snapshot) {
+      const pending = snapshot.agreements.find((a) => a.status === 'pending_tenant_signature' && !a.tenantSignedAt);
+      if (pending) setMandatoryAgreement(pending);
+    }
   };
 
   // ── Maintenance submit ─────────────────────────────────────────────────────
@@ -669,7 +889,7 @@ export function TenantPortal() {
   const currentPayment = pendingPayments[0] ?? null;
 
   const viewHome = (
-    <div className="space-y-5 pb-8">
+    <div className="space-y-6 pb-8">
       {/* Page title */}
       <div>
         <h1 className="text-2xl font-bold text-gray-900">{greeting()}, {tenant.name.split(' ')[0]} 👋</h1>
@@ -678,77 +898,101 @@ export function TenantPortal() {
         </p>
       </div>
 
-      {/* 4 KPI stat cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white border border-gray-100 rounded-xl p-4 border-l-4 border-l-purple-500">
-          <div className="flex items-start justify-between">
-            <div>
-              <p className="text-xs text-gray-500 mb-1">Monthly Rent</p>
-              <p className="text-xl font-bold text-gray-900">{fmtAmount(tenant.rent)}</p>
-              <p className="text-xs text-gray-400 mt-1">Due on {tenant.rentDueDate}th every month</p>
+      {/* Pending Agreement Banner */}
+      {agreements.some((a) => a.status === 'pending_tenant_signature' && !a.tenantSignedAt) && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex items-center justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <div className="w-9 h-9 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
+              <FileText className="w-5 h-5 text-blue-600" />
             </div>
-            <div className="w-9 h-9 rounded-lg bg-rose-50 flex items-center justify-center flex-shrink-0">
-              <Home className="w-4 h-4 text-rose-500" />
+            <div>
+              <p className="text-sm font-semibold text-blue-900">Agreement Pending Your Signature</p>
+              <p className="text-xs text-blue-700 mt-0.5">Your rental agreement is ready. Please review and sign to complete your onboarding.</p>
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              const pending = agreements.find((a) => a.status === 'pending_tenant_signature' && !a.tenantSignedAt);
+              if (pending) setMandatoryAgreement(pending);
+            }}
+            className="flex-shrink-0 px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-semibold hover:bg-blue-700 transition-colors"
+          >
+            Review & Sign
+          </button>
+        </div>
+      )}
+
+      {/* 4 KPI stat cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-5">
+        <div className="bg-white border border-gray-100 rounded-xl p-5 border-l-4 border-l-purple-500">
+          <div className="flex items-start justify-between">
+            <div className="flex-1 min-w-0">
+              <p className="text-xs text-gray-500 mb-2">Monthly Rent</p>
+              <p className="text-2xl font-bold text-gray-900">{fmtAmount(tenant.rent)}</p>
+              <p className="text-xs text-gray-400 mt-1.5">Due on {tenant.rentDueDate}th every month</p>
+            </div>
+            <div className="w-10 h-10 rounded-lg bg-rose-50 flex items-center justify-center flex-shrink-0 ml-3">
+              <Home className="w-5 h-5 text-rose-400" />
             </div>
           </div>
         </div>
 
-        <div className="bg-white border border-gray-100 rounded-xl p-4 border-l-4 border-l-amber-400">
+        <div className="bg-white border border-gray-100 rounded-xl p-5 border-l-4 border-l-amber-400">
           <div className="flex items-start justify-between">
-            <div>
-              <p className="text-xs text-gray-500 mb-1">
+            <div className="flex-1 min-w-0">
+              <p className="text-xs text-gray-500 mb-2">
                 {new Date().toLocaleDateString('en-IN', { month: 'long' })} Status
               </p>
               {currentPayment ? (
                 <>
-                  <p className="text-xl font-bold text-amber-600">{fmtAmount(currentPayment.totalAmount)} Due</p>
-                  <p className="text-xs text-gray-400 mt-1">Due by {fmtDate(currentPayment.dueDate)}</p>
+                  <p className="text-2xl font-bold text-amber-600">{fmtAmount(currentPayment.totalAmount)} Due</p>
+                  <p className="text-xs text-gray-400 mt-1.5">Due by {fmtDate(currentPayment.dueDate)}</p>
                 </>
               ) : (
                 <>
-                  <p className="text-xl font-bold text-green-600">All Clear</p>
-                  <p className="text-xs text-gray-400 mt-1">No pending payments</p>
+                  <p className="text-2xl font-bold text-green-600">All Clear</p>
+                  <p className="text-xs text-gray-400 mt-1.5">No pending payments</p>
                 </>
               )}
             </div>
-            <div className="w-9 h-9 rounded-lg bg-amber-50 flex items-center justify-center flex-shrink-0">
-              <CreditCard className="w-4 h-4 text-amber-500" />
+            <div className="w-10 h-10 rounded-lg bg-amber-50 flex items-center justify-center flex-shrink-0 ml-3">
+              <CreditCard className="w-5 h-5 text-amber-400" />
             </div>
           </div>
         </div>
 
-        <div className="bg-white border border-gray-100 rounded-xl p-4 border-l-4 border-l-green-500">
+        <div className="bg-white border border-gray-100 rounded-xl p-5 border-l-4 border-l-green-500">
           <div className="flex items-start justify-between">
-            <div>
-              <p className="text-xs text-gray-500 mb-1">Security Deposit</p>
-              <p className="text-xl font-bold text-gray-900">{fmtAmount(tenant.securityDeposit)}</p>
-              <p className="text-xs text-gray-400 mt-1">Active tenancy</p>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs text-gray-500 mb-2">Security Deposit</p>
+              <p className="text-2xl font-bold text-gray-900">{fmtAmount(tenant.securityDeposit)}</p>
+              <p className="text-xs text-gray-400 mt-1.5">Active tenancy</p>
             </div>
-            <div className="w-9 h-9 rounded-lg bg-green-50 flex items-center justify-center flex-shrink-0">
-              <Shield className="w-4 h-4 text-green-500" />
+            <div className="w-10 h-10 rounded-lg bg-green-50 flex items-center justify-center flex-shrink-0 ml-3">
+              <Shield className="w-5 h-5 text-green-400" />
             </div>
           </div>
         </div>
 
-        <div className="bg-white border border-gray-100 rounded-xl p-4 border-l-4 border-l-blue-400">
+        <div className="bg-white border border-gray-100 rounded-xl p-5 border-l-4 border-l-blue-400">
           <div className="flex items-start justify-between">
-            <div>
-              <p className="text-xs text-gray-500 mb-1">Staying Since</p>
-              <p className="text-xl font-bold text-gray-900">
+            <div className="flex-1 min-w-0">
+              <p className="text-xs text-gray-500 mb-2">Staying Since</p>
+              <p className="text-2xl font-bold text-gray-900">
                 {new Date(tenant.joinDate).toLocaleDateString('en-IN', { month: 'short', year: 'numeric' })}
               </p>
-              <p className="text-xs text-gray-400 mt-1">{stayingSince(tenant.joinDate)}</p>
+              <p className="text-xs text-gray-400 mt-1.5">{stayingSince(tenant.joinDate)}</p>
             </div>
-            <div className="w-9 h-9 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
-              <Calendar className="w-4 h-4 text-blue-500" />
+            <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0 ml-3">
+              <Calendar className="w-5 h-5 text-blue-400" />
             </div>
           </div>
         </div>
       </div>
 
       {/* Rent Status + Caretaker Contact */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="bg-white border border-gray-100 rounded-xl p-5">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <div className="bg-white border border-gray-100 rounded-xl p-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-base font-semibold text-gray-900">Rent Status</h3>
             {currentPayment ? (
@@ -782,35 +1026,35 @@ export function TenantPortal() {
         </div>
 
         {(ownerPaymentInfo.ownerPhone || owner?.phone) ? (
-          <div className="bg-white border border-gray-100 rounded-xl p-5">
-            <h3 className="text-base font-semibold text-gray-900 mb-4">Caretaker Contact</h3>
-            <div className="flex items-center gap-3 mb-5">
-              <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center font-bold text-sm text-indigo-700 flex-shrink-0">
+          <div className="bg-white border border-gray-100 rounded-xl p-6">
+            <h3 className="text-base font-semibold text-gray-900 mb-5">Caretaker Contact</h3>
+            <div className="flex items-center gap-3 mb-6">
+              <div className="w-11 h-11 rounded-full bg-indigo-100 flex items-center justify-center font-bold text-sm text-indigo-700 flex-shrink-0">
                 {(owner?.name ?? 'M').split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2)}
               </div>
               <div>
                 <p className="text-sm font-semibold text-gray-900">{owner?.name ?? 'Property Manager'}</p>
-                <p className="text-xs text-gray-500">{ownerPaymentInfo.ownerPhone || owner?.phone}</p>
+                <p className="text-xs text-gray-500 mt-0.5">{ownerPaymentInfo.ownerPhone || owner?.phone}</p>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <a
                 href={`tel:${ownerPaymentInfo.ownerPhone || owner?.phone}`}
-                className="flex items-center justify-center gap-2 py-2.5 border border-gray-200 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                className="flex items-center justify-center gap-2 py-3 border border-gray-200 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
               >
                 <Phone className="w-4 h-4" /> Call
               </a>
               <a
                 href={`https://wa.me/${(ownerPaymentInfo.ownerPhone || owner?.phone || '').replace(/\D/g, '')}`}
                 target="_blank" rel="noopener noreferrer"
-                className="flex items-center justify-center gap-2 py-2.5 border border-green-200 rounded-xl text-sm font-medium text-green-700 hover:bg-green-50 transition-colors"
+                className="flex items-center justify-center gap-2 py-3 border border-green-200 rounded-xl text-sm font-medium text-green-700 hover:bg-green-50 transition-colors"
               >
                 <MessageSquare className="w-4 h-4" /> WhatsApp
               </a>
             </div>
           </div>
         ) : (
-          <div className="bg-white border border-gray-100 rounded-xl p-5 flex flex-col items-center justify-center text-gray-400">
+          <div className="bg-white border border-gray-100 rounded-xl p-6 flex flex-col items-center justify-center text-gray-400">
             <Phone className="w-8 h-8 mb-2 opacity-30" />
             <p className="text-sm">No contact info available</p>
           </div>
@@ -818,70 +1062,78 @@ export function TenantPortal() {
       </div>
 
       {/* Recent Announcements + Quick Access */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="bg-white border border-gray-100 rounded-xl p-5">
-          <div className="flex items-center justify-between mb-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <div className="bg-white border border-gray-100 rounded-xl p-6">
+          <div className="flex items-center justify-between mb-5">
             <h3 className="text-base font-semibold text-gray-900">Recent Announcements</h3>
             <button onClick={() => setView('announcements')} className="text-sm font-medium text-indigo-600 hover:text-indigo-700 flex items-center gap-1">
               View all <ChevronRight className="w-3.5 h-3.5" />
             </button>
           </div>
           {announcements.length > 0 ? (
-            <div className="space-y-3">
+            <div className="space-y-4">
               {announcements.slice(0, 3).map((a) => (
-                <div key={a.id} className="border-l-2 border-indigo-200 pl-3">
-                  <div className="flex items-center gap-2 mb-0.5">
-                    <span className={`text-xs font-semibold px-1.5 py-0.5 rounded capitalize ${
-                      a.category === 'payment' ? 'bg-green-100 text-green-700'
-                      : a.category === 'maintenance' ? 'bg-orange-100 text-orange-700'
-                      : a.category === 'rules' ? 'bg-purple-100 text-purple-700'
-                      : 'bg-blue-100 text-blue-700'
-                    }`}>{a.category}</span>
-                    <span className="text-xs text-gray-400">{fmtDate(a.date)}</span>
+                <div key={a.id} className="flex gap-3 border-l-[3px] border-indigo-300 pl-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-md capitalize ${
+                        a.category === 'payment' ? 'bg-green-100 text-green-700'
+                        : a.category === 'maintenance' ? 'bg-orange-100 text-orange-700'
+                        : a.category === 'rules' ? 'bg-purple-100 text-purple-700'
+                        : 'bg-blue-100 text-blue-700'
+                      }`}>{a.category}</span>
+                      <span className="text-xs text-gray-400">{fmtDate(a.date)}</span>
+                    </div>
+                    <p className="text-sm font-semibold text-gray-900">{a.title}</p>
+                    <p className="text-xs text-gray-500 line-clamp-1 mt-0.5">{a.content}</p>
                   </div>
-                  <p className="text-sm font-semibold text-gray-900">{a.title}</p>
-                  <p className="text-xs text-gray-500 line-clamp-1">{a.content}</p>
                 </div>
               ))}
             </div>
           ) : (
-            <div className="text-center py-6 text-gray-400">
+            <div className="text-center py-8 text-gray-400">
               <Bell className="w-8 h-8 mx-auto mb-2 opacity-30" />
               <p className="text-sm">No announcements yet.</p>
             </div>
           )}
         </div>
 
-        <div className="bg-white border border-gray-100 rounded-xl p-5">
-          <h3 className="text-base font-semibold text-gray-900 mb-4">Quick Access</h3>
-          <div className="grid grid-cols-2 gap-3">
-            <button onClick={() => setView('payments')} className="flex flex-col items-center gap-2 p-4 rounded-xl border border-gray-100 hover:bg-gray-50 transition-colors">
-              <div className="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center">
-                <CreditCard className="w-5 h-5 text-indigo-600" />
+        <div className="bg-white border border-gray-100 rounded-xl p-6">
+          <h3 className="text-base font-semibold text-gray-900 mb-5">Quick Access</h3>
+          <div className="grid grid-cols-2 gap-4">
+            <button onClick={() => setView('payments')} className="flex flex-col items-center gap-2.5 p-5 rounded-xl border border-gray-100 hover:bg-gray-50 transition-colors">
+              <div className="w-12 h-12 rounded-xl bg-indigo-50 flex items-center justify-center">
+                <CreditCard className="w-6 h-6 text-indigo-500" />
               </div>
-              <span className="text-sm font-medium text-gray-700">Payments</span>
-              {pendingPayments.length > 0 && <span className="text-xs text-amber-600 font-medium">{pendingPayments.length} pending</span>}
+              <span className="text-sm font-semibold text-gray-700">Payments</span>
+              {pendingPayments.length > 0
+                ? <span className="text-xs text-amber-600 font-medium">{pendingPayments.length} pending</span>
+                : <span className="text-xs text-gray-400">All clear</span>}
             </button>
-            <button onClick={() => setView('documents')} className="flex flex-col items-center gap-2 p-4 rounded-xl border border-gray-100 hover:bg-gray-50 transition-colors">
-              <div className="w-10 h-10 rounded-xl bg-green-50 flex items-center justify-center">
-                <FileText className="w-5 h-5 text-green-600" />
+            <button onClick={() => setView('documents')} className="flex flex-col items-center gap-2.5 p-5 rounded-xl border border-gray-100 hover:bg-gray-50 transition-colors">
+              <div className="w-12 h-12 rounded-xl bg-green-50 flex items-center justify-center">
+                <FileText className="w-6 h-6 text-green-500" />
               </div>
-              <span className="text-sm font-medium text-gray-700">Documents</span>
-              <span className="text-xs text-gray-400 font-medium">{documents.length} files</span>
+              <span className="text-sm font-semibold text-gray-700">Documents</span>
+              <span className="text-xs text-gray-400">{documents.length} files</span>
             </button>
-            <button onClick={() => setView('maintenance-new')} className="flex flex-col items-center gap-2 p-4 rounded-xl border border-gray-100 hover:bg-gray-50 transition-colors">
-              <div className="w-10 h-10 rounded-xl bg-orange-50 flex items-center justify-center">
-                <Wrench className="w-5 h-5 text-orange-600" />
+            <button onClick={() => setView('maintenance-new')} className="flex flex-col items-center gap-2.5 p-5 rounded-xl border border-gray-100 hover:bg-gray-50 transition-colors">
+              <div className="w-12 h-12 rounded-xl bg-orange-50 flex items-center justify-center">
+                <Wrench className="w-6 h-6 text-orange-500" />
               </div>
-              <span className="text-sm font-medium text-gray-700">New Request</span>
-              {openTickets.length > 0 && <span className="text-xs text-orange-600 font-medium">{openTickets.length} open</span>}
+              <span className="text-sm font-semibold text-gray-700">New Request</span>
+              {openTickets.length > 0
+                ? <span className="text-xs text-orange-600 font-medium">{openTickets.length} open</span>
+                : <span className="text-xs text-gray-400">No open tickets</span>}
             </button>
-            <button onClick={() => setView('announcements')} className="flex flex-col items-center gap-2 p-4 rounded-xl border border-gray-100 hover:bg-gray-50 transition-colors">
-              <div className="w-10 h-10 rounded-xl bg-purple-50 flex items-center justify-center">
-                <Bell className="w-5 h-5 text-purple-600" />
+            <button onClick={() => setView('announcements')} className="flex flex-col items-center gap-2.5 p-5 rounded-xl border border-gray-100 hover:bg-gray-50 transition-colors">
+              <div className="w-12 h-12 rounded-xl bg-purple-50 flex items-center justify-center">
+                <Bell className="w-6 h-6 text-purple-500" />
               </div>
-              <span className="text-sm font-medium text-gray-700">Announcements</span>
-              {tenantUnreadCount > 0 && <span className="text-xs text-indigo-600 font-medium">{tenantUnreadCount} new</span>}
+              <span className="text-sm font-semibold text-gray-700">Announcements</span>
+              {tenantUnreadCount > 0
+                ? <span className="text-xs text-indigo-600 font-medium">{tenantUnreadCount} new</span>
+                : <span className="text-xs text-gray-400">All read</span>}
             </button>
           </div>
         </div>
@@ -1739,6 +1991,20 @@ export function TenantPortal() {
   return (
     <>
       {showWelcome && !isInactiveTenant && <WelcomeScreen snapshot={snapshot} onDone={handleWelcomeDone} />}
+      {mandatoryAgreement && !isInactiveTenant && (
+        <MandatoryAgreementScreen
+          agreement={mandatoryAgreement}
+          snapshot={snapshot}
+          onSigned={(updated) => {
+            setSnapshot((prev) => prev ? {
+              ...prev,
+              agreements: prev.agreements.map((a) => a.id === updated.id ? updated : a),
+            } : prev);
+            setMandatoryAgreement(null);
+          }}
+          onDismiss={() => setMandatoryAgreement(null)}
+        />
+      )}
 
       {/* Agreement signing modal */}
       {tenantSignModal && (
@@ -1980,7 +2246,7 @@ export function TenantPortal() {
 
           {/* Page content */}
           <main className="flex-1 overflow-y-auto pb-24 lg:pb-6">
-            <div className="max-w-4xl mx-auto px-4 py-6">
+            <div className="px-6 lg:px-8 py-6 w-full">
               {renderView()}
             </div>
           </main>
