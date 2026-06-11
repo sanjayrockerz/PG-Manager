@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ArrowLeft, ArrowRight, Check, Home, LayoutGrid, Mail, Shield,
-  Building2, KeyRound, Send,
+  Building2, KeyRound, RefreshCw, ExternalLink, AlertCircle,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import type { PortalType } from './PortalSelector';
@@ -17,11 +17,16 @@ const EMAIL_MAX_LENGTH = 254;
 // ─── Tenant Portal Login ──────────────────────────────────────────────────────
 // Premium split-panel magic-link-only login. No Google, no Phone OTP, no signup.
 
+const RESEND_COOLDOWN = 60; // seconds
+
 function TenantLogin({ onBack }: { onBack?: () => void }) {
   const { sendLoginMagicLink, authError, isLoading } = useAuth();
   const [email, setEmail] = useState('');
   const [error, setError] = useState('');
   const [isSent, setIsSent] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const [resending, setResending] = useState(false);
+  const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => { if (authError) setError(authError); }, [authError]);
 
@@ -31,6 +36,26 @@ function TenantLogin({ onBack }: { onBack?: () => void }) {
     const pre = params.get('email')?.trim().toLowerCase() ?? '';
     if (pre && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(pre)) setEmail(pre);
   }, []);
+
+  useEffect(() => () => { if (cooldownRef.current) clearInterval(cooldownRef.current); }, []);
+
+  const startCooldown = () => {
+    setResendCooldown(RESEND_COOLDOWN);
+    cooldownRef.current = setInterval(() => {
+      setResendCooldown((c) => {
+        if (c <= 1) { clearInterval(cooldownRef.current!); return 0; }
+        return c - 1;
+      });
+    }, 1000);
+  };
+
+  const handleResend = async () => {
+    if (resendCooldown > 0 || resending) return;
+    setResending(true);
+    const sent = await sendLoginMagicLink(email.trim().toLowerCase());
+    setResending(false);
+    if (sent) startCooldown();
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -43,6 +68,7 @@ function TenantLogin({ onBack }: { onBack?: () => void }) {
     const sent = await sendLoginMagicLink(cleaned);
     if (sent) {
       setIsSent(true);
+      startCooldown();
     } else {
       // Friendly tenant-specific error
       const raw = authError || '';
@@ -210,37 +236,87 @@ function TenantLogin({ onBack }: { onBack?: () => void }) {
             </>
           ) : (
             /* ── Sent state ── */
-            <div className="text-center py-8">
-              <div className="w-16 h-16 rounded-2xl bg-green-100 flex items-center justify-center mx-auto mb-5">
-                <Send className="w-8 h-8 text-green-600" />
+            <div className="py-4">
+              {/* Icon + heading */}
+              <div className="flex flex-col items-center text-center mb-7">
+                <div className="relative mb-5">
+                  <div className="w-20 h-20 rounded-2xl bg-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-200">
+                    <Mail className="w-9 h-9 text-white" />
+                  </div>
+                  <div className="absolute -top-1.5 -right-1.5 w-7 h-7 rounded-full bg-green-500 border-2 border-white flex items-center justify-center">
+                    <Check className="w-3.5 h-3.5 text-white" />
+                  </div>
+                </div>
+                <h2 className="text-2xl font-bold text-gray-900 mb-1.5">Check your email</h2>
+                <p className="text-sm text-gray-500">We sent a sign-in link to</p>
+                <p className="text-base font-bold text-indigo-600 mt-1 break-all">{email.trim().toLowerCase()}</p>
               </div>
-              <h2 className="text-xl font-bold text-gray-900 mb-2">Check your inbox</h2>
-              <p className="text-sm text-gray-500 mb-1">
-                A sign-in link was sent to
-              </p>
-              <p className="text-sm font-semibold text-gray-900 mb-6">{email.trim().toLowerCase()}</p>
 
-              <div className="bg-white rounded-2xl border border-gray-200 p-5 text-left space-y-3 mb-6">
+              {/* Steps */}
+              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-3.5 mb-5">
                 {[
-                  'Open the email from RentCare',
-                  'Click the "Sign in to RentCare" button',
-                  'You\'ll be taken straight to your portal',
-                ].map((step, i) => (
-                  <div key={i} className="flex items-start gap-3 text-sm">
-                    <span className="w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center flex-shrink-0 font-semibold text-xs">
-                      {i + 1}
+                  { step: '1', text: 'Open the email from RentCare in your inbox' },
+                  { step: '2', text: 'Click the "Sign in to RentCare" button in the email' },
+                  { step: '3', text: "You'll be signed in and taken to your portal instantly" },
+                ].map(({ step, text }) => (
+                  <div key={step} className="flex items-start gap-3 text-sm">
+                    <span className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 font-bold text-xs text-white"
+                      style={{ background: 'linear-gradient(135deg, #6D28D9, #4F46E5)' }}>
+                      {step}
                     </span>
-                    <span className="text-gray-700">{step}</span>
+                    <span className="text-gray-700 leading-relaxed">{text}</span>
                   </div>
                 ))}
               </div>
 
-              <button
-                onClick={() => { setIsSent(false); setEmail(''); setError(''); }}
-                className="text-sm text-indigo-600 hover:text-indigo-700 font-medium"
-              >
-                Use a different email
-              </button>
+              {/* Open email provider shortcut */}
+              {(() => {
+                const domain = email.split('@')[1]?.toLowerCase() ?? '';
+                const providers: Array<{ match: string[]; label: string; url: string }> = [
+                  { match: ['gmail.com'], label: 'Open Gmail', url: 'https://mail.google.com' },
+                  { match: ['outlook.com', 'hotmail.com', 'live.com'], label: 'Open Outlook', url: 'https://outlook.live.com' },
+                  { match: ['yahoo.com', 'yahoo.in'], label: 'Open Yahoo Mail', url: 'https://mail.yahoo.com' },
+                ];
+                const matched = providers.find((p) => p.match.includes(domain));
+                if (!matched) return null;
+                return (
+                  <a
+                    href={matched.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold text-white mb-4 transition-opacity hover:opacity-90"
+                    style={{ background: 'linear-gradient(135deg, #6D28D9, #4F46E5)' }}
+                  >
+                    {matched.label} <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                );
+              })()}
+
+              {/* Spam reminder */}
+              <div className="flex items-start gap-2.5 bg-amber-50 border border-amber-100 rounded-xl px-4 py-3 mb-5">
+                <AlertCircle className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
+                <p className="text-xs text-amber-700 leading-relaxed">
+                  Can't find it? Check your <strong>Spam</strong> or <strong>Promotions</strong> folder. The link expires in <strong>1 hour</strong>.
+                </p>
+              </div>
+
+              {/* Resend + change email */}
+              <div className="flex items-center justify-between">
+                <button
+                  onClick={() => void handleResend()}
+                  disabled={resendCooldown > 0 || resending}
+                  className="flex items-center gap-1.5 text-sm font-medium text-indigo-600 hover:text-indigo-700 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${resending ? 'animate-spin' : ''}`} />
+                  {resending ? 'Sending…' : resendCooldown > 0 ? `Resend in ${resendCooldown}s` : 'Resend email'}
+                </button>
+                <button
+                  onClick={() => { setIsSent(false); setEmail(''); setError(''); setResendCooldown(0); }}
+                  className="text-sm text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  Use a different email
+                </button>
+              </div>
             </div>
           )}
         </div>
