@@ -3,7 +3,7 @@ import {
   AlertCircle, ArrowLeft, ArrowRight, Bell, Building2, Calendar,
   Check, CheckCircle2, ChevronRight, ClipboardCheck, CreditCard, Copy,
   Download, FileText, Home, IndianRupee, LayoutDashboard, LogOut,
-  MapPin, MessageSquare, PanelLeftClose, PanelLeftOpen, Phone, Plus, QrCode,
+  MapPin, MessageSquare, PanelLeft, PanelLeftClose, PanelLeftOpen, Phone, Plus, QrCode,
   Send, Upload, User, Wrench, X, HelpCircle, Menu, Shield,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -2721,6 +2721,14 @@ export function TenantPortal() {
           {/* Desktop top bar */}
           <header className="hidden lg:flex bg-white border-b border-gray-100 px-6 py-3.5 items-center justify-between flex-shrink-0">
             <div className="flex items-center gap-2 text-sm text-gray-600">
+              <button
+                onClick={toggleSidebar}
+                aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+                title={sidebarCollapsed ? 'Expand sidebar (Ctrl+B)' : 'Collapse sidebar (Ctrl+B)'}
+                className="flex items-center justify-center w-8 h-8 -ml-1 mr-1 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors"
+              >
+                <PanelLeft className="w-4 h-4" />
+              </button>
               <Building2 className="w-4 h-4 text-gray-400" />
               <span className="font-medium text-gray-800">{ownerPaymentInfo.pgName || property?.name}</span>
               {tenant.room && (

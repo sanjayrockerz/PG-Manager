@@ -9,6 +9,7 @@ import {
   LogOut,
   Menu,
   Package,
+  PanelLeft,
   Settings as SettingsIcon,
   Users,
   X,
@@ -305,6 +306,14 @@ export function AdminLayout({ current, onNavigate, profileName, profileRole, not
         <header className="h-14 shrink-0 bg-white border-b border-gray-200 px-5 flex items-center gap-3">
           <button onClick={() => setMobileOpen(true)} className="lg:hidden p-2 -ml-2 rounded-lg text-gray-500 hover:bg-gray-100">
             <Menu className="w-5 h-5" />
+          </button>
+          <button
+            onClick={() => setCollapsed((prev) => !prev)}
+            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            title={collapsed ? 'Expand sidebar (Ctrl+B)' : 'Collapse sidebar (Ctrl+B)'}
+            className="hidden lg:flex items-center justify-center w-9 h-9 -ml-2 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors"
+          >
+            <PanelLeft className="w-5 h-5" />
           </button>
           <div className="min-w-0 flex items-center gap-3">
             <p className="text-[15px] font-semibold text-gray-900">RentCare Admin</p>
