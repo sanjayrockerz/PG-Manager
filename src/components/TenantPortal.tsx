@@ -845,6 +845,17 @@ export function TenantPortal() {
     return localStorage.getItem(notifSeenKey('__init')) ?? new Date(0).toISOString();
   });
 
+  // Threshold captured at the moment the notifications view is opened, so items
+  // that were unread on open stay visually highlighted even after we mark them seen.
+  const notifHighlightThresholdRef = useRef<string>(new Date(0).toISOString());
+
+  const markNotificationsSeen = useCallback((tenantId: string | undefined) => {
+    if (!tenantId) return;
+    const now = new Date().toISOString();
+    localStorage.setItem(notifSeenKey(tenantId), now);
+    setNotifLastSeen(now);
+  }, []);
+
   // Agreement signing state
   const [tenantSignModal, setTenantSignModal] = useState<{ agreement: AgreementRecord } | null>(null);
   const [tenantSignatureName, setTenantSignatureName] = useState('');
@@ -1940,13 +1951,41 @@ export function TenantPortal() {
         <h1 className="text-xl font-bold text-gray-900 flex-1">Announcements</h1>
         {tenantUnreadCount > 0 && (
           <button
-            onClick={() => { const now = new Date().toISOString(); localStorage.setItem(notifSeenKey(tenant.id), now); setNotifLastSeen(now); }}
+            onClick={() => { notifHighlightThresholdRef.current = notifLastSeen; markNotificationsSeen(tenant.id); }}
             className="text-xs bg-indigo-600 text-white font-semibold px-2 py-0.5 rounded-full hover:bg-indigo-700"
           >
-            {tenantUnreadCount} new
+            Mark all read
           </button>
         )}
       </div>
+
+      {/* Notifications — payment, maintenance, agreement & system updates */}
+      {notifications.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Notifications</p>
+          {notifications.slice(0, 25).map((n) => {
+            const isUnread = n.createdAt > notifHighlightThresholdRef.current;
+            return (
+              <div
+                key={n.id}
+                className={`rounded-xl p-4 border flex items-start gap-3 ${
+                  isUnread ? 'bg-indigo-50 border-indigo-200' : 'bg-white border-gray-200'
+                }`}
+              >
+                <div className="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center flex-shrink-0">
+                  <Bell className="w-4 h-4 text-indigo-600" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  {n.title && <p className="text-sm font-semibold text-gray-900">{n.title}</p>}
+                  <p className="text-sm text-gray-600">{n.message}</p>
+                  <p className="text-xs text-gray-400 mt-1">{fmtDate(n.createdAt)}</p>
+                </div>
+                {isUnread && <span className="w-2 h-2 rounded-full bg-indigo-500 flex-shrink-0 mt-1.5" />}
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {pinnedAnnouncements.length > 0 && (
         <div className="space-y-2">
@@ -1980,10 +2019,10 @@ export function TenantPortal() {
         </div>
       ))}
 
-      {announcements.length === 0 && (
+      {announcements.length === 0 && notifications.length === 0 && (
         <div className="text-center py-12 text-gray-400">
           <Bell className="w-10 h-10 mx-auto mb-2 opacity-30" />
-          <p className="text-sm">No announcements yet.</p>
+          <p className="text-sm">No notifications or announcements yet.</p>
         </div>
       )}
     </div>
@@ -2562,7 +2601,10 @@ export function TenantPortal() {
                   return (
                     <button
                       key={id}
-                      onClick={() => setView(id)}
+                      onClick={() => {
+                        if (id === 'announcements') { notifHighlightThresholdRef.current = notifLastSeen; markNotificationsSeen(tenant.id); }
+                        setView(id);
+                      }}
                       title={sidebarCollapsed ? label : undefined}
                       className={`w-full flex items-center rounded-xl text-sm font-medium transition-all mb-0.5 ${
                         sidebarCollapsed ? 'justify-center p-2.5' : 'gap-3 px-3 py-2.5'
@@ -2629,7 +2671,10 @@ export function TenantPortal() {
                       return (
                         <button
                           key={id}
-                          onClick={() => { setView(id); setSidebarOpen(false); }}
+                          onClick={() => {
+                            if (id === 'announcements') { notifHighlightThresholdRef.current = notifLastSeen; markNotificationsSeen(tenant.id); }
+                            setView(id); setSidebarOpen(false);
+                          }}
                           className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all mb-0.5 ${
                             isActive ? 'bg-indigo-600 text-white' : 'text-gray-600 hover:bg-gray-50'
                           }`}
@@ -2687,7 +2732,12 @@ export function TenantPortal() {
             </div>
             <div className="flex items-center gap-3">
               <button
-                onClick={() => setView('announcements')}
+                onClick={() => {
+                  notifHighlightThresholdRef.current = notifLastSeen;
+                  setView('announcements');
+                  markNotificationsSeen(tenant.id);
+                }}
+                aria-label="Notifications"
                 className="relative p-2 hover:bg-gray-100 rounded-xl transition-colors"
               >
                 <Bell className="w-4 h-4 text-gray-500" />
@@ -2746,7 +2796,10 @@ export function TenantPortal() {
                 return (
                   <button
                     key={id}
-                    onClick={() => setView(id)}
+                    onClick={() => {
+                      if (id === 'announcements') { notifHighlightThresholdRef.current = notifLastSeen; markNotificationsSeen(tenant.id); }
+                      setView(id);
+                    }}
                     className={`flex-1 flex flex-col items-center justify-center py-3 gap-0.5 transition-colors ${
                       isActive ? 'text-indigo-600' : 'text-gray-400 hover:text-gray-600'
                     }`}

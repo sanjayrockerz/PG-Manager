@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Building2, ChevronDown, HelpCircle, PanelLeft, Search } from 'lucide-react';
+import { Building2, ChevronDown, PanelLeft, Search } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { isPlatformAdminRole } from '../utils/roles';
 import { isDemoModeEnabled } from '../services/dataService';
@@ -134,14 +134,6 @@ export function Header({ setSidebarOpen, sidebarCollapsed, onToggleSidebar, curr
 
         {/* Notifications */}
         <NotificationBell />
-
-        {/* Help */}
-        <button
-          className="hidden md:flex items-center justify-center rounded-lg hover:bg-zinc-100 transition-colors"
-          style={{ width: 33, height: 33, color: '#71717A' }}
-        >
-          <HelpCircle style={{ width: 16, height: 16 }} />
-        </button>
 
         {/* Divider */}
         <div style={{ width: 1, height: 20, background: '#E4E4E7', margin: '0 2px' }} />
