@@ -94,6 +94,10 @@ function AppContent() {
       // Reset portal selection on logout so selector is always shown again
       setSelectedPortal(readInviteToken() ? 'owner' : null);
       writeStoredPortal(null);
+      // Reset to the default landing tab so a stale tab from a previous session
+      // (e.g. 'tenant-portal' or 'admin-section') doesn't carry into the next login.
+      setActiveTab('dashboard');
+      setSelectedTenantId(null);
       return;
     }
 
@@ -112,10 +116,19 @@ function AppContent() {
       return;
     }
 
-    // If user selected a portal but logged in with a mismatched role, silently correct it.
-    if (selectedPortal === 'admin' && !isPlatformAdminRole(user.role) && user.role !== 'tenant') {
-      setActiveTab('dashboard');
-      setSelectedTenantId(null);
+    // Owner / manager / staff: ensure we always land on a tab this role can
+    // actually render. A stale tab carried over from a previous persona (tenant
+    // → 'tenant-portal', admin → 'admin-section', or any tab the role lacks
+    // permission for) would otherwise be denied by PageGuard and render a blank
+    // page until the user manually clicks a nav item. Default everyone to the
+    // dashboard.
+    if (!isPlatformAdminRole(user.role) && user.role !== 'tenant') {
+      const requiredAction = TAB_PERMISSION_MAP[activeTab];
+      const tabAllowed = requiredAction ? hasPermission(user.role, requiredAction) : true;
+      if (!tabAllowed || activeTab === 'tenant-portal' || activeTab === 'admin-section') {
+        setActiveTab(getDefaultTab(user.role));
+        setSelectedTenantId(null);
+      }
     }
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
