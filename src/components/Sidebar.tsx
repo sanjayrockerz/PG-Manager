@@ -3,8 +3,9 @@ import {
   LogOut, Settings, Shield, Users, Wrench, X, Zap, UserCog,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { useWorkspace } from '../contexts/WorkspaceContext';
 import { isPlatformAdminRole } from '../utils/roles';
-import { hasPermission } from '../utils/permissions';
+import { hasPermission, hasWorkspacePermission } from '../utils/permissions';
 
 interface SidebarProps {
   activeTab: string;
@@ -77,24 +78,35 @@ export function Sidebar({
   userRole = 'owner',
 }: SidebarProps) {
   const { logout, user } = useAuth();
+  const { navWorkspaceRole } = useWorkspace();
 
   const isPlatformAdmin = isPlatformAdminRole(userRole as any);
-  const isTenant = userRole === 'tenant';
-  const showSettings   = !isTenant && hasPermission(userRole, 'page:settings');
+  const isTenant        = userRole === 'tenant';
+
+  // Settings is visible to workspace owners (via profiles.role) AND managers
+  // (via workspace role). Managers see a restricted Settings with only workspace tabs.
+  const showSettings = !isTenant && (
+    hasPermission(userRole, 'page:settings') ||
+    hasWorkspacePermission(navWorkspaceRole, 'settings:workspace')
+  );
   const showUpgradePro = !isPlatformAdmin && !isTenant;
 
   const filteredOwnerSections = ownerSections.map((section) => ({
     ...section,
     items: section.items.filter((item) => {
       switch (item.id) {
-        case 'properties':    return hasPermission(userRole, 'page:properties');
-        case 'tenants':       return hasPermission(userRole, 'page:tenants');
-        case 'payments':      return hasPermission(userRole, 'page:payments');
-        case 'maintenance':   return hasPermission(userRole, 'page:maintenance');
-        case 'announcements': return hasPermission(userRole, 'page:announcements');
-        case 'support':       return hasPermission(userRole, 'page:support');
-        case 'audit-log':     return hasPermission(userRole, 'page:dashboard');
-        case 'team':          return hasPermission(userRole, 'team:manage');
+        case 'properties':    return hasPermission(userRole, 'page:properties')    || hasWorkspacePermission(navWorkspaceRole, 'page:properties');
+        case 'tenants':       return hasPermission(userRole, 'page:tenants')       || hasWorkspacePermission(navWorkspaceRole, 'page:tenants');
+        case 'payments':      return hasPermission(userRole, 'page:payments')      || hasWorkspacePermission(navWorkspaceRole, 'page:payments');
+        case 'maintenance':   return hasPermission(userRole, 'page:maintenance')   || hasWorkspacePermission(navWorkspaceRole, 'page:maintenance');
+        case 'announcements': return hasPermission(userRole, 'page:announcements') || hasWorkspacePermission(navWorkspaceRole, 'page:announcements');
+        case 'support':       return hasPermission(userRole, 'page:support')       || hasWorkspacePermission(navWorkspaceRole, 'page:support');
+        case 'audit-log':     return hasPermission(userRole, 'page:dashboard')     || navWorkspaceRole === 'workspace_owner';
+        case 'team':
+          // Only workspace_owner and manager may see Team Members.
+          // Editors/viewers are excluded even though profiles.role='owner' after acceptance —
+          // workspace role is authoritative here, not profile role.
+          return hasWorkspacePermission(navWorkspaceRole, 'team:view');
         default:              return true;
       }
     }),
@@ -108,10 +120,19 @@ export function Sidebar({
   };
 
   const userInitials = user?.name
-    ? user.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()
+    ? user.name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()
     : user?.email?.slice(0, 2).toUpperCase() ?? 'U';
 
-  const portalLabel = isPlatformAdmin ? 'Admin' : isTenant ? 'Tenant' : 'Owner';
+  // Role chip shown under user name in the bottom bar (expanded mode only)
+  const workspaceRoleLabel: string = (() => {
+    switch (navWorkspaceRole) {
+      case 'workspace_owner': return '';   // Owners need no label
+      case 'manager':         return 'Manager';
+      case 'editor':          return 'Editor';
+      case 'viewer':          return 'Viewer';
+      default:                return '';
+    }
+  })();
 
   const NavBtn = ({ item }: { item: NavItem }) => {
     const Icon = item.icon;
@@ -127,15 +148,14 @@ export function Sidebar({
           style={{
             width: '100%',
             justifyContent: sidebarCollapsed ? 'center' : undefined,
-            paddingLeft: sidebarCollapsed ? 0 : undefined,
-            paddingRight: sidebarCollapsed ? 0 : undefined,
+            paddingLeft:    sidebarCollapsed ? 0 : undefined,
+            paddingRight:   sidebarCollapsed ? 0 : undefined,
           }}
         >
           <Icon
             className="flex-shrink-0"
             style={{
-              width: 16,
-              height: 16,
+              width: 16, height: 16,
               strokeWidth: isActive ? 2 : 1.75,
               color: isActive ? 'var(--ds-accent)' : 'var(--ds-text-3)',
             }}
@@ -146,7 +166,7 @@ export function Sidebar({
               letterSpacing: '-0.01em',
               whiteSpace: 'nowrap',
               overflow: 'hidden',
-              opacity: sidebarCollapsed ? 0 : 1,
+              opacity:  sidebarCollapsed ? 0 : 1,
               maxWidth: sidebarCollapsed ? 0 : 160,
               transition: 'opacity 180ms ease, max-width 250ms cubic-bezier(0.4,0,0.2,1)',
               display: 'block',
@@ -156,28 +176,19 @@ export function Sidebar({
           </span>
         </button>
 
-        {/* Tooltip — only in collapsed mode */}
+        {/* Tooltip — collapsed mode only */}
         {sidebarCollapsed && (
           <div
             role="tooltip"
             className="pointer-events-none absolute left-full top-1/2 -translate-y-1/2 ml-2.5 z-50
               px-2.5 py-1.5 rounded-md text-white whitespace-nowrap
               opacity-0 group-hover/nav:opacity-100 transition-opacity duration-150"
-            style={{
-              fontSize: 12,
-              fontWeight: 500,
-              background: '#18181B',
-              boxShadow: '0 4px 12px rgb(0 0 0 / 0.15)',
-            }}
+            style={{ fontSize: 12, fontWeight: 500, background: '#18181B', boxShadow: '0 4px 12px rgb(0 0 0 / 0.15)' }}
           >
             {item.label}
             <div
               className="absolute right-full top-1/2 -translate-y-1/2"
-              style={{
-                borderWidth: '4px 4px 4px 0',
-                borderStyle: 'solid',
-                borderColor: 'transparent #18181B transparent transparent',
-              }}
+              style={{ borderWidth: '4px 4px 4px 0', borderStyle: 'solid', borderColor: 'transparent #18181B transparent transparent' }}
             />
           </div>
         )}
@@ -210,49 +221,15 @@ export function Sidebar({
           overflow: 'hidden',
         }}
       >
-        {/* ── Logo ─────────────────────────────── */}
+        {/* Mobile-only close strip */}
         <div
-          className="flex items-center flex-shrink-0"
-          style={{
-            height: 52,
-            padding: '0 14px',
-            borderBottom: '1px solid #F1F1F3',
-            gap: 10,
-            overflow: 'hidden',
-          }}
+          className="lg:hidden flex items-center justify-between flex-shrink-0"
+          style={{ height: 48, padding: '0 14px', borderBottom: '1px solid #F1F1F3' }}
         >
-          <div
-            className="flex-shrink-0 flex items-center justify-center rounded-lg"
-            style={{
-              width: 28,
-              height: 28,
-              background: 'linear-gradient(135deg, #6366F1 0%, #4F46E5 100%)',
-              boxShadow: '0 1px 4px rgb(99 102 241 / 0.35)',
-            }}
-          >
-            <LayoutGrid style={{ width: 14, height: 14, color: '#fff', strokeWidth: 2 }} />
-          </div>
-
-          <div
-            style={{
-              flex: 1,
-              minWidth: 0,
-              overflow: 'hidden',
-              opacity: sidebarCollapsed ? 0 : 1,
-              transition: 'opacity 180ms ease',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            <p style={{ fontSize: 14, fontWeight: 700, color: '#0A0A0B', letterSpacing: '-0.02em', lineHeight: 1 }}>
-              RentCare
-            </p>
-            <p style={{ fontSize: 11, color: '#A1A1AA', marginTop: 1 }}>{portalLabel} Portal</p>
-          </div>
-
-          {/* Mobile close */}
+          <span style={{ fontSize: 13, fontWeight: 600, color: '#0A0A0B' }}>Menu</span>
           <button
             onClick={() => setSidebarOpen(false)}
-            className="lg:hidden flex items-center justify-center rounded-md hover:bg-zinc-100 flex-shrink-0"
+            className="flex items-center justify-center rounded-md hover:bg-zinc-100"
             style={{ width: 28, height: 28, color: '#A1A1AA' }}
             aria-label="Close sidebar"
           >
@@ -260,7 +237,7 @@ export function Sidebar({
           </button>
         </div>
 
-        {/* ── Navigation ───────────────────────── */}
+        {/* Navigation */}
         <nav
           className="flex-1 overflow-y-auto overflow-x-hidden"
           style={{ padding: '10px 8px' }}
@@ -271,12 +248,10 @@ export function Sidebar({
               <p
                 className="ds-section-label"
                 style={{
-                  padding: '0 10px',
-                  marginBottom: 4,
+                  padding: '0 10px', marginBottom: 4,
                   opacity: sidebarCollapsed ? 0 : 1,
                   transition: 'opacity 150ms ease',
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
+                  whiteSpace: 'nowrap', overflow: 'hidden',
                   height: sidebarCollapsed ? 0 : undefined,
                   marginTop: sidebarCollapsed ? 0 : undefined,
                 }}
@@ -284,7 +259,7 @@ export function Sidebar({
                 {section.title}
               </p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                {section.items.map(item => <NavBtn key={item.id} item={item} />)}
+                {section.items.map((item) => <NavBtn key={item.id} item={item} />)}
               </div>
             </div>
           ))}
@@ -294,12 +269,10 @@ export function Sidebar({
               <p
                 className="ds-section-label"
                 style={{
-                  padding: '0 10px',
-                  marginBottom: 4,
+                  padding: '0 10px', marginBottom: 4,
                   opacity: sidebarCollapsed ? 0 : 1,
                   transition: 'opacity 150ms ease',
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
+                  whiteSpace: 'nowrap', overflow: 'hidden',
                   height: sidebarCollapsed ? 0 : undefined,
                 }}
               >
@@ -310,26 +283,14 @@ export function Sidebar({
           )}
         </nav>
 
-        {/* ── Bottom ───────────────────────────── */}
-        <div
-          style={{
-            padding: '10px 8px',
-            borderTop: '1px solid #F1F1F3',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 4,
-          }}
-        >
-          {/* Upgrade to Pro — expanded only */}
-          {showUpgradePro && !sidebarCollapsed && (
+        {/* Bottom — user + sign out */}
+        <div style={{ padding: '10px 8px', borderTop: '1px solid #F1F1F3', display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {/* Upgrade to Pro — expanded + owner only */}
+          {showUpgradePro && !sidebarCollapsed && navWorkspaceRole === 'workspace_owner' && (
             <button
               onClick={() => handleNav('pricing')}
               className="w-full text-left rounded-lg transition-opacity hover:opacity-90"
-              style={{
-                padding: '10px 12px',
-                background: 'linear-gradient(135deg, #6366F1 0%, #4338CA 100%)',
-                marginBottom: 4,
-              }}
+              style={{ padding: '10px 12px', background: 'linear-gradient(135deg, #6366F1 0%, #4338CA 100%)', marginBottom: 4 }}
             >
               <div className="flex items-center gap-2 mb-1">
                 <Zap style={{ width: 13, height: 13, color: '#C7D2FE', strokeWidth: 2 }} />
@@ -338,22 +299,13 @@ export function Sidebar({
               <p style={{ fontSize: 11, color: '#A5B4FC', lineHeight: 1.4 }}>
                 Unlock advanced reports, automation and more.
               </p>
-              <div
-                className="mt-2.5 text-center rounded-md"
-                style={{
-                  padding: '5px 0',
-                  background: 'rgba(255,255,255,0.15)',
-                  fontSize: 11,
-                  fontWeight: 600,
-                  color: '#ffffff',
-                }}
-              >
+              <div className="mt-2.5 text-center rounded-md" style={{ padding: '5px 0', background: 'rgba(255,255,255,0.15)', fontSize: 11, fontWeight: 600, color: '#ffffff' }}>
                 Upgrade Now
               </div>
             </button>
           )}
 
-          {/* Sign out */}
+          {/* Sign out / user row */}
           <div className="relative group/signout">
             <button
               onClick={() => void logout()}
@@ -362,36 +314,34 @@ export function Sidebar({
               style={{
                 color: '#A1A1AA',
                 justifyContent: sidebarCollapsed ? 'center' : undefined,
-                paddingLeft: sidebarCollapsed ? 0 : undefined,
+                paddingLeft:  sidebarCollapsed ? 0 : undefined,
                 paddingRight: sidebarCollapsed ? 0 : undefined,
               }}
             >
               <div
                 className="flex-shrink-0 flex items-center justify-center rounded-md text-white"
-                style={{
-                  width: 22,
-                  height: 22,
-                  background: 'linear-gradient(135deg, #6366F1, #4F46E5)',
-                  fontSize: 10,
-                  fontWeight: 700,
-                }}
+                style={{ width: 22, height: 22, background: 'linear-gradient(135deg, #6366F1, #4F46E5)', fontSize: 10, fontWeight: 700 }}
               >
                 {userInitials}
               </div>
-              <span
+              <div
                 style={{
-                  fontSize: 13,
-                  color: '#52525B',
-                  whiteSpace: 'nowrap',
                   overflow: 'hidden',
-                  opacity: sidebarCollapsed ? 0 : 1,
+                  opacity:  sidebarCollapsed ? 0 : 1,
                   maxWidth: sidebarCollapsed ? 0 : 140,
                   transition: 'opacity 180ms ease, max-width 250ms cubic-bezier(0.4,0,0.2,1)',
-                  display: 'block',
+                  display: 'flex', flexDirection: 'column', alignItems: 'flex-start', flex: 1,
                 }}
               >
-                {user?.name || user?.email || 'Account'}
-              </span>
+                <span style={{ fontSize: 13, color: '#52525B', whiteSpace: 'nowrap' }}>
+                  {user?.name || user?.email || 'Account'}
+                </span>
+                {workspaceRoleLabel && (
+                  <span style={{ fontSize: 10, color: '#6366F1', fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', lineHeight: 1.2 }}>
+                    {workspaceRoleLabel}
+                  </span>
+                )}
+              </div>
               {!sidebarCollapsed && (
                 <LogOut style={{ width: 13, height: 13, color: '#A1A1AA', flexShrink: 0 }} />
               )}

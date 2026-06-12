@@ -4,6 +4,7 @@ import {
   ChevronDown,
   ChevronUp,
   Clock,
+  Info,
   Mail,
   Pencil,
   Plus,
@@ -16,6 +17,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useProperty } from '../contexts/PropertyContext';
+import { useWorkspace } from '../contexts/WorkspaceContext';
 import {
   type CreateInviteInput,
   type DisplayRole,
@@ -25,6 +27,7 @@ import {
   inviteService,
   teamService,
 } from '../services/inviteService';
+import { workspaceService, type WorkspaceMemberSummary } from '../services/workspaceService';
 import { validateInviteForm } from '../utils/validation';
 
 const DISPLAY_ROLE_OPTIONS: { value: DisplayRole; label: string; description: string }[] = [
@@ -73,7 +76,7 @@ const buildInviteLink = (token: string): string => {
   return `${window.location.origin}/accept-invite?token=${token}`;
 };
 
-// â”€â”€â”€ Capability Toggle Row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€â"€ Capability Toggle Row â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 function CapabilityRow({
   label,
@@ -107,7 +110,7 @@ function CapabilityRow({
   );
 }
 
-// â”€â”€â”€ Edit Scope Dialog â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€â"€ Edit Scope Dialog â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 interface EditScopeDialogProps {
   memberId: string;
@@ -253,7 +256,7 @@ function EditScopeDialog({
   );
 }
 
-// â”€â”€â”€ Add Property Scope Dialog â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€â"€ Add Property Scope Dialog â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 interface AddPropertyScopeDialogProps {
   memberId: string;
@@ -433,20 +436,25 @@ function AddPropertyScopeDialog({
   );
 }
 
-// â”€â”€â”€ Invite Dialog â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€â"€ Invite Dialog â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 interface InviteDialogProps {
   onClose: () => void;
   onSuccess: () => void;
+  // When a manager opens the dialog: restrict roles + scope properties + set workspace owner
+  allowedRoles?: DisplayRole[];
+  workspaceOwnerId?: string;
+  scopedPropertyIds?: string[];
 }
 
-function InviteDialog({ onClose, onSuccess }: InviteDialogProps) {
+function InviteDialog({ onClose, onSuccess, allowedRoles, workspaceOwnerId, scopedPropertyIds }: InviteDialogProps) {
   const { properties } = useProperty();
   const [formData, setFormData] = useState<CreateInviteInput>({
     invitedEmail: '',
     displayRole: 'viewer',
     propertyIds: [],
     capabilities: {},
+    workspaceOwnerId,
   });
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -505,7 +513,16 @@ function InviteDialog({ onClose, onSuccess }: InviteDialogProps) {
     }
   };
 
-  const selectedRole = DISPLAY_ROLE_OPTIONS.find((r) => r.value === formData.displayRole);
+  const visibleRoleOptions = allowedRoles
+    ? DISPLAY_ROLE_OPTIONS.filter((r) => allowedRoles.includes(r.value))
+    : DISPLAY_ROLE_OPTIONS;
+
+  // Scope property list: if manager, only show their assigned properties
+  const availableProperties = scopedPropertyIds
+    ? properties.filter((p) => scopedPropertyIds.includes(p.id))
+    : properties;
+
+  const selectedRole = visibleRoleOptions.find((r) => r.value === formData.displayRole);
   const inviteLink = createdInvite ? buildInviteLink(createdInvite.token) : '';
 
   return (
@@ -551,8 +568,14 @@ function InviteDialog({ onClose, onSuccess }: InviteDialogProps) {
             <label className="block text-sm font-medium text-gray-700 mb-1.5">
               Access Role *
             </label>
+            {allowedRoles && (
+              <div className="flex items-center gap-1.5 mb-2 px-3 py-1.5 rounded-md bg-amber-50 border border-amber-200">
+                <Info className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
+                <p className="text-xs text-amber-700">As a manager, you can invite editors and viewers only.</p>
+              </div>
+            )}
             <div className="space-y-2">
-              {DISPLAY_ROLE_OPTIONS.map((opt) => (
+              {visibleRoleOptions.map((opt) => (
                 <label
                   key={opt.value}
                   className={`flex items-start gap-3 p-3 border rounded-lg cursor-pointer transition-colors ${
@@ -585,11 +608,11 @@ function InviteDialog({ onClose, onSuccess }: InviteDialogProps) {
             <label className="block text-sm font-medium text-gray-700 mb-1.5">
               Properties to Grant Access *
             </label>
-            {properties.length === 0 ? (
+            {availableProperties.length === 0 ? (
               <p className="text-sm text-gray-500 italic">No properties found. Add a property first.</p>
             ) : (
               <div className="space-y-2 max-h-48 overflow-y-auto border border-gray-200 rounded-lg p-2">
-                {properties.map((prop) => (
+                {availableProperties.map((prop) => (
                   <label
                     key={prop.id}
                     className={`flex items-center gap-3 p-2.5 rounded-lg cursor-pointer transition-colors ${
@@ -623,27 +646,34 @@ function InviteDialog({ onClose, onSuccess }: InviteDialogProps) {
           {selectedRole && (
             <div className="rounded-lg bg-gray-50 border border-gray-200 px-4 py-3 text-xs text-gray-600 space-y-1">
               <p className="font-medium text-gray-700 mb-1">Default capabilities for {selectedRole.label}:</p>
-              <p>{selectedRole.value === 'viewer' ? 'âœ“ View only â€” no edits' : ''}</p>
-              <p>{selectedRole.value === 'editor' ? 'âœ“ Tenants, maintenance' : ''}</p>
-              <p>{selectedRole.value === 'manager' ? 'âœ“ Tenants, payments, maintenance, announcements' : ''}</p>
+              <p>{selectedRole.value === 'viewer' ? '✓ View only — no edits' : ''}</p>
+              <p>{selectedRole.value === 'editor' ? '✓ Tenants, maintenance' : ''}</p>
+              <p>{selectedRole.value === 'manager' ? '✓ Tenants, payments, maintenance, announcements' : ''}</p>
             </div>
           )}
 
           {createdInvite && (
-            <div className="rounded-lg border border-indigo-100 bg-indigo-50 px-4 py-3 text-xs text-indigo-700">
-              <p className="font-semibold mb-1">Invite link</p>
+            <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 space-y-2">
+              <div className="flex items-center gap-2">
+                <UserCheck className="w-4 h-4 text-green-600 flex-shrink-0" />
+                <p className="text-sm font-semibold text-green-800">Invite created!</p>
+              </div>
+              <p className="text-xs text-green-700">
+                A sign-in email has been sent if your project has SMTP configured.
+                Either way, share this link directly to guarantee delivery:
+              </p>
               <div className="flex items-center gap-2">
                 <input
                   value={inviteLink}
                   readOnly
-                  className="flex-1 px-2 py-1 border border-indigo-200 rounded bg-white text-[11px]"
+                  className="flex-1 px-2 py-1 border border-green-300 rounded bg-white text-[11px] font-mono"
                 />
                 <button
                   type="button"
                   onClick={() => void handleCopyLink(createdInvite.token)}
-                  className="px-2 py-1 bg-indigo-600 text-white rounded text-xs"
+                  className="px-3 py-1.5 bg-green-600 text-white rounded text-xs font-medium hover:bg-green-700"
                 >
-                  Copy
+                  Copy Link
                 </button>
               </div>
             </div>
@@ -663,7 +693,7 @@ function InviteDialog({ onClose, onSuccess }: InviteDialogProps) {
                 disabled={isSubmitting || !formData.propertyIds.length}
                 className="px-5 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-60"
               >
-                {isSubmitting ? 'Sending...' : 'Send Invite'}
+                {isSubmitting ? 'Creating...' : 'Create Invite'}
               </button>
             )}
           </div>
@@ -673,7 +703,7 @@ function InviteDialog({ onClose, onSuccess }: InviteDialogProps) {
   );
 }
 
-// â”€â”€â”€ Main TeamMembers Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â"€â"€â"€ Main TeamMembers Component â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 interface EditScopeState {
   memberId: string;
@@ -691,8 +721,24 @@ interface EditScopeState {
 
 export function TeamMembers() {
   const { properties } = useProperty();
+  const { navWorkspaceRole, managedProperties, workspaceMemberships } = useWorkspace();
+
+  // Determine if the caller is a manager (not workspace owner)
+  const isManager = navWorkspaceRole === 'manager';
+
+  // For managers: find the workspace owner ID from their membership records
+  const managerWorkspaceOwnerId = isManager
+    ? (workspaceMemberships.find((m) => m.workspaceRole === 'manager')?.workspaceOwnerId ?? null)
+    : null;
+
+  // Property IDs the manager has access to (scoped invite + team view)
+  const managerPropertyIds = isManager
+    ? managedProperties.map((p) => p.propertyId)
+    : [];
+
   const [invites, setInvites] = useState<InviteRecord[]>([]);
   const [members, setMembers] = useState<TeamMemberRecord[]>([]);
+  const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMemberSummary[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showInviteDialog, setShowInviteDialog] = useState(false);
   const [expandedMemberId, setExpandedMemberId] = useState<string | null>(null);
@@ -702,18 +748,32 @@ export function TeamMembers() {
   const load = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [inviteList, memberList] = await Promise.all([
-        inviteService.listInvites(),
-        teamService.listMembers(),
-      ]);
-      setInvites(inviteList);
-      setMembers(memberList);
+      if (isManager && managerWorkspaceOwnerId) {
+        // Manager: load invites attributed to the workspace owner, scoped to their properties
+        // and members relevant to their assigned properties
+        const [inviteList, memberSummaries] = await Promise.all([
+          inviteService.listInvites(), // RLS limits to records where owner_id=me or invited by me
+          workspaceService.listMembersForProperties(managerWorkspaceOwnerId, managerPropertyIds),
+        ]);
+        setInvites(inviteList.filter((inv) => inv.ownerId === managerWorkspaceOwnerId));
+        setWorkspaceMembers(memberSummaries);
+        setMembers([]);
+      } else {
+        // Workspace owner: load full team
+        const [inviteList, memberList] = await Promise.all([
+          inviteService.listInvites(),
+          teamService.listMembers(),
+        ]);
+        setInvites(inviteList);
+        setMembers(memberList);
+        setWorkspaceMembers([]);
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to load team data.');
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [isManager, managerWorkspaceOwnerId, managerPropertyIds.join(',')]);
 
   useEffect(() => {
     void load();
@@ -796,7 +856,9 @@ export function TeamMembers() {
         <div>
           <h1 className="ds-page-title">Team</h1>
           <p style={{ fontSize: 13, color: '#A1A1AA', marginTop: 2 }}>
-            Invite people and grant them access to specific properties.
+            {isManager
+              ? 'Manage members and invitations for your assigned properties.'
+              : 'Invite people and grant them access to specific properties.'}
           </p>
         </div>
         <button
@@ -804,23 +866,68 @@ export function TeamMembers() {
           className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition-colors"
         >
           <Plus className="w-4 h-4" />
-          Invite Member
+          {isManager ? 'Invite Editor / Viewer' : 'Invite Member'}
         </button>
       </div>
 
-      {/* Active Members */}
+      {/* Manager context banner */}
+      {isManager && (
+        <div className="flex items-start gap-3 px-4 py-3 rounded-xl bg-indigo-50 border border-indigo-200">
+          <Shield className="w-4 h-4 text-indigo-600 mt-0.5 flex-shrink-0" />
+          <div>
+            <p className="text-sm font-medium text-indigo-800">Manager view</p>
+            <p className="text-xs text-indigo-700 mt-0.5">
+              You can invite editors and viewers to the properties you manage.
+              Only the workspace owner can invite or promote managers.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Active Members — Workspace Owner sees full list; Manager sees scoped list */}
       <div className="bg-white rounded-xl border border-gray-200">
         <div className="px-5 py-4 border-b border-gray-100 flex items-center gap-2">
           <UserCheck className="w-4 h-4 text-green-600" />
-          <h3 className="text-sm font-semibold text-gray-900">Active Members ({members.length})</h3>
+          <h3 className="text-sm font-semibold text-gray-900">
+            Active Members ({isManager ? workspaceMembers.length : members.length})
+          </h3>
         </div>
 
-        {members.length === 0 ? (
+        {/* Manager scoped view */}
+        {isManager && workspaceMembers.length === 0 && (
+          <div className="px-5 py-8 text-center">
+            <Shield className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+            <p className="text-sm text-gray-500">No members on your assigned properties yet.</p>
+          </div>
+        )}
+        {isManager && workspaceMembers.length > 0 && (
+          <div className="divide-y divide-gray-100">
+            {workspaceMembers.map((member) => (
+              <div key={member.id} className="px-5 py-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-sm font-medium text-gray-900 truncate">{member.name || member.email}</p>
+                      <span className={`px-2 py-0.5 rounded text-xs font-medium ${roleColor(member.workspaceRole as DisplayRole)}`}>
+                        {member.workspaceRole}
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-0.5">{member.email}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">{member.propertyIds.length} propert{member.propertyIds.length === 1 ? 'y' : 'ies'} shared</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Workspace owner full view */}
+        {!isManager && members.length === 0 ? (
           <div className="px-5 py-8 text-center">
             <Shield className="w-8 h-8 text-gray-300 mx-auto mb-2" />
             <p className="text-sm text-gray-500">No active members yet. Invite someone to get started.</p>
           </div>
-        ) : (
+        ) : !isManager && (
           <div className="divide-y divide-gray-100">
             {members.map((member) => (
               <div key={member.id} className="px-5 py-4">
@@ -930,7 +1037,7 @@ export function TeamMembers() {
                               ['Announcements', scope.canManageAnnouncements],
                             ].map(([label, enabled]) => (
                               <span key={String(label)} className={`text-xs ${enabled ? 'text-green-700' : 'text-gray-400'}`}>
-                                {enabled ? 'âœ“' : 'âœ—'} {label}
+                                {enabled ? '✓' : '✗'} {label}
                               </span>
                             ))}
                           </div>
@@ -1042,18 +1149,25 @@ export function TeamMembers() {
       <div className="rounded-xl px-5 py-4" style={{ background: '#F8FAFC', border: '1px solid #E4E4E7' }}>
         <p className="text-sm font-semibold text-gray-700 mb-2">How invites work</p>
         <ul className="text-xs text-gray-500 space-y-1 list-disc list-inside">
-          <li>Enter the email address and role for the person you want to invite.</li>
-          <li>Select which properties they can access.</li>
-          <li>When they sign up or log in with that exact email, they will automatically get access.</li>
-          <li>Invites expire after 7 days. You can refresh them at any time.</li>
-          <li>Members can only see data for their assigned properties â€” never other owners' data.</li>
+          <li>Enter the email and access role — you can invite any PG owner, property manager, or staff member.</li>
+          <li>Select which of your properties they can access.</li>
+          <li><strong className="text-gray-600">Copy and share the invite link</strong> — this is the most reliable delivery method. A sign-in email is also attempted if your project has SMTP configured.</li>
+          <li>When they open the link and sign in, access is granted automatically.</li>
+          <li>Invites expire after 7 days. Refresh them from the pending list at any time.</li>
+          <li>Invited PG owners keep their own properties and workspace — they will see your properties listed separately under "Managing for Others."</li>
           <li>You can edit or remove individual property access at any time from the member row.</li>
         </ul>
       </div>
 
       {/* Dialogs */}
       {showInviteDialog && (
-        <InviteDialog onClose={() => setShowInviteDialog(false)} onSuccess={() => void load()} />
+        <InviteDialog
+          onClose={() => setShowInviteDialog(false)}
+          onSuccess={() => void load()}
+          allowedRoles={isManager ? ['editor', 'viewer'] : undefined}
+          workspaceOwnerId={isManager && managerWorkspaceOwnerId ? managerWorkspaceOwnerId : undefined}
+          scopedPropertyIds={isManager ? managerPropertyIds : undefined}
+        />
       )}
       {editScopeState && (
         <EditScopeDialog

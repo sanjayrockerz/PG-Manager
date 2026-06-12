@@ -1,41 +1,41 @@
 // Invite service: CRUD for owner_invites and team membership management
 import { supabase } from '../lib/supabase';
-import { displayRoleToProfileRole } from '../utils/roles';
 import { domainEvents } from './eventBus';
 
-const supabaseUrl = String((import.meta as any).env?.VITE_SUPABASE_URL ?? '');
+// ── Email delivery for team invites ──────────────────────────────────────────
+//
+// Strategy: use Supabase's built-in OTP / magic-link flow via the anon key.
+// `supabase.auth.signInWithOtp({ email, options: { shouldCreateUser, emailRedirectTo } })`
+// sends a Supabase magic-link email using the project's configured email provider
+// (SMTP settings in the Supabase dashboard).
+//
+// If the project has no SMTP configured, the email silently fails on the server
+// but the invite record is still created in the DB. The owner can then copy the
+// invite link from the Team page and share it manually.
+//
+// We deliberately DO NOT use the service-role key in frontend code — doing so
+// exposes admin-level API access to every user's browser.
+// ─────────────────────────────────────────────────────────────────────────────
 
 async function sendTeamInviteEmail(email: string, inviteToken: string): Promise<void> {
-  const serviceRoleKey = String((import.meta as any).env?.VITE_SUPABASE_SERVICE_ROLE_KEY ?? '');
-  if (!serviceRoleKey) return;
-
-  const { createClient: createAdminClient } = await import('@supabase/supabase-js');
-  const adminClient = createAdminClient(supabaseUrl, serviceRoleKey, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
-
   const configuredSiteUrl = String((import.meta as any).env?.VITE_SITE_URL ?? '').trim();
   const origin = typeof window !== 'undefined' && window.location?.origin ? window.location.origin : '';
   const isLocal = origin.includes('localhost') || origin.includes('127.0.0.1');
   const base = (isLocal ? origin : (configuredSiteUrl || origin)) || '';
   const redirectTo = `${base}/accept-invite?token=${inviteToken}`;
 
-  // Ensure the auth account exists before generating the link
-  const { data: listData } = await (adminClient.auth.admin.listUsers() as unknown as Promise<{ data: { users: Array<{ id: string; email?: string }> } }>);
-  const existing = listData?.users?.find((u) => u.email?.toLowerCase() === email.toLowerCase());
-  if (!existing) {
-    await adminClient.auth.admin.createUser({
-      email: email.toLowerCase(),
-      email_confirm: true,
-      user_metadata: { role: 'staff' },
-    });
-  }
-
-  await adminClient.auth.admin.generateLink({
-    type: 'magiclink',
+  // Send magic-link using the anon key (no service role needed).
+  // This uses the project's email provider — works whenever SMTP is configured.
+  await supabase.auth.signInWithOtp({
     email: email.toLowerCase(),
-    options: { redirectTo },
+    options: {
+      shouldCreateUser: true,
+      emailRedirectTo: redirectTo,
+      data: { role: 'owner', invite_token: inviteToken },
+    },
   });
+  // We intentionally don't throw on error here — the invite record already
+  // exists in the DB and the owner can copy-share the link as a fallback.
 }
 
 async function createNotification(args: {
@@ -58,7 +58,7 @@ async function createNotification(args: {
 }
 
 export type DisplayRole = 'viewer' | 'editor' | 'manager';
-export type InviteStatus = 'pending' | 'accepted' | 'expired' | 'revoked';
+export type InviteStatus = 'pending' | 'accepted' | 'expired' | 'revoked' | 'declined';
 
 export interface InviteCapabilities {
   canManageTenants: boolean;
@@ -71,7 +71,7 @@ export interface InviteRecord {
   id: string;
   ownerId: string;
   invitedEmail: string;
-  role: 'owner_manager' | 'staff';
+  role: 'owner' | 'owner_manager' | 'staff';
   displayRole: DisplayRole;
   propertyIds: string[];
   capabilities: InviteCapabilities;
@@ -88,6 +88,9 @@ export interface CreateInviteInput {
   displayRole: DisplayRole;
   propertyIds: string[];
   capabilities?: Partial<InviteCapabilities>;
+  // When a manager creates an invite, the workspace owner must be specified
+  // so the invite is attributed to the owner's workspace, not the manager's ID.
+  workspaceOwnerId?: string;
 }
 
 export interface InviteTokenInfo {
@@ -104,7 +107,7 @@ interface InviteRow {
   id: string;
   owner_id: string;
   invited_email: string;
-  role: 'owner_manager' | 'staff';
+  role: 'owner' | 'owner_manager' | 'staff';
   display_role: DisplayRole;
   property_ids: string[];
   capabilities: {
@@ -234,18 +237,31 @@ export const inviteService = {
    * Create a new invite. Only owners can call this.
    */
   async createInvite(input: CreateInviteInput): Promise<InviteRecord> {
-    const role = displayRoleToProfileRole(input.displayRole);
-    const capabilities = capabilitiesToRow(input.displayRole, input.capabilities);
-
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error('Not authenticated');
+
+    // Managers can only invite editors/viewers — prevent privilege escalation.
+    if (input.workspaceOwnerId && input.displayRole === 'manager') {
+      throw new Error('Managers can only invite editor or viewer roles.');
+    }
+
+    // The owner_id on the invite must be the WORKSPACE OWNER, not the calling user.
+    // When a manager creates an invite, workspaceOwnerId is passed to attribute it
+    // to the workspace owner so it appears on their Team page.
+    const ownerId = input.workspaceOwnerId ?? user.id;
+    // owner_invites.role must satisfy CHECK (role IN ('owner_manager', 'staff')).
+    // On acceptance, the RPC sets profiles.role = 'owner' directly (see migration),
+    // so we only use this column to carry the display hint.
+    const profileRole: 'owner_manager' | 'staff' =
+      input.displayRole === 'manager' ? 'owner_manager' : 'staff';
+    const capabilities = capabilitiesToRow(input.displayRole, input.capabilities);
 
     const { data, error } = await supabase
       .from('owner_invites')
       .insert({
-        owner_id: user.id,
+        owner_id: ownerId,
         invited_email: input.invitedEmail.trim().toLowerCase(),
-        role,
+        role: profileRole,
         display_role: input.displayRole,
         property_ids: input.propertyIds,
         capabilities,
@@ -401,6 +417,16 @@ export const inviteService = {
   },
 
   /**
+   * Decline an invite by token — no authentication required.
+   * This allows unauthenticated recipients to decline.
+   */
+  async declineInvite(token: string): Promise<{ success: boolean; reason?: string }> {
+    const { data, error } = await supabase.rpc('decline_invite_by_token', { p_token: token });
+    if (error) throw error;
+    return data as { success: boolean; reason?: string };
+  },
+
+  /**
    * Accept invite using token (for logged-in users).
    */
   async acceptInviteByToken(userId: string, email: string, token: string): Promise<AcceptInviteResult> {
@@ -439,7 +465,7 @@ export interface TeamMemberRecord {
   email: string;
   name: string;
   phone: string;
-  role: 'owner_manager' | 'staff';
+  role: 'owner' | 'owner_manager' | 'staff';
   displayRole: DisplayRole;
   ownerScopeId: string | null;
   propertyAssignments: Array<{
@@ -458,7 +484,7 @@ interface TeamMemberRow {
   email: string | null;
   full_name: string | null;
   phone: string | null;
-  role: 'owner_manager' | 'staff';
+  role: 'owner' | 'owner_manager' | 'staff';
   owner_scope_id: string | null;
 }
 
@@ -478,29 +504,40 @@ interface ScopeRow {
 export const teamService = {
   /**
    * List all team members under the current owner.
+   *
+   * Queries by property scope (owner_user_property_scopes.owner_id = current user)
+   * rather than by global profiles.role. This correctly surfaces every person who
+   * has been granted access — including PG owners who also manage this owner's
+   * properties — regardless of what their global role is.
    */
   async listMembers(): Promise<TeamMemberRecord[]> {
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    if (!authUser) return [];
+
+    // 1. Find all scope rows granted by this owner
+    const { data: scopes, error: scopeError } = await supabase
+      .from('owner_user_property_scopes')
+      .select('*')
+      .eq('owner_id', authUser.id)
+      .returns<ScopeRow[]>();
+
+    if (scopeError) throw scopeError;
+    if (!scopes?.length) return [];
+
+    const memberIds = [...new Set(scopes.map((s) => s.user_id))];
+
+    // 2. Fetch profiles for all users who have scopes (any global role)
     const { data: profiles, error: profileError } = await supabase
       .from('profiles')
       .select('id, email, full_name, phone, role, owner_scope_id')
-      .in('role', ['owner_manager', 'staff'])
+      .in('id', memberIds)
       .returns<TeamMemberRow[]>();
 
     if (profileError) throw profileError;
     if (!profiles?.length) return [];
 
-    const memberIds = profiles.map((p) => p.id);
-
-    const { data: scopes, error: scopeError } = await supabase
-      .from('owner_user_property_scopes')
-      .select('*')
-      .in('user_id', memberIds)
-      .returns<ScopeRow[]>();
-
-    if (scopeError) throw scopeError;
-
     const scopesByUser = new Map<string, ScopeRow[]>();
-    (scopes ?? []).forEach((s) => {
+    scopes.forEach((s) => {
       const list = scopesByUser.get(s.user_id) ?? [];
       list.push(s);
       scopesByUser.set(s.user_id, list);
@@ -509,7 +546,8 @@ export const teamService = {
     return profiles.map((p) => {
       const memberScopes = scopesByUser.get(p.id) ?? [];
       const firstScope = memberScopes[0];
-      const displayRole: DisplayRole = firstScope?.display_role ?? (p.role === 'owner_manager' ? 'manager' : 'viewer');
+      const displayRole: DisplayRole = firstScope?.display_role
+        ?? (p.role === 'owner_manager' ? 'manager' : 'viewer');
 
       return {
         id: p.id,

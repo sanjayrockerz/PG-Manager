@@ -335,7 +335,7 @@ function AppContent() {
         );
       case 'team':
         return (
-          <PageGuard action="team:manage">
+          <PageGuard action="team:view">
             <TeamMembers />
           </PageGuard>
         );
@@ -383,30 +383,30 @@ function AppContent() {
   return (
     <PropertyProvider>
       <WorkspaceProvider>
-      <div className="flex h-screen bg-[#F8FAFC] overflow-hidden">
-        {/* Sidebar for desktop */}
-        <Sidebar
-          activeTab={activeTab}
-          setActiveTab={setActiveTabWithRoleGuard}
-          sidebarOpen={sidebarOpen}
+      <div className="flex flex-col h-screen bg-[#F8FAFC] overflow-hidden">
+        {/* Full-width workspace header */}
+        <Header
           setSidebarOpen={setSidebarOpen}
           sidebarCollapsed={sidebarCollapsed}
-          setSidebarCollapsed={setSidebarCollapsed}
-          userRole={user.role}
+          onToggleSidebar={() => {
+            const next = !sidebarCollapsed;
+            localStorage.setItem('sidebar_collapsed', String(next));
+            setSidebarCollapsed(next);
+          }}
+          currentPage={activeTab}
+          onNotificationClick={() => setActiveTabWithRoleGuard('notifications')}
         />
 
-        {/* Main content */}
-        <div className="flex-1 flex flex-col overflow-hidden">
-          <Header
+        {/* Sidebar + content row */}
+        <div className="flex flex-1 overflow-hidden">
+          <Sidebar
+            activeTab={activeTab}
+            setActiveTab={setActiveTabWithRoleGuard}
+            sidebarOpen={sidebarOpen}
             setSidebarOpen={setSidebarOpen}
             sidebarCollapsed={sidebarCollapsed}
-            onToggleSidebar={() => {
-              const next = !sidebarCollapsed;
-              localStorage.setItem('sidebar_collapsed', String(next));
-              setSidebarCollapsed(next);
-            }}
-            currentPage={activeTab}
-            onNotificationClick={() => setActiveTabWithRoleGuard('notifications')}
+            setSidebarCollapsed={setSidebarCollapsed}
+            userRole={user.role}
           />
 
           <main className="flex-1 overflow-y-auto pb-20 md:pb-0">
@@ -414,10 +414,10 @@ function AppContent() {
               {renderContent()}
             </PageFrame>
           </main>
-
-          {/* Mobile bottom navigation */}
-          <MobileNav activeTab={activeTab} setActiveTab={setActiveTabWithRoleGuard} userRole={user.role} />
         </div>
+
+        {/* Mobile bottom navigation */}
+        <MobileNav activeTab={activeTab} setActiveTab={setActiveTabWithRoleGuard} userRole={user.role} />
       </div>
       </WorkspaceProvider>
     </PropertyProvider>

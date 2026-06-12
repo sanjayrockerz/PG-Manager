@@ -1379,11 +1379,42 @@ async function assertPropertyDefinitionWriteAccess(): Promise<CurrentUserContext
     return context;
   }
 
-  if (context.role !== 'owner') {
-    throw new Error('Property save is blocked by role policy. In current Supabase RLS, only owner accounts can create/update/delete properties. Log in as owner, or update the properties_owner_manage policy for owner_manager/staff roles.');
+  if (context.role === 'owner') {
+    return context;
   }
 
-  return context;
+  if (context.role === 'owner_manager') {
+    // This manager is creating their own PG — upgrade them to 'owner' so they
+    // get their own data context. Existing manager scopes in
+    // owner_user_property_scopes are preserved and will appear under
+    // "Managing for Others" in their workspace.
+    const { error: upgradeError } = await supabase
+      .from('profiles')
+      .update({ role: 'owner', owner_scope_id: null })
+      .eq('id', context.userId);
+
+    if (upgradeError) {
+      throw new Error('Unable to upgrade your account to create properties. Please try again or contact support.');
+    }
+
+    // Refresh the JWT so subsequent getCurrentUserContext() reads pick up the
+    // new role from the DB immediately (no page reload required).
+    await supabase.auth.refreshSession().catch(() => {});
+
+    // Signal the app shell that the user's role changed
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('user-role-upgraded', { detail: { newRole: 'owner' } }));
+    }
+
+    return {
+      ...context,
+      role: 'owner' as UserRole,
+      ownerId: context.userId,
+      ownerScopeId: null,
+    };
+  }
+
+  throw new Error('Property save is blocked by role policy. Only owner accounts can create/update/delete properties.');
 }
 
 interface CurrentUserContext {

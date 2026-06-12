@@ -675,6 +675,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // Auto-refresh profile when backend upgrades a user's role (e.g. owner_manager → owner)
+  useEffect(() => {
+    const handler = () => { void refreshProfile(); };
+    window.addEventListener('user-role-upgraded', handler);
+    return () => window.removeEventListener('user-role-upgraded', handler);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
     <AuthContext.Provider value={{ user, authError, isSuspended, sendLoginMagicLink, signInWithPassword, signInWithGoogle, sendSignupMagicLink, sendPhoneOtp, verifyPhoneOtp, signInAsDemo, refreshProfile, logout, isLoading }}>
       {children}

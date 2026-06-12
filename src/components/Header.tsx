@@ -54,7 +54,7 @@ export function Header({ setSidebarOpen, sidebarCollapsed, onToggleSidebar, curr
         </div>
       )}
       <header
-        className="flex-shrink-0 flex items-center justify-between sticky top-0 z-30"
+        className="flex-shrink-0 flex items-center justify-between z-30"
         style={{
           height: 52,
           paddingLeft: 12,
@@ -64,9 +64,8 @@ export function Header({ setSidebarOpen, sidebarCollapsed, onToggleSidebar, curr
           gap: 12,
         }}
       >
-      {/* ── Left: global sidebar toggle + workspace ── */}
+      {/* ── Left: sidebar toggle + brand ── */}
       <div className="flex items-center gap-2 flex-shrink-0">
-        {/* Global sidebar toggle — desktop toggles collapse, mobile opens drawer */}
         <button
           onClick={handleSidebarToggle}
           aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
@@ -76,19 +75,15 @@ export function Header({ setSidebarOpen, sidebarCollapsed, onToggleSidebar, curr
           <PanelLeft style={{ width: 16, height: 16 }} />
         </button>
 
-        {showPropertySelector ? (
-          <WorkspaceSelector />
-        ) : (
-          <div className="flex items-center gap-2" style={{ color: '#0A0A0B', fontSize: 14, fontWeight: 600 }}>
-            <div
-              className="flex items-center justify-center rounded-lg"
-              style={{ width: 24, height: 24, background: 'linear-gradient(135deg, #6366F1, #4F46E5)' }}
-            >
-              <Building2 style={{ width: 12, height: 12, color: '#fff' }} />
-            </div>
-            RentCare
+        <div className="flex items-center gap-2" style={{ color: '#0A0A0B', fontSize: 14, fontWeight: 600 }}>
+          <div
+            className="flex items-center justify-center rounded-lg"
+            style={{ width: 24, height: 24, background: 'linear-gradient(135deg, #6366F1, #4F46E5)' }}
+          >
+            <Building2 style={{ width: 12, height: 12, color: '#fff' }} />
           </div>
-        )}
+          <span className="hidden sm:block">RentCare</span>
+        </div>
       </div>
 
       {/* ── Center: Search ──────────────────── */}
@@ -124,11 +119,14 @@ export function Header({ setSidebarOpen, sidebarCollapsed, onToggleSidebar, curr
         </div>
       </div>
 
-      {/* ── Right: Actions + User ───────────── */}
-      <div className="flex items-center gap-1 flex-shrink-0">
+      {/* ── Right: property selector + actions + user ── */}
+      <div className="flex items-center gap-1.5 flex-shrink-0">
+        {/* Property / workspace switcher */}
+        {showPropertySelector && <WorkspaceSelector />}
+
         {/* Demo mode badge */}
         {isDemoMode && (
-          <div className="mr-1 px-2.5 py-1 rounded-full bg-amber-50 border border-amber-200 text-amber-700 text-[11px] font-semibold flex items-center gap-1">
+          <div className="ml-0.5 px-2.5 py-1 rounded-full bg-amber-50 border border-amber-200 text-amber-700 text-[11px] font-semibold flex items-center gap-1">
             <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
             Demo
           </div>
@@ -146,7 +144,7 @@ export function Header({ setSidebarOpen, sidebarCollapsed, onToggleSidebar, curr
         </button>
 
         {/* Divider */}
-        <div style={{ width: 1, height: 20, background: '#E4E4E7', margin: '0 4px' }} />
+        <div style={{ width: 1, height: 20, background: '#E4E4E7', margin: '0 2px' }} />
 
         {/* User menu */}
         <div className="relative">

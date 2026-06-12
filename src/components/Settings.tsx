@@ -28,6 +28,8 @@ import {
 } from '../services/supabaseData';
 import { logSettingsChange } from '../utils/settingsAudit';
 import { SMS_PROVIDER_OPTIONS, type SMSProviderName } from '../services/smsProvider';
+import { useWorkspace } from '../contexts/WorkspaceContext';
+import { hasWorkspacePermission } from '../utils/permissions';
 import { PAYMENT_GATEWAY_OPTIONS, type PaymentGatewayName } from '../services/paymentGateway';
 import type { SMSProviderAdapter } from '../services/smsProvider';
 import { SMS_PROVIDER_ADAPTERS } from '../services/smsProvider';
@@ -343,8 +345,13 @@ function IntegrationsTab({
 }
 
 // ─── Main component ────────────────────────────────────────────────────────────
+
 export function Settings() {
   const { user, refreshProfile, logout } = useAuth();
+  const { navWorkspaceRole } = useWorkspace();
+
+  const isBillingVisible = hasWorkspacePermission(navWorkspaceRole, 'settings:billing');
+
   const [activeTab, setActiveTab] = useState('profile');
 
   // ── Profile ─────────────────────────────────────────────────────────────────
@@ -817,16 +824,27 @@ export function Settings() {
         <p className="text-sm text-gray-500 mt-1">Manage your account, payment details, and messaging preferences.</p>
       </div>
 
+      {/* Role badge for non-owners */}
+      {navWorkspaceRole !== 'workspace_owner' && navWorkspaceRole !== 'editor' && navWorkspaceRole !== 'viewer' && (
+        <div className="mb-4 flex items-center gap-2 px-3 py-2 rounded-lg bg-indigo-50 border border-indigo-200">
+          <Shield className="w-4 h-4 text-indigo-600 flex-shrink-0" />
+          <p className="text-sm text-indigo-700">
+            <strong>Manager view</strong> — You can update your profile and legal signature.
+            Billing and payment settings are managed by the workspace owner.
+          </p>
+        </div>
+      )}
+
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="mb-6 bg-white border border-gray-200 h-auto gap-1 p-1 overflow-x-auto flex-nowrap">
           {[
-            { value: 'profile', icon: User, label: 'Profile' },
-            { value: 'payment', icon: CreditCard, label: 'Payment' },
-            { value: 'whatsapp', icon: MessageCircle, label: 'WhatsApp' },
-            { value: 'subscription', icon: Crown, label: 'Plan' },
-            { value: 'legal', icon: FileSignature, label: 'Legal' },
-            { value: 'integrations', icon: Globe, label: 'Integrations' },
-          ].map(({ value, icon: Icon, label }) => (
+            { value: 'profile',      icon: User,          label: 'Profile',     group: 'workspace' },
+            { value: 'payment',      icon: CreditCard,    label: 'Payment',     group: 'billing' },
+            { value: 'whatsapp',     icon: MessageCircle, label: 'WhatsApp',    group: 'billing' },
+            { value: 'subscription', icon: Crown,         label: 'Plan',        group: 'billing' },
+            { value: 'legal',        icon: FileSignature, label: 'Legal',       group: 'workspace' },
+            { value: 'integrations', icon: Globe,         label: 'Integrations',group: 'billing' },
+          ].filter(({ group }) => group === 'workspace' || isBillingVisible).map(({ value, icon: Icon, label }) => (
             <TabsTrigger key={value} value={value} className="data-[state=active]:bg-indigo-600 data-[state=active]:text-white whitespace-nowrap">
               <Icon className="w-4 h-4 mr-1.5" /> {label}
             </TabsTrigger>

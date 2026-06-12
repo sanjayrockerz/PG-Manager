@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   Building2,
   ChevronDown,
@@ -308,17 +308,17 @@ function AllPropertiesCard({
 
       <div style={{ flex: 1 }}>
         <p style={{ fontSize: 13, fontWeight: 600, color: '#0A0A0B', marginBottom: 3 }}>
-          All Accessible Properties
+          All Properties
         </p>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{ fontSize: 12, color: '#52525B', fontWeight: 500 }}>
             {totals.total} {totals.total === 1 ? 'Property' : 'Properties'}
           </span>
           {totals.owned > 0 && (
-            <span style={{ fontSize: 11, color: '#4F46E5' }}>Owner: {totals.owned}</span>
+            <span style={{ fontSize: 11, color: '#4F46E5' }}>Mine: {totals.owned}</span>
           )}
           {totals.managed > 0 && (
-            <span style={{ fontSize: 11, color: '#15803D' }}>Manager: {totals.managed}</span>
+            <span style={{ fontSize: 11, color: '#15803D' }}>Managing: {totals.managed}</span>
           )}
           {totals.staff > 0 && (
             <span style={{ fontSize: 11, color: '#C2410C' }}>Staff: {totals.staff}</span>
@@ -375,7 +375,10 @@ export function WorkspaceSelector({ hidden }: WorkspaceSelectorProps) {
   const openPanel = () => {
     if (triggerRef.current) {
       const r = triggerRef.current.getBoundingClientRect();
-      setPos({ top: r.bottom + 6, left: r.left });
+      const panelW = 340;
+      const margin = 12;
+      const left = Math.min(r.left, window.innerWidth - panelW - margin);
+      setPos({ top: r.bottom + 6, left: Math.max(margin, left) });
     }
     setOpen(true);
   };
@@ -491,9 +494,9 @@ export function WorkspaceSelector({ hidden }: WorkspaceSelectorProps) {
                 onSelect={handleSelect}
               />
 
-              {/* Managed Properties */}
+              {/* Properties managed on behalf of another PG owner */}
               <PropertyGroup
-                title="Managed Properties"
+                title="Managing for Others"
                 properties={managedProperties}
                 selectedId={selectedId}
                 onSelect={handleSelect}
