@@ -157,7 +157,7 @@ export function openReceiptWindow(data: ReceiptData): void {
   }
   const html = generateReceiptHTML(data);
   const win = window.open('', '_blank', 'width=700,height=900,scrollbars=yes');
-  if (!win) return;
+  if (!win) throw new Error('Popup blocked. Please allow popups for this site to print the receipt.');
   win.document.write(html);
   win.document.close();
 }
@@ -284,7 +284,7 @@ export function openInvoiceWindow(data: ReceiptData): void {
   }
   const html = generateInvoiceHTML(data);
   const win = window.open('', '_blank', 'width=700,height=900,scrollbars=yes');
-  if (!win) return;
+  if (!win) throw new Error('Popup blocked. Please allow popups for this site to print the invoice.');
   win.document.write(html);
   win.document.close();
 }

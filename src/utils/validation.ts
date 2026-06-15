@@ -247,8 +247,16 @@ export function validateTenantForm(data: Partial<TenantFormData>): TenantFormErr
   }
 
   if (data.securityDeposit !== undefined) {
-    const err = validateNonNegativeNumber(data.securityDeposit, 'Security deposit');
-    if (err) errors.securityDeposit = err;
+    // Security deposit is a required field — a complete tenant record must carry a
+    // deposit on file. Reject empty/zero/negative values with an inline error.
+    const raw = data.securityDeposit;
+    const n = typeof raw === 'string' ? parseInt(raw, 10) : raw;
+    if (raw === '' || raw === undefined || raw === null || Number.isNaN(n)) {
+      errors.securityDeposit = 'Security deposit is required.';
+    } else {
+      const err = validatePositiveInt(n, 'Security deposit', 1, 99999999);
+      if (err) errors.securityDeposit = err;
+    }
   }
 
   if (data.rentDueDate !== undefined) {

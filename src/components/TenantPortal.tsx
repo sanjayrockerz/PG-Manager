@@ -3,7 +3,7 @@ import {
   AlertCircle, ArrowLeft, ArrowRight, Bell, Building2, Calendar,
   Check, CheckCircle2, ChevronRight, ClipboardCheck, CreditCard, Copy,
   Download, FileText, Home, IndianRupee, LayoutDashboard, LogOut,
-  MapPin, MessageSquare, PanelLeft, PanelLeftClose, PanelLeftOpen, Phone, Plus, QrCode,
+  MapPin, MessageSquare, PanelLeft, Phone, Plus, QrCode,
   Send, Upload, User, Wrench, X, HelpCircle, Menu, Shield,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -2539,25 +2539,9 @@ export function TenantPortal() {
                 <Building2 className="w-3.5 h-3.5 text-white" />
               </div>
             )}
-            <button
-              onClick={toggleSidebar}
-              title="Toggle sidebar (Ctrl+B)"
-              className={`p-1.5 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-gray-700 transition-colors flex-shrink-0 ${sidebarCollapsed ? 'hidden' : ''}`}
-            >
-              <PanelLeftClose className="w-4 h-4" />
-            </button>
+            {/* Collapse toggle lives in the top bar (matching Owner/Admin portals) —
+                no duplicate in-sidebar or floating toggle here. */}
           </div>
-
-          {/* Expand button when collapsed */}
-          {sidebarCollapsed && (
-            <button
-              onClick={toggleSidebar}
-              title="Expand sidebar (Ctrl+B)"
-              className="mx-auto mt-2 p-1.5 hover:bg-gray-100 rounded-lg text-gray-400 hover:text-gray-700 transition-colors"
-            >
-              <PanelLeftOpen className="w-4 h-4" />
-            </button>
-          )}
 
           {/* Tenant identity */}
           {!sidebarCollapsed ? (

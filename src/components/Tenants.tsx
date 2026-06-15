@@ -605,14 +605,16 @@ export function Tenants({ onViewTenant }: TenantsProps) {
                 <FieldError msg={addErrors.monthlyRent} />
               </div>
               <div className="flex flex-col gap-1">
-                <Label className="text-xs font-semibold">Security Deposit (₹)</Label>
+                <Label className="text-xs font-semibold">Security Deposit (₹) <span className="text-red-500">*</span></Label>
                 <Input
                   type="number"
+                  min="1"
                   className={fieldClass(addErrors.securityDeposit)}
                   placeholder="16000"
                   value={addForm.securityDeposit || ''}
-                  onChange={(e) => setAddForm({ ...addForm, securityDeposit: parseInt(e.target.value) || 0 })}
+                  onChange={(e) => { setAddForm({ ...addForm, securityDeposit: parseInt(e.target.value) || 0 }); setAddErrors((prev) => ({ ...prev, securityDeposit: undefined })); }}
                 />
+                <FieldError msg={addErrors.securityDeposit} />
               </div>
             </div>
 
@@ -778,7 +780,7 @@ export function Tenants({ onViewTenant }: TenantsProps) {
     const stepFields: Record<number, (keyof typeof addForm)[]> = {
       1: ['name', 'phone', 'email'],
       2: ['parentName', 'parentPhone'],
-      3: ['propertyId', 'room', 'monthlyRent'],
+      3: ['propertyId', 'room', 'monthlyRent', 'securityDeposit'],
       4: ['idType', 'idNumber'],
     };
     const fields = stepFields[addStep] ?? [];

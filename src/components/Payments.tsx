@@ -7,45 +7,53 @@ import { toast } from 'sonner';
 import {
   CheckCircle2, Clock, AlertCircle, Plus, MessageCircle,
   Download, IndianRupee, Calendar, Save, Receipt,
-  Loader2, TrendingUp, ChevronDown, Filter, ChevronLeft, ChevronRight,
+  Loader2, TrendingUp, ChevronDown, Filter, ChevronLeft, ChevronRight, Lock,
 } from 'lucide-react';
 import { useProperty } from '../contexts/PropertyContext';
 import { supabase } from '../lib/supabase';
-import { isDemoModeEnabled, getPayments, updatePaymentStatusRecord, addPaymentChargeRecord, getTenantById, patchPaymentCache, invalidatePaymentCache } from '../services/dataService';
+import { isDemoModeEnabled, getPayments, getTenants, updatePaymentStatusRecord, addPaymentChargeRecord, getTenantById, patchPaymentCache, invalidatePaymentCache } from '../services/dataService';
 import { supabaseOwnerDataApi } from '../services/supabaseData';
-import type { PaymentRecord, PaymentStatus } from '../services/supabaseData';
+import type { PaymentRecord, PaymentStatus, TenantRecord } from '../services/supabaseData';
 import { PaymentDocumentDialog } from './ui/PaymentDocumentDialog';
 
-// ── Period helpers ──────────────────────────────────────────────────────────
-type PeriodMode = 'all' | 'last-month' | 'this-month' | 'next-month';
+// A payment row that may be a synthetic projection (an upcoming invoice that has
+// not been generated yet) rather than a persisted payment record.
+type PaymentRow = PaymentRecord & { projected?: boolean };
+const isProjected = (p: PaymentRow): boolean => p.projected === true;
 
-function getPeriodRange(mode: PeriodMode): { start: Date; end: Date } | null {
-  if (mode === 'all') return null;
+// Tenant statuses that should carry an upcoming-month rent projection.
+const PROJECTION_STATUSES = ['active', 'payment_overdue', 'notice_submitted', 'vacating'];
+
+// ── Period helpers ──────────────────────────────────────────────────────────
+// Mirrors the Dashboard calendar filter: This Month (default) / Next Month / This
+// Year. There is no "All" option — collection tracking is always period-scoped.
+type PeriodMode = 'this-month' | 'next-month' | 'this-year';
+
+const PERIOD_OPTIONS: { key: PeriodMode; label: string }[] = [
+  { key: 'this-month', label: 'This Month' },
+  { key: 'next-month', label: 'Next Month' },
+  { key: 'this-year',  label: 'This Year' },
+];
+
+function getPeriodRange(mode: PeriodMode): { start: Date; end: Date } {
   const now = new Date();
-  if (mode === 'last-month') {
-    return {
-      start: new Date(now.getFullYear(), now.getMonth() - 1, 1),
-      end:   new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59),
-    };
-  }
+  const y = now.getFullYear();
+  const m = now.getMonth();
   if (mode === 'this-month') {
-    return {
-      start: new Date(now.getFullYear(), now.getMonth(), 1),
-      end:   new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59),
-    };
+    return { start: new Date(y, m, 1), end: new Date(y, m + 1, 0, 23, 59, 59) };
   }
-  // next-month
-  return {
-    start: new Date(now.getFullYear(), now.getMonth() + 1, 1),
-    end:   new Date(now.getFullYear(), now.getMonth() + 2, 0, 23, 59, 59),
-  };
+  if (mode === 'next-month') {
+    return { start: new Date(y, m + 1, 1), end: new Date(y, m + 2, 0, 23, 59, 59) };
+  }
+  // this-year
+  return { start: new Date(y, 0, 1), end: new Date(y, 11, 31, 23, 59, 59) };
 }
 
 function periodLabel(mode: PeriodMode): string {
-  if (mode === 'all') return 'All Time';
   const now = new Date();
-  const offsets: Record<PeriodMode, number> = { 'all': 0, 'last-month': -1, 'this-month': 0, 'next-month': 1 };
-  const target = new Date(now.getFullYear(), now.getMonth() + offsets[mode], 1);
+  if (mode === 'this-year') return String(now.getFullYear());
+  const offset = mode === 'next-month' ? 1 : 0;
+  const target = new Date(now.getFullYear(), now.getMonth() + offset, 1);
   return target.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
 }
 
@@ -87,6 +95,7 @@ interface PaymentsProps {
 export function Payments({ onNavigate }: PaymentsProps) {
   const { properties, selectedProperty } = useProperty();
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
+  const [tenants, setTenants] = useState<TenantRecord[]>([]);
   const [loading, setLoading] = useState(true);
   // Receipt/invoice "Issued by" authority — always the registered property
   // owner, fetched from the database (not the logged-in user).
@@ -99,8 +108,8 @@ export function Payments({ onNavigate }: PaymentsProps) {
       .catch(() => setAuthorityName(undefined));
   }, []);
   const [filterStatus, setFilterStatus] = useState<'all' | PaymentStatus>('all');
-  // period state kept for backward compat with local aging bucket picker; removed global period conflict
-  const [period, setPeriod] = useState<PeriodMode>('all');
+  // Period scope — defaults to the current month, mirroring the Dashboard filter.
+  const [period, setPeriod] = useState<PeriodMode>('this-month');
 
   // Mark paid modal
   const [markPaidOpen, setMarkPaidOpen] = useState(false);
@@ -130,8 +139,14 @@ export function Payments({ onNavigate }: PaymentsProps) {
   const reload = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await getPayments(selectedProperty);
-      setPayments(data);
+      // Tenants are loaded alongside payments so we can project upcoming-month
+      // invoices for active tenants that have not been generated yet.
+      const [paymentData, tenantData] = await Promise.all([
+        getPayments(selectedProperty),
+        getTenants(selectedProperty).catch(() => [] as TenantRecord[]),
+      ]);
+      setPayments(paymentData);
+      setTenants(tenantData);
     } catch {
       toast.error('Failed to load payments');
     } finally {
@@ -178,13 +193,48 @@ export function Payments({ onNavigate }: PaymentsProps) {
 
   // Period-filtered payment set — driven by local period picker
   const localPeriodRange = useMemo(() => getPeriodRange(period), [period]);
-  const periodPayments = useMemo(() => {
-    if (!localPeriodRange) return payments; // 'all' shows everything
-    return payments.filter((p) => {
-      const d = new Date(p.dueDate);
-      return d >= localPeriodRange.start && d <= localPeriodRange.end;
-    });
-  }, [payments, localPeriodRange]);
+
+  // Real payments whose due date falls within the selected period.
+  const realPeriodPayments = useMemo(() => payments.filter((p) => {
+    const d = new Date(p.dueDate);
+    return d >= localPeriodRange.start && d <= localPeriodRange.end;
+  }), [payments, localPeriodRange]);
+
+  // Projected upcoming invoices — for an upcoming-month view, synthesize a pending
+  // row for every active tenant who does not yet have a real invoice in range, so
+  // the period never renders empty just because invoices were not generated yet.
+  const projectedPayments = useMemo<PaymentRow[]>(() => {
+    if (period !== 'next-month') return [];
+    const covered = new Set(realPeriodPayments.map((p) => p.tenantId));
+    return tenants
+      .filter((t) => PROJECTION_STATUSES.includes(t.status))
+      .filter((t) => selectedProperty === 'all' || t.propertyId === selectedProperty)
+      .filter((t) => !covered.has(t.id))
+      .map((t) => {
+        const dueDay = Math.min(Math.max(t.rentDueDate || 1, 1), 28);
+        const due = new Date(localPeriodRange.start.getFullYear(), localPeriodRange.start.getMonth(), dueDay);
+        return {
+          id: `projected-${t.id}`,
+          tenantId: t.id,
+          tenant: t.name,
+          propertyId: t.propertyId,
+          room: t.room,
+          monthlyRent: t.rent,
+          extraCharges: 0,
+          totalAmount: t.rent,
+          dueDate: due.toISOString(),
+          paidDate: '',
+          status: 'pending' as PaymentStatus,
+          createdAt: '',
+          projected: true,
+        } satisfies PaymentRow;
+      });
+  }, [period, tenants, realPeriodPayments, localPeriodRange, selectedProperty]);
+
+  const periodPayments = useMemo<PaymentRow[]>(
+    () => [...realPeriodPayments, ...projectedPayments],
+    [realPeriodPayments, projectedPayments],
+  );
 
   const unstampedOverdue = periodPayments.filter(
     (p) => p.status === 'pending' && new Date(p.dueDate) < today,
@@ -223,6 +273,9 @@ export function Payments({ onNavigate }: PaymentsProps) {
     (p) => filterStatus === 'all' || p.status === filterStatus,
   );
 
+  // Projected rows have no persisted invoice, so they cannot be bulk-selected.
+  const selectablePayments = filteredPayments.filter((p) => !isProjected(p));
+
   const filterCounts = {
     all: periodPayments.length,
     paid: periodPayments.filter((p) => p.status === 'paid').length,
@@ -231,6 +284,13 @@ export function Payments({ onNavigate }: PaymentsProps) {
   };
 
   const handleStatusChange = async (paymentId: string, newStatus: PaymentStatus) => {
+    const current = payments.find((p) => p.id === paymentId);
+    // Status protection: a completed payment is locked. Once paid (receipt issued,
+    // reference captured) the owner cannot revert it to pending/overdue.
+    if (current?.status === 'paid' && newStatus !== 'paid') {
+      toast.error('This payment is completed and locked. Paid invoices cannot be reverted.');
+      return;
+    }
     if (newStatus === 'paid') {
       const payment = payments.find((p) => p.id === paymentId);
       if (payment) {
@@ -363,6 +423,50 @@ export function Payments({ onNavigate }: PaymentsProps) {
     }
   };
 
+  // Status cell — projected rows are read-only, paid rows are locked, everything
+  // else is an editable dropdown (no revert-from-paid option is ever offered).
+  const StatusControl = ({ payment }: { payment: PaymentRow }) => {
+    if (isProjected(payment)) {
+      return (
+        <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 99, background: '#F4F4F6', color: '#71717A', border: '1px dashed #D4D4D8' }}>
+          Projected
+        </span>
+      );
+    }
+    if (payment.status === 'paid') {
+      const s = STATUS_STYLE.paid;
+      return (
+        <span
+          title="Paid invoices are locked and cannot be reverted"
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 99, background: s.bg, color: s.color, border: `1px solid ${s.border}` }}
+        >
+          <Lock style={{ width: 9, height: 9 }} /> Paid
+        </span>
+      );
+    }
+    return (
+      <div className="relative inline-flex items-center">
+        <select
+          value={payment.status}
+          onChange={(e) => void handleStatusChange(payment.id, e.target.value as PaymentStatus)}
+          style={{
+            appearance: 'none',
+            paddingLeft: 8, paddingRight: 22, paddingTop: 3, paddingBottom: 3,
+            borderRadius: 99, fontSize: 11, fontWeight: 600, cursor: 'pointer',
+            background: STATUS_STYLE[payment.status].bg,
+            color: STATUS_STYLE[payment.status].color,
+            border: `1px solid ${STATUS_STYLE[payment.status].border}`,
+          }}
+        >
+          <option value="pending">Pending</option>
+          <option value="overdue">Overdue</option>
+          <option value="paid">Paid</option>
+        </select>
+        <ChevronDown style={{ width: 10, height: 10, position: 'absolute', right: 6, pointerEvents: 'none', color: STATUS_STYLE[payment.status].color }} />
+      </div>
+    );
+  };
+
   if (loading) {
     return (
       <div className="space-y-4 animate-pulse">
@@ -390,17 +494,12 @@ export function Payments({ onNavigate }: PaymentsProps) {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Period selector — operational order: All → Last → This → Next */}
+          {/* Period selector — This Month (default) → Next Month → This Year */}
           <div
             className="flex items-center rounded-lg overflow-hidden"
             style={{ border: '1px solid #E4E4E7', background: '#fff' }}
           >
-            {([
-              { key: 'all',        label: 'All' },
-              { key: 'last-month', label: 'Last Month' },
-              { key: 'this-month', label: 'This Month' },
-              { key: 'next-month', label: 'Next Month' },
-            ] as const).map(({ key, label }, i, arr) => (
+            {PERIOD_OPTIONS.map(({ key, label }, i) => (
               <button
                 key={key}
                 onClick={() => setPeriod(key)}
@@ -449,7 +548,10 @@ export function Payments({ onNavigate }: PaymentsProps) {
         <div style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 5 }}>
           <Calendar style={{ width: 12, height: 12, color: '#A1A1AA' }} />
           <span style={{ fontSize: 11, color: '#71717A', fontWeight: 500, whiteSpace: 'nowrap' }}>{periodLabel(period)}</span>
-          {period !== 'all' && <span style={{ fontSize: 10, color: '#A1A1AA' }}>· {periodPayments.length}</span>}
+          <span style={{ fontSize: 10, color: '#A1A1AA' }}>· {periodPayments.length}</span>
+          {projectedPayments.length > 0 && (
+            <span style={{ fontSize: 10, color: '#A1A1AA' }}>({projectedPayments.length} projected)</span>
+          )}
         </div>
       </div>
 
@@ -547,9 +649,9 @@ export function Payments({ onNavigate }: PaymentsProps) {
                 <th style={{ width: 36, padding: '8px 6px 8px 12px' }}>
                   <input
                     type="checkbox"
-                    checked={selectedPaymentIds.size === filteredPayments.length && filteredPayments.length > 0}
+                    checked={selectablePayments.length > 0 && selectedPaymentIds.size === selectablePayments.length}
                     onChange={(e) => {
-                      if (e.target.checked) setSelectedPaymentIds(new Set(filteredPayments.map((p) => p.id)));
+                      if (e.target.checked) setSelectedPaymentIds(new Set(selectablePayments.map((p) => p.id)));
                       else setSelectedPaymentIds(new Set());
                     }}
                     style={{ cursor: 'pointer', accentColor: '#6366F1' }}
@@ -581,6 +683,7 @@ export function Payments({ onNavigate }: PaymentsProps) {
                   <td style={{ padding: '7px 6px 7px 12px' }}>
                     <input
                       type="checkbox"
+                      disabled={isProjected(payment)}
                       checked={selectedPaymentIds.has(payment.id)}
                       onChange={(e) => {
                         const next = new Set(selectedPaymentIds);
@@ -588,7 +691,7 @@ export function Payments({ onNavigate }: PaymentsProps) {
                         else next.delete(payment.id);
                         setSelectedPaymentIds(next);
                       }}
-                      style={{ cursor: 'pointer', accentColor: '#6366F1' }}
+                      style={{ cursor: isProjected(payment) ? 'not-allowed' : 'pointer', accentColor: '#6366F1', opacity: isProjected(payment) ? 0.3 : 1 }}
                     />
                   </td>
                   <td style={{ padding: '7px 12px' }}>
@@ -623,32 +726,19 @@ export function Payments({ onNavigate }: PaymentsProps) {
                     {new Date(payment.dueDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
                   </td>
                   <td style={{ padding: '7px 12px' }}>
-                    <div className="relative inline-flex items-center">
-                      <select
-                        value={payment.status}
-                        onChange={(e) => void handleStatusChange(payment.id, e.target.value as PaymentStatus)}
-                        style={{
-                          appearance: 'none',
-                          paddingLeft: 8, paddingRight: 22, paddingTop: 3, paddingBottom: 3,
-                          borderRadius: 99, fontSize: 11, fontWeight: 600, cursor: 'pointer',
-                          background: STATUS_STYLE[payment.status].bg,
-                          color: STATUS_STYLE[payment.status].color,
-                          border: `1px solid ${STATUS_STYLE[payment.status].border}`,
-                        }}
-                      >
-                        <option value="paid">Paid</option>
-                        <option value="pending">Pending</option>
-                        <option value="overdue">Overdue</option>
-                      </select>
-                      <ChevronDown style={{ width: 10, height: 10, position: 'absolute', right: 6, pointerEvents: 'none', color: STATUS_STYLE[payment.status].color }} />
-                    </div>
+                    <StatusControl payment={payment} />
                   </td>
                   <td style={{ padding: '7px 12px' }}>
                     <div className="flex items-center gap-1">
+                      {(() => { const locked = payment.status === 'paid' || isProjected(payment); return (
                       <button
-                        title={payment.status === 'paid' ? 'Invoice closed — add charges to the current pending invoice' : 'Add extra charge'}
-                        disabled={payment.status === 'paid'}
+                        title={isProjected(payment) ? 'Invoice not generated yet — projected invoice' : payment.status === 'paid' ? 'Invoice closed — add charges to the current pending invoice' : 'Add extra charge'}
+                        disabled={locked}
                         onClick={() => {
+                          if (isProjected(payment)) {
+                            toast.info('This is a projected invoice for an upcoming month. It can be charged once generated.');
+                            return;
+                          }
                           if (payment.status === 'paid') {
                             toast.info('This invoice is paid and locked. To add charges, find the pending invoice for this tenant.');
                             return;
@@ -657,10 +747,11 @@ export function Payments({ onNavigate }: PaymentsProps) {
                           setAddChargeOpen(true);
                         }}
                         className="ds-btn ds-btn-secondary"
-                        style={{ fontSize: 11, padding: '4px 6px', minWidth: 0, opacity: payment.status === 'paid' ? 0.35 : 1, cursor: payment.status === 'paid' ? 'not-allowed' : 'pointer' }}
+                        style={{ fontSize: 11, padding: '4px 6px', minWidth: 0, opacity: locked ? 0.35 : 1, cursor: locked ? 'not-allowed' : 'pointer' }}
                       >
                         <Plus style={{ width: 12, height: 12 }} />
                       </button>
+                      ); })()}
                       <button
                         title="WhatsApp reminder"
                         onClick={() => void handleWhatsAppReminder(payment)}
@@ -670,10 +761,11 @@ export function Payments({ onNavigate }: PaymentsProps) {
                         <MessageCircle style={{ width: 12, height: 12, color: '#25D366' }} />
                       </button>
                       <button
-                        title={payment.status === 'paid' ? 'View receipt' : 'View invoice'}
-                        onClick={() => handleOpenReceipt(payment)}
+                        title={isProjected(payment) ? 'Invoice not generated yet' : payment.status === 'paid' ? 'View receipt' : 'View invoice'}
+                        disabled={isProjected(payment)}
+                        onClick={() => { if (!isProjected(payment)) handleOpenReceipt(payment); }}
                         className="ds-btn ds-btn-secondary"
-                        style={{ fontSize: 11, padding: '4px 6px', minWidth: 0 }}
+                        style={{ fontSize: 11, padding: '4px 6px', minWidth: 0, opacity: isProjected(payment) ? 0.35 : 1, cursor: isProjected(payment) ? 'not-allowed' : 'pointer' }}
                       >
                         <Receipt style={{ width: 12, height: 12, color: payment.status === 'paid' ? '#16a34a' : '#6366F1' }} />
                       </button>
@@ -718,25 +810,7 @@ export function Payments({ onNavigate }: PaymentsProps) {
                   </div>
                 </div>
                 <div className="flex-shrink-0">
-                  <div className="relative inline-flex items-center">
-                    <select
-                      value={payment.status}
-                      onChange={(e) => void handleStatusChange(payment.id, e.target.value as PaymentStatus)}
-                      style={{
-                        appearance: 'none',
-                        paddingLeft: 8, paddingRight: 22, paddingTop: 3, paddingBottom: 3,
-                        borderRadius: 99, fontSize: 11, fontWeight: 600, cursor: 'pointer',
-                        background: STATUS_STYLE[payment.status].bg,
-                        color: STATUS_STYLE[payment.status].color,
-                        border: `1px solid ${STATUS_STYLE[payment.status].border}`,
-                      }}
-                    >
-                      <option value="paid">Paid</option>
-                      <option value="pending">Pending</option>
-                      <option value="overdue">Overdue</option>
-                    </select>
-                    <ChevronDown style={{ width: 10, height: 10, position: 'absolute', right: 6, pointerEvents: 'none', color: STATUS_STYLE[payment.status].color }} />
-                  </div>
+                  <StatusControl payment={payment} />
                 </div>
               </div>
 
@@ -756,13 +830,20 @@ export function Payments({ onNavigate }: PaymentsProps) {
               </div>
 
               <div className="flex items-center gap-2">
+                {(() => { const locked = payment.status === 'paid' || isProjected(payment); return (
                 <button
-                  onClick={() => { setSelectedPayment(payment); setAddChargeOpen(true); }}
+                  disabled={locked}
+                  onClick={() => {
+                    if (isProjected(payment)) { toast.info('This is a projected invoice for an upcoming month. It can be charged once generated.'); return; }
+                    if (payment.status === 'paid') { toast.info('This invoice is paid and locked.'); return; }
+                    setSelectedPayment(payment); setAddChargeOpen(true);
+                  }}
                   className="ds-btn ds-btn-secondary"
-                  style={{ flex: 1, fontSize: 12, padding: '6px 0', justifyContent: 'center', gap: 4 }}
+                  style={{ flex: 1, fontSize: 12, padding: '6px 0', justifyContent: 'center', gap: 4, opacity: locked ? 0.4 : 1, cursor: locked ? 'not-allowed' : 'pointer' }}
                 >
                   <Plus style={{ width: 12, height: 12 }} /> Charge
                 </button>
+                ); })()}
                 <button
                   onClick={() => void handleWhatsAppReminder(payment)}
                   className="ds-btn ds-btn-secondary"
@@ -771,12 +852,13 @@ export function Payments({ onNavigate }: PaymentsProps) {
                   <MessageCircle style={{ width: 12, height: 12, color: '#25D366' }} /> Remind
                 </button>
                 <button
-                  onClick={() => handleOpenReceipt(payment)}
+                  disabled={isProjected(payment)}
+                  onClick={() => { if (!isProjected(payment)) handleOpenReceipt(payment); }}
                   className="ds-btn ds-btn-secondary"
-                  style={{ flex: 1, fontSize: 12, padding: '6px 0', justifyContent: 'center', gap: 4 }}
+                  style={{ flex: 1, fontSize: 12, padding: '6px 0', justifyContent: 'center', gap: 4, opacity: isProjected(payment) ? 0.4 : 1, cursor: isProjected(payment) ? 'not-allowed' : 'pointer' }}
                 >
                   <Receipt style={{ width: 12, height: 12, color: payment.status === 'paid' ? '#16a34a' : '#6366F1' }} />
-                  {payment.status === 'paid' ? 'Receipt' : 'Invoice'}
+                  {isProjected(payment) ? 'Projected' : payment.status === 'paid' ? 'Receipt' : 'Invoice'}
                 </button>
               </div>
             </div>

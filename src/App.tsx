@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { PropertyProvider } from './contexts/PropertyContext';
 import { WorkspaceProvider } from './contexts/WorkspaceContext';
@@ -84,6 +84,51 @@ function AppContent() {
   );
   const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
 
+  // ── Navigation history ──────────────────────────────────────────────────────
+  // State-based routing (activeTab + selectedTenantId) has no browser history, so
+  // deep pages used to "back" via hardcoded redirects — e.g. a tenant opened from
+  // Building View would return to the Tenants list, not to Building View. We keep
+  // an explicit stack of where the user came from (with the scroll position of the
+  // page they left) so goBack() restores the true previous location and scroll.
+  type NavSnapshot = { tab: string; tenantId: string | null; scrollTop: number };
+  const mainRef = useRef<HTMLElement>(null);
+  const historyRef = useRef<NavSnapshot[]>([]);
+  const pendingScrollRef = useRef<number | null>(null);
+
+  // Capture the current location (and its live scroll position) before navigating
+  // away. Called by every forward navigation entry point so back is always exact.
+  const recordHistory = useCallback(() => {
+    historyRef.current.push({
+      tab: activeTab,
+      tenantId: selectedTenantId,
+      scrollTop: mainRef.current?.scrollTop ?? 0,
+    });
+    // Bound the stack so a long session can't grow it without limit.
+    if (historyRef.current.length > 50) historyRef.current.shift();
+  }, [activeTab, selectedTenantId]);
+
+  // Pop the previous location and restore it (including scroll). Falls back to a
+  // sensible tab when the stack is empty (e.g. deep-linked / first navigation).
+  const goBack = useCallback((fallbackTab = 'dashboard') => {
+    const snap = historyRef.current.pop();
+    if (snap) {
+      setActiveTab(snap.tab);
+      setSelectedTenantId(snap.tenantId);
+      pendingScrollRef.current = snap.scrollTop;
+    } else {
+      setActiveTab(fallbackTab);
+      setSelectedTenantId(null);
+    }
+  }, []);
+
+  // Restore the recorded scroll position after a back navigation has rendered.
+  useLayoutEffect(() => {
+    if (pendingScrollRef.current != null && mainRef.current) {
+      mainRef.current.scrollTop = pendingScrollRef.current;
+      pendingScrollRef.current = null;
+    }
+  });
+
   const handlePortalSelect = (portal: PortalType) => {
     setSelectedPortal(portal);
     writeStoredPortal(portal);
@@ -139,6 +184,9 @@ function AppContent() {
       setActiveTab(tab);
       return;
     }
+
+    // Record the page being left so back navigation can return here exactly.
+    if (tab !== activeTab || selectedTenantId !== null) recordHistory();
 
     // Tabs not in the permission map (notifications, pricing) are always accessible
     const requiredAction = TAB_PERMISSION_MAP[tab];
@@ -211,11 +259,14 @@ function AppContent() {
   }
 
   const handleViewTenant = (tenantId: string) => {
+    recordHistory();
     setSelectedTenantId(tenantId);
   };
 
   const handleBackToTenants = () => {
-    setSelectedTenantId(null);
+    // Return to wherever the tenant was opened from (Tenants list, Building View,
+    // Notifications, …), restoring scroll. Falls back to the Tenants list.
+    goBack('tenants');
   };
 
   // Show auth pages if not logged in
@@ -271,13 +322,13 @@ function AppContent() {
       case 'dashboard':
         return (
           <PageGuard action="page:dashboard">
-            <Dashboard onNavigate={setActiveTab} />
+            <Dashboard onNavigate={setActiveTabWithRoleGuard} />
           </PageGuard>
         );
       case 'properties':
         return (
           <PageGuard action="page:properties">
-            <Properties onNavigate={setActiveTab} />
+            <Properties onNavigate={setActiveTabWithRoleGuard} />
           </PageGuard>
         );
       case 'building-view':
@@ -288,7 +339,8 @@ function AppContent() {
                 setActiveTabWithRoleGuard('tenants');
                 setSelectedTenantId(tenantId);
               }}
-              onNavigate={setActiveTab}
+              onNavigate={setActiveTabWithRoleGuard}
+              onBack={() => goBack('properties')}
             />
           </PageGuard>
         );
@@ -325,7 +377,7 @@ function AppContent() {
       case 'notifications':
         return (
           <Notifications
-            onBack={() => setActiveTab('dashboard')}
+            onBack={() => goBack('dashboard')}
             onNavigate={(tab, entityId) => {
               setActiveTabWithRoleGuard(tab);
               if (tab === 'tenants' && entityId) {
@@ -343,7 +395,7 @@ function AppContent() {
       case 'audit-log':
         return (
           <PageGuard action="page:dashboard">
-            <AuditLog onBack={() => setActiveTab('dashboard')} />
+            <AuditLog onBack={() => goBack('dashboard')} />
           </PageGuard>
         );
       case 'team':
@@ -422,7 +474,7 @@ function AppContent() {
             userRole={user.role}
           />
 
-          <main className="flex-1 overflow-y-auto pb-20 md:pb-0">
+          <main ref={mainRef} className="flex-1 overflow-y-auto pb-20 md:pb-0">
             <PageFrame>
               {renderContent()}
             </PageFrame>

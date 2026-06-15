@@ -1604,7 +1604,7 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
     return (
       <div className="p-6">
         <Button variant="ghost" onClick={onBack} className="mb-4 text-gray-600">
-          <ArrowLeft className="w-4 h-4 mr-2" /> Back to Tenants
+          <ArrowLeft className="w-4 h-4 mr-2" /> Back
         </Button>
         <div className="text-center py-16 text-gray-400">
           <User className="w-10 h-10 mx-auto mb-3 opacity-30" />
@@ -1628,7 +1628,7 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
   return (
     <div className="p-6 bg-gray-50 min-h-screen pb-20 md:pb-6">
       <Button variant="ghost" onClick={onBack} className="mb-4 text-gray-600 hover:text-gray-900">
-        <ArrowLeft className="w-4 h-4 mr-2" /> Back to Tenants
+        <ArrowLeft className="w-4 h-4 mr-2" /> Back
       </Button>
 
       {/* Upcoming vacate alert */}

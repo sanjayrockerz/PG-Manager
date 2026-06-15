@@ -1,7 +1,9 @@
 import { Dialog, DialogContent } from './dialog';
 import { Button } from './button';
 import { Printer, CheckCircle2, Clock, AlertCircle } from 'lucide-react';
+import { toast } from 'sonner';
 import type { PaymentRecord } from '../../services/supabaseData';
+import { openPaymentDocument } from '../../services/receiptGenerator';
 
 interface PaymentDocumentDialogProps {
   open: boolean;
@@ -231,11 +233,22 @@ export function PaymentDocumentDialog({
             Close
           </Button>
           <Button
-            onClick={() => window.print()}
+            onClick={() => {
+              // Open a clean, self-contained printable document in a new window.
+              // Printing the in-dialog markup via window.print() renders blank in
+              // several browsers because the dialog lives in a body portal with a
+              // transformed/animated container — the standalone document avoids that
+              // entirely and lets the user Print or Save as PDF reliably.
+              try {
+                openPaymentDocument({ payment, propertyName, ownerName });
+              } catch (err) {
+                toast.error(err instanceof Error ? err.message : 'Could not open the document');
+              }
+            }}
             className="h-9 px-4 bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-1.5 shadow-sm"
           >
             <Printer className="w-3.5 h-3.5" />
-            Print Document
+            Print / Save as PDF
           </Button>
         </div>
       </DialogContent>

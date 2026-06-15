@@ -80,10 +80,10 @@ function StatCard({
         <p style={{ fontSize: 10, fontWeight: 600, color: '#71717A', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 5 }}>
           {label}
         </p>
-        <p style={{ fontSize: 20, fontWeight: 700, color: '#0A0A0B', letterSpacing: '-0.03em', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
-          {prefix && <span style={{ fontSize: 16, fontWeight: 600, color: '#71717A', marginRight: 1 }}>{prefix}</span>}
+        <p style={{ fontSize: 24, fontWeight: 800, color: '#0A0A0B', letterSpacing: '-0.03em', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
+          {prefix && <span style={{ fontSize: 18, fontWeight: 700, color: '#27272A', marginRight: 1 }}>{prefix}</span>}
           {value}
-          {suffix && <span style={{ fontSize: 16, fontWeight: 600, color: '#71717A', marginLeft: 1 }}>{suffix}</span>}
+          {suffix && <span style={{ fontSize: 18, fontWeight: 700, color: '#27272A', marginLeft: 1 }}>{suffix}</span>}
         </p>
 
         <div className="flex items-center gap-2 flex-wrap mt-2">

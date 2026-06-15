@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Bed, Home, Users, Wrench, ChevronRight, X,
   AlertTriangle, Clock, CheckCircle, User, IndianRupee,
-  Calendar, MapPin, ArrowUpRight, AlertCircle, ZapIcon,
+  Calendar, MapPin, ArrowUpRight, ArrowLeft, AlertCircle, ZapIcon,
   TrendingUp, Shield,
 } from 'lucide-react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from './ui/sheet';
@@ -21,15 +21,25 @@ import type { OccupancyMode } from '../services/supabaseData';
 interface BuildingViewProps {
   onTenantClick?: (tenantId: string) => void;
   onNavigate?: (tab: string) => void;
+  // History-aware back: returns to wherever Building View was opened from
+  // (Properties, Dashboard, …) rather than a hardcoded redirect.
+  onBack?: () => void;
 }
 
 // Semantic palette — soft backgrounds, muted accents (never saturated blocks).
 // Priority: maintenance > overdue_risk > vacating > full > partial > vacant
-// Premium SaaS palette - HSL with soft alpha backgrounds
+//
+// Business color semantics (do NOT invert):
+//   Vacant      → Green  (healthy availability — ready to earn)
+//   Occupied    → Neutral grey/blue (steady state, no action needed)
+//   Maintenance → Amber
+//   Vacating    → Purple   Overdue risk → Red
 const ROOM_STATUS_STYLES: Record<string, { bg: string; border: string; accent: string; dot: string; shadow: string }> = {
-  occupied_full:    { bg: 'hsla(142, 76%, 97%, 0.7)', border: 'hsla(142, 71%, 85%, 0.5)', accent: 'hsl(142, 71%, 45%)', dot: 'hsl(142, 71%, 45%)', shadow: '0 4px 20px hsla(142, 71%, 45%, 0.05)' },
-  occupied_partial: { bg: 'hsla(142, 76%, 97%, 0.7)', border: 'hsla(142, 71%, 85%, 0.5)', accent: 'hsl(142, 71%, 45%)', dot: 'hsl(142, 71%, 45%)', shadow: '0 4px 20px hsla(142, 71%, 45%, 0.05)' },
-  vacant:           { bg: 'hsla(210, 40%, 98%, 0.8)', border: 'hsla(214, 32%, 91%, 0.8)', accent: 'hsl(215, 16%, 47%)', dot: 'hsl(215, 16%, 47%)', shadow: '0 4px 20px hsla(215, 16%, 47%, 0.03)' },
+  // Occupied = neutral grey/blue (no action needed)
+  occupied_full:    { bg: 'hsla(210, 40%, 98%, 0.8)', border: 'hsla(214, 32%, 91%, 0.8)', accent: 'hsl(215, 16%, 47%)', dot: 'hsl(215, 16%, 47%)', shadow: '0 4px 20px hsla(215, 16%, 47%, 0.03)' },
+  occupied_partial: { bg: 'hsla(210, 40%, 98%, 0.8)', border: 'hsla(214, 32%, 91%, 0.8)', accent: 'hsl(215, 16%, 47%)', dot: 'hsl(215, 16%, 47%)', shadow: '0 4px 20px hsla(215, 16%, 47%, 0.03)' },
+  // Vacant = green (healthy availability)
+  vacant:           { bg: 'hsla(142, 76%, 97%, 0.7)', border: 'hsla(142, 71%, 85%, 0.5)', accent: 'hsl(142, 71%, 45%)', dot: 'hsl(142, 71%, 45%)', shadow: '0 4px 20px hsla(142, 71%, 45%, 0.05)' },
   maintenance:      { bg: 'hsla(45, 100%, 96%, 0.7)', border: 'hsla(45, 93%, 80%, 0.5)', accent: 'hsl(38, 92%, 50%)', dot: 'hsl(38, 92%, 50%)', shadow: '0 4px 20px hsla(38, 92%, 50%, 0.08)' },
   vacating:         { bg: 'hsla(250, 100%, 98%, 0.7)', border: 'hsla(250, 80%, 90%, 0.5)', accent: 'hsl(262, 83%, 58%)', dot: 'hsl(262, 83%, 58%)', shadow: '0 4px 20px hsla(262, 83%, 58%, 0.08)' },
   overdue_risk:     { bg: 'hsla(0, 100%, 98%, 0.7)', border: 'hsla(0, 93%, 90%, 0.5)', accent: 'hsl(0, 84%, 60%)', dot: 'hsl(0, 84%, 60%)', shadow: '0 4px 20px hsla(0, 84%, 60%, 0.08)' },
@@ -57,17 +67,20 @@ function BedGrid({ occ, mode }: { occ: RoomOccupancy; mode: OccupancyMode }) {
   if (mode !== 'BED_BASED' || occ.totalCapacity <= 1) return null;
 
   return (
-    <div className="flex items-center gap-1.5 mt-2.5">
+    // Wrap so high-capacity dorm rooms don't overflow a narrow card on mobile.
+    <div className="flex items-center flex-wrap gap-1.5 mt-2.5">
       {Array.from({ length: occ.totalCapacity }).map((_, i) => {
         const tenant = occ.tenantsInRoom[i];
         const isVacating = tenant && (tenant.status === 'notice_submitted' || tenant.status === 'vacating');
         const isOverdue = tenant && tenant.status === 'payment_overdue';
+        // Semantics: vacant bed = green (available), occupied = neutral grey,
+        // overdue = red, vacating = purple.
         const dotColor = tenant
-          ? isOverdue ? '#DC2626' : isVacating ? '#7C3AED' : '#16A34A'
-          : 'transparent';
+          ? isOverdue ? '#DC2626' : isVacating ? '#7C3AED' : '#64748B'
+          : '#16A34A';
         const ringColor = tenant
-          ? isOverdue ? '#DC2626' : isVacating ? '#7C3AED' : '#16A34A'
-          : '#CBD5E1';
+          ? isOverdue ? '#DC2626' : isVacating ? '#7C3AED' : '#64748B'
+          : '#16A34A';
         return (
           <span
             key={i}
@@ -328,7 +341,7 @@ function StatTile({ label, value, accent }: { label: string; value: React.ReactN
   return (
     <div className="rounded-xl px-3 py-2.5" style={{ background: 'var(--ds-accent-subtle, #F4F4F5)' }}>
       <p className="ds-meta mb-0.5">{label}</p>
-      <p className="text-[14px] font-semibold" style={{ color: accent ?? 'var(--ds-text-1)' }}>{value}</p>
+      <p className="text-[14px] font-semibold break-words" style={{ color: accent ?? 'var(--ds-text-1)' }}>{value}</p>
     </div>
   );
 }
@@ -475,7 +488,8 @@ function RoomDetailSheet({
                   const tenant = occ.tenantsInRoom[i];
                   const isVacating = tenant && (tenant.status === 'notice_submitted' || tenant.status === 'vacating');
                   const isOverdue = tenant && tenant.status === 'payment_overdue';
-                  const tone = !tenant ? '#94A3B8' : isOverdue ? '#DC2626' : isVacating ? '#D97706' : '#16A34A';
+                  // Vacant bed = green (available), occupied = grey, overdue = red, vacating = purple.
+                  const tone = !tenant ? '#16A34A' : isOverdue ? '#DC2626' : isVacating ? '#7C3AED' : '#64748B';
                   return (
                     <div
                       key={i}
@@ -690,7 +704,7 @@ function RoomDetailSheet({
   );
 }
 
-export function BuildingView({ onTenantClick, onNavigate }: BuildingViewProps) {
+export function BuildingView({ onTenantClick, onNavigate, onBack }: BuildingViewProps) {
   const { selectedProperty, setSelectedProperty, properties } = useProperty();
   const [tenants, setTenants] = useState<TenantRecord[]>([]);
   const [loadingTenants, setLoadingTenants] = useState(false);
@@ -813,15 +827,15 @@ export function BuildingView({ onTenantClick, onNavigate }: BuildingViewProps) {
   const summaryMetrics = [
     { label: 'Upcoming Vacates', value: upcomingVacates, icon: Clock, sub: 'tenants giving notice', bg: '#F5F3FF', accent: '#7C3AED' },
     { label: 'Overdue Risk', value: overdueRooms, icon: AlertCircle, sub: 'rooms with overdue rent', bg: overdueRooms > 0 ? '#FEF2F2' : '#F8FAFC', accent: overdueRooms > 0 ? '#DC2626' : '#64748B' },
-    { label: 'Occupied', value: snapshot.occupiedRooms, icon: CheckCircle, sub: 'fully or partially filled', bg: '#ECFDF3', accent: '#16A34A' },
-    { label: 'Vacant', value: snapshot.vacantRooms, icon: Home, sub: 'available to rent', bg: '#F8FAFC', accent: '#64748B' },
+    { label: 'Occupied', value: snapshot.occupiedRooms, icon: CheckCircle, sub: 'fully or partially filled', bg: '#F8FAFC', accent: '#64748B' },
+    { label: 'Vacant', value: snapshot.vacantRooms, icon: Home, sub: 'available to rent', bg: '#ECFDF3', accent: '#16A34A' },
     { label: 'Maintenance', value: snapshot.maintenanceRooms, icon: Wrench, sub: 'awaiting service', bg: '#FFFBEB', accent: '#D97706' },
     { label: 'Occupancy', value: `${snapshot.occupancyRate}%`, icon: TrendingUp, sub: 'of total capacity', bg: '#EEF2FF', accent: '#4F46E5' },
   ];
 
   const legendItems = [
-    { label: 'Occupied', bg: '#ECFDF3', accent: '#16A34A' },
-    { label: 'Vacant', bg: '#F8FAFC', accent: '#64748B' },
+    { label: 'Occupied', bg: '#F8FAFC', accent: '#64748B' },
+    { label: 'Vacant', bg: '#ECFDF3', accent: '#16A34A' },
     { label: 'Maintenance', bg: '#FFFBEB', accent: '#D97706' },
     { label: 'Upcoming Vacate', bg: '#F5F3FF', accent: '#7C3AED' },
     { label: 'Overdue Risk', bg: '#FEF2F2', accent: '#DC2626' },
@@ -831,9 +845,21 @@ export function BuildingView({ onTenantClick, onNavigate }: BuildingViewProps) {
     <div className="space-y-6">
       {/* Page header + property switcher */}
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="ds-page-title">Building View</h1>
-          <p style={{ fontSize: 13, color: '#A1A1AA', marginTop: 2 }}>A live look at your property · click any room for details</p>
+        <div className="flex items-center gap-2.5">
+          {(onBack || onNavigate) && (
+            <button
+              onClick={() => (onBack ? onBack() : onNavigate?.('properties'))}
+              aria-label="Go back"
+              className="flex items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 hover:bg-gray-50 hover:text-gray-800 transition-colors flex-shrink-0"
+              style={{ width: 34, height: 34 }}
+            >
+              <ArrowLeft className="w-4 h-4" />
+            </button>
+          )}
+          <div>
+            <h1 className="ds-page-title">Building View</h1>
+            <p style={{ fontSize: 13, color: '#A1A1AA', marginTop: 2 }}>A live look at your property · click any room for details</p>
+          </div>
         </div>
         {properties.length > 1 && (
           <div className="relative">
