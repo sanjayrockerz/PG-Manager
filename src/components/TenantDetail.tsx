@@ -1226,6 +1226,27 @@ function DocumentVaultTab({ tenant, allowedGroups }: { tenant: TenantRecord; all
 
   useEffect(() => { void loadDocs(); }, [tenant.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Keep the vault live: receipts are written to tenant_documents asynchronously
+  // when a payment is marked paid (and agreements/settlements land here too), so
+  // an open owner view reflects new files without a manual refresh — matching the
+  // tenant portal and admin inventory.
+  useEffect(() => {
+    if (isDemoMode) return;
+    let channel: { unsubscribe: () => void } | undefined;
+    let cancelled = false;
+    void (async () => {
+      const { supabase } = await import('../lib/supabase');
+      if (cancelled) return;
+      channel = supabase
+        .channel(`tenant-docs-rt-${tenant.id}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'tenant_documents', filter: `tenant_id=eq.${tenant.id}` }, () => {
+          void loadDocs();
+        })
+        .subscribe();
+    })();
+    return () => { cancelled = true; channel?.unsubscribe(); };
+  }, [tenant.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;

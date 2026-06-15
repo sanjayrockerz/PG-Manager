@@ -3997,16 +3997,26 @@ export const supabaseOwnerDataApi = {
 
     const { data: paymentRow, error: paymentFetchError } = await supabase
       .from('payments')
-      .select('property_id')
+      .select('property_id, status')
       .eq('id', paymentId)
       .eq('owner_id', ownerId)
-      .maybeSingle<{ property_id: string | null }>();
+      .maybeSingle<{ property_id: string | null; status: PaymentStatus }>();
 
     if (paymentFetchError) {
       throw paymentFetchError;
     }
 
     await assertScopeCapability(context, paymentRow?.property_id ?? null, 'payments');
+
+    // Completed-payment lock (defense in depth — the UI also enforces this).
+    // A paid invoice has a receipt issued, a captured reference, and downstream
+    // accounting/next-month generation. Reverting it to pending/overdue would
+    // wipe paid_date and corrupt the record, so reject the transition at the
+    // service layer regardless of which caller initiates it. Re-marking an
+    // already-paid invoice as paid (idempotent) is still allowed.
+    if (paymentRow?.status === 'paid' && status !== 'paid') {
+      throw new Error('This payment is completed and locked. Paid invoices cannot be reverted.');
+    }
 
     const payload: Record<string, unknown> = { status };
 

@@ -1104,6 +1104,18 @@ export function TenantPortal() {
           .catch(() => {});
       })
 
+      // Documents — receipts are stored to tenant_documents asynchronously after a
+      // payment is marked paid, and agreements/IDs land here too. Subscribe so the
+      // Documents tab reflects new files (e.g. a fresh rent receipt) without a manual
+      // refresh, keeping the tenant portal in sync with Owner/Admin.
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tenant_documents', filter: `tenant_id=eq.${tenantId}` }, () => {
+        void supabaseLifecycleApi.getTenantDocuments(tenantId)
+          .then((documents) => {
+            setSnapshot((prev) => prev ? { ...prev, documents } : prev);
+          })
+          .catch(() => {});
+      })
+
       .subscribe((status) => {
         if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
           // Silent fallback: do not trigger reload on connection issues
