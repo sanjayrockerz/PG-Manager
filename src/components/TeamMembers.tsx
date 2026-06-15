@@ -18,6 +18,7 @@ import {
 import { toast } from 'sonner';
 import { useProperty } from '../contexts/PropertyContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
+import { useAuth } from '../contexts/AuthContext';
 import {
   type CreateInviteInput,
   type DisplayRole,
@@ -722,6 +723,7 @@ interface EditScopeState {
 export function TeamMembers() {
   const { properties } = useProperty();
   const { navWorkspaceRole, managedProperties, workspaceMemberships } = useWorkspace();
+  const { user } = useAuth();
 
   // Determine if the caller is a manager (not workspace owner)
   const isManager = navWorkspaceRole === 'manager';
@@ -778,6 +780,31 @@ export function TeamMembers() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Live team roster: when an invited user accepts (from their own session) the
+  // invite flips to accepted and a property scope row is created. Subscribe to
+  // both tables for this workspace owner so the Team page reflects the new member
+  // and the cleared pending invite without a manual refresh.
+  const workspaceOwnerId = isManager ? managerWorkspaceOwnerId : (user?.id ?? null);
+  useEffect(() => {
+    if (!workspaceOwnerId) return;
+    let channel: { unsubscribe: () => void } | undefined;
+    let cancelled = false;
+    void (async () => {
+      const { supabase } = await import('../lib/supabase');
+      if (cancelled) return;
+      channel = supabase
+        .channel(`team-rt-${workspaceOwnerId}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'owner_invites', filter: `owner_id=eq.${workspaceOwnerId}` }, () => {
+          void load();
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'owner_user_property_scopes', filter: `owner_id=eq.${workspaceOwnerId}` }, () => {
+          void load();
+        })
+        .subscribe();
+    })();
+    return () => { cancelled = true; channel?.unsubscribe(); };
+  }, [workspaceOwnerId, load]);
 
   const handleRevokeInvite = async (inviteId: string) => {
     if (!confirm('Revoke this invite? The user will no longer be able to accept it.')) return;
