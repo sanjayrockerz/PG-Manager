@@ -7844,6 +7844,54 @@ export const supabaseAdminDataApi = {
       { ownerId, adminId: context.userId, email: profile.email },
     );
   },
+
+  // ── Platform email templates ──────────────────────────────────────────────
+  // Editable, DB-persisted overrides for the platform's transactional emails
+  // (welcome, payment reminder, receipt, agreement, password reset, …). The
+  // admin UI ships built-in defaults and overlays any saved overrides on top, so
+  // the feature degrades gracefully when the table has not been migrated yet.
+  async getEmailTemplateOverrides(): Promise<Array<{ id: string; subject: string; body: string; updatedAt: string | null }>> {
+    const { data, error } = await supabase
+      .from('platform_email_templates')
+      .select('id, subject, body, updated_at')
+      .returns<Array<{ id: string; subject: string; body: string; updated_at: string | null }>>();
+    if (error) {
+      if (isMissingRelationError(error, 'platform_email_templates')) return [];
+      throw error;
+    }
+    return (data ?? []).map((r) => ({ id: r.id, subject: r.subject, body: r.body, updatedAt: r.updated_at }));
+  },
+
+  async saveEmailTemplate(input: { id: string; name: string; subject: string; body: string }): Promise<void> {
+    const context = await getCurrentUserContext();
+    if (!context.isPlatformAdmin) throw new Error('Platform admin access is required.');
+
+    const { error } = await supabase
+      .from('platform_email_templates')
+      .upsert(
+        {
+          id: input.id,
+          name: input.name,
+          subject: input.subject,
+          body: input.body,
+          updated_by: context.userId,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: 'id' },
+      );
+
+    if (error) {
+      if (isMissingRelationError(error, 'platform_email_templates')) {
+        throw new Error('Email templates are not persisted yet — apply migration 20260615_platform_email_templates.sql.');
+      }
+      throw error;
+    }
+
+    await logActivity(context.userId, null, 'ADMIN_EMAIL_TEMPLATE_SAVED',
+      `Email template "${input.name}" updated`,
+      { templateId: input.id, adminId: context.userId },
+    );
+  },
 };
 
 export interface AdminCouponRecord {

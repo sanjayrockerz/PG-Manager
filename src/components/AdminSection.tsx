@@ -319,12 +319,28 @@ export function AdminSection() {
     }
   };
 
-  const handleSaveEmailTemplate = () => {
-    setEmailTemplates((prev) => prev.map((t) => (
-      t.id === selectedEmailTemplateId ? { ...t, subject: draftTemplateSubject, body: draftTemplateBody } : t
-    )));
+  const [isSavingTemplate, setIsSavingTemplate] = useState(false);
+  const handleSaveEmailTemplate = async () => {
     const template = emailTemplates.find((t) => t.id === selectedEmailTemplateId);
-    toast.success(`${template?.name ?? 'Template'} saved`);
+    if (!template) return;
+    setIsSavingTemplate(true);
+    try {
+      await supabaseAdminDataApi.saveEmailTemplate({
+        id: template.id,
+        name: template.name,
+        subject: draftTemplateSubject,
+        body: draftTemplateBody,
+      });
+      // Reflect the saved values locally only after the write succeeds.
+      setEmailTemplates((prev) => prev.map((t) => (
+        t.id === selectedEmailTemplateId ? { ...t, subject: draftTemplateSubject, body: draftTemplateBody } : t
+      )));
+      toast.success(`${template.name} saved`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save template');
+    } finally {
+      setIsSavingTemplate(false);
+    }
   };
 
   // Audit logs
@@ -490,6 +506,26 @@ export function AdminSection() {
   useEffect(() => {
     if (currentView === 'analytics') void loadAnalytics();
   }, [range]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Overlay any DB-persisted email-template edits on top of the built-in defaults
+  // so saved subject/body changes survive a reload (degrades to defaults when the
+  // platform_email_templates table has not been migrated yet).
+  useEffect(() => {
+    let cancelled = false;
+    void supabaseAdminDataApi.getEmailTemplateOverrides()
+      .then((overrides) => {
+        if (cancelled || overrides.length === 0) return;
+        const byId = new Map(overrides.map((o) => [o.id, o]));
+        setEmailTemplates((prev) => prev.map((t) => {
+          const o = byId.get(t.id);
+          return o ? { ...t, subject: o.subject, body: o.body } : t;
+        }));
+        const sel = byId.get(selectedEmailTemplateId);
+        if (sel) { setDraftTemplateSubject(sel.subject); setDraftTemplateBody(sel.body); }
+      })
+      .catch(() => { /* table not migrated — keep defaults */ });
+    return () => { cancelled = true; };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadTeamInvites = useCallback(async () => {
     setIsLoadingTeam(true);
@@ -2112,11 +2148,11 @@ export function AdminSection() {
                   Discard
                 </button>
                 <button
-                  onClick={handleSaveEmailTemplate}
-                  disabled={!templateIsDirty}
+                  onClick={() => void handleSaveEmailTemplate()}
+                  disabled={!templateIsDirty || isSavingTemplate}
                   className="px-4 py-2 rounded-lg text-sm font-medium bg-[#7C3AED] text-white hover:bg-[#6D28D9] disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  Save Template
+                  {isSavingTemplate ? 'Saving…' : 'Save Template'}
                 </button>
               </div>
             </div>
