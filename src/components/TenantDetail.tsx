@@ -609,6 +609,26 @@ function AgreementTab({ tenant, property }: { tenant: TenantRecord; property?: {
 
   useEffect(() => { loadAgreements(); }, [tenant.id, isDemoMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Live agreement status: when the tenant signs from their portal the row flips
+  // to executed + locked. Subscribe so the owner sees the status change (and the
+  // newly executed document) without a manual refresh.
+  useEffect(() => {
+    if (isDemoMode) return;
+    let channel: { unsubscribe: () => void } | undefined;
+    let cancelled = false;
+    void (async () => {
+      const { supabase } = await import('../lib/supabase');
+      if (cancelled) return;
+      channel = supabase
+        .channel(`tenant-detail-agreements-rt-${tenant.id}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'agreements', filter: `tenant_id=eq.${tenant.id}` }, () => {
+          loadAgreements();
+        })
+        .subscribe();
+    })();
+    return () => { cancelled = true; channel?.unsubscribe(); };
+  }, [tenant.id, isDemoMode]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Fetch owner signature vault so Print/Download embed the real signature
   useEffect(() => {
     if (isDemoMode) return;
