@@ -770,7 +770,7 @@ export function Maintenance() {
                 className="w-full px-3 py-2 border border-zinc-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-indigo-400 resize-none"
               />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold text-zinc-700">Priority *</Label>
                 <select value={createForm.priority} onChange={(e) => setCreateForm({ ...createForm, priority: e.target.value as MaintenancePriority })} className="w-full h-9 px-3 border border-zinc-200 rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-indigo-400">
@@ -797,7 +797,7 @@ export function Maintenance() {
                 {properties.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold text-zinc-700">Tenant *</Label>
                 <Input placeholder="Tenant name" value={createForm.tenant} onChange={(e) => setCreateForm({ ...createForm, tenant: e.target.value })} className="h-9 text-sm" required />
@@ -807,7 +807,7 @@ export function Maintenance() {
                 <Input placeholder="e.g., 201" value={createForm.room} onChange={(e) => setCreateForm({ ...createForm, room: e.target.value })} className="h-9 text-sm" required />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold text-zinc-700">Phone</Label>
                 <Input type="tel" placeholder="+91 98765 43210" value={createForm.phone} onChange={(e) => setCreateForm({ ...createForm, phone: e.target.value })} className="h-9 text-sm" />

@@ -709,6 +709,7 @@ export function BuildingView({ onTenantClick, onNavigate, onBack }: BuildingView
   const [tenants, setTenants] = useState<TenantRecord[]>([]);
   const [loadingTenants, setLoadingTenants] = useState(false);
   const [selectedRoom, setSelectedRoom] = useState<{ occ: RoomOccupancy; room: Room } | null>(null);
+  const [selectedFloor, setSelectedFloor] = useState<number | 'all'>('all');
   const fetchSeq = useRef(0);
 
   // Auto-select first property if "All Properties" is selected
@@ -968,9 +969,30 @@ export function BuildingView({ onTenantClick, onNavigate, onBack }: BuildingView
         </div>
       )}
 
+      {/* Floor Tabs */}
+      {floorData.length > 0 && (
+        <div className="flex items-center gap-2 overflow-x-auto pb-2 snap-x hide-scrollbar">
+          <button
+            onClick={() => setSelectedFloor('all')}
+            className={`flex-shrink-0 snap-start px-4 py-2 text-[13px] font-semibold rounded-full border transition-colors ${selectedFloor === 'all' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+          >
+            All Floors
+          </button>
+          {floorData.map(({ floor }) => (
+            <button
+              key={floor}
+              onClick={() => setSelectedFloor(floor)}
+              className={`flex-shrink-0 snap-start px-4 py-2 text-[13px] font-semibold rounded-full border transition-colors ${selectedFloor === floor ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}`}
+            >
+              Floor {floor}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Floor-by-floor grid */}
       <div className="space-y-6">
-        {floorData.map(({ floor, items }, index) => {
+        {floorData.filter(f => selectedFloor === 'all' || f.floor === selectedFloor).map(({ floor, items }, index) => {
           const floorOccupied = items.filter((i) => i.occ.isFullyOccupied || i.occ.isPartiallyOccupied).length;
           const floorTotal = items.length;
           const floorOverdue = items.filter((i) => i.occ.hasOverdueRisk).length;
@@ -986,7 +1008,7 @@ export function BuildingView({ onTenantClick, onNavigate, onBack }: BuildingView
                 {/* Floor summary panel */}
                 <div className="lg:w-64 shrink-0 px-6 py-6 flex lg:flex-col items-center lg:items-start gap-4 lg:gap-4 relative" style={{ backgroundColor: 'rgba(250, 250, 251, 0.5)', borderRight: '1px solid rgba(0,0,0,0.04)' }}>
                   <ProgressRing percent={floorPercent} size={56} />
-                  <div className="mt-2">
+                  <div className="mt-2 text-center lg:text-left">
                     <p className="text-[18px] font-bold text-gray-900 tracking-tight">Floor {floor}</p>
                     <p className="text-[13px] font-medium text-gray-500/80 mt-1">{floorTotal} room{floorTotal !== 1 ? 's' : ''} · {floorOccupied} occupied</p>
                     {floorOverdue > 0 && (
@@ -999,7 +1021,7 @@ export function BuildingView({ onTenantClick, onNavigate, onBack }: BuildingView
                 </div>
 
                 {/* Rooms grid */}
-                <div className="flex-1 p-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4 bg-white/60">
+                <div className="flex-1 p-4 lg:p-6 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4 bg-white/60">
                   {items.map(({ occ, room }) => (
                     <RoomCard
                       key={room.id}

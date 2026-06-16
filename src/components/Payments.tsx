@@ -585,7 +585,7 @@ export function Payments({ onNavigate }: PaymentsProps) {
 
         {/* Filter bar */}
         <div
-          className="flex items-center justify-between flex-wrap gap-3"
+          className="flex items-center justify-between flex-wrap gap-3 sticky top-0 z-10 bg-white"
           style={{ padding: '8px 12px', borderBottom: '1px solid #F4F4F6' }}
         >
           <div className="flex items-center gap-1.5">
@@ -801,7 +801,7 @@ export function Payments({ onNavigate }: PaymentsProps) {
                     </span>
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p style={{ fontSize: 13, fontWeight: 600, color: '#0A0A0B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    <p style={{ fontSize: 13, fontWeight: 600, color: '#0A0A0B', wordBreak: 'break-word' }}>
                       {payment.tenant}
                     </p>
                     <p style={{ fontSize: 11, color: '#A1A1AA' }}>

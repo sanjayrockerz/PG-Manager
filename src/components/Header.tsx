@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Building2, ChevronDown, PanelLeft, Search } from 'lucide-react';
+import { Building2, ChevronDown, PanelLeft, Menu, Search } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { isPlatformAdminRole } from '../utils/roles';
 import { isDemoModeEnabled } from '../services/dataService';
@@ -54,9 +54,9 @@ export function Header({ setSidebarOpen, sidebarCollapsed, onToggleSidebar, curr
         </div>
       )}
       <header
-        className="flex-shrink-0 flex items-center justify-between z-30"
+        className="flex-shrink-0 flex items-center justify-between z-30 pt-safe"
         style={{
-          height: 52,
+          minHeight: 52,
           paddingLeft: 12,
           paddingRight: 16,
           background: '#FFFFFF',
@@ -72,7 +72,8 @@ export function Header({ setSidebarOpen, sidebarCollapsed, onToggleSidebar, curr
           className="flex items-center justify-center rounded-md hover:bg-zinc-100 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
           style={{ width: 32, height: 32, color: '#71717A', flexShrink: 0 }}
         >
-          <PanelLeft style={{ width: 16, height: 16 }} />
+          <Menu className="w-5 h-5 lg:hidden" />
+          <PanelLeft style={{ width: 16, height: 16 }} className="hidden lg:block" />
         </button>
 
         <div className="flex items-center gap-2" style={{ color: '#0A0A0B', fontSize: 14, fontWeight: 600 }}>

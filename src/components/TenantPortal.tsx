@@ -1642,7 +1642,7 @@ export function TenantPortal() {
 
       {/* Payments table */}
       <div className="bg-white border border-gray-100 rounded-xl overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50/50">
@@ -1667,9 +1667,6 @@ export function TenantPortal() {
                 </tr>
               )}
               {payments.map((p) => {
-                // Base rent + extras derived from fields present on every PaymentRecord
-                // (demo and live). Avoids depending on the partial `amount` field that
-                // only the realtime delta-patch populates.
                 const baseRent = p.monthlyRent ?? p.totalAmount;
                 const extras = p.totalAmount - baseRent;
                 return (
@@ -1709,6 +1706,65 @@ export function TenantPortal() {
               })}
             </tbody>
           </table>
+        </div>
+        <div className="md:hidden flex flex-col gap-3 p-4 bg-gray-50/50">
+          {payments.length === 0 && (
+            <div className="py-14 text-center">
+              <CreditCard className="w-10 h-10 mx-auto mb-2 text-gray-300" />
+              <p className="text-sm text-gray-400">No payment records yet.</p>
+            </div>
+          )}
+          {payments.map((p) => {
+            const baseRent = p.monthlyRent ?? p.totalAmount;
+            const extras = p.totalAmount - baseRent;
+            return (
+              <div key={p.id} className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm hover:shadow-md transition-shadow">
+                <div className="flex items-start justify-between mb-3">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900">{paymentMonth(p)}</p>
+                    <p className="text-xs text-gray-500">Due: {fmtDate(p.dueDate)}</p>
+                  </div>
+                  <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${statusBadge(p.status)}`}>
+                    {p.status === 'paid' ? 'Paid' : p.status.charAt(0).toUpperCase() + p.status.slice(1)}
+                  </span>
+                </div>
+                <div className="flex items-end justify-between mb-4">
+                  <div>
+                    <p className="text-xs text-gray-500 mb-1">Total Amount</p>
+                    <p className="text-xl font-bold text-gray-900">{fmtAmount(p.totalAmount)}</p>
+                  </div>
+                  {extras > 0 && (
+                    <p className="text-xs text-gray-500 text-right">
+                      {fmtAmount(baseRent)} rent + {fmtAmount(extras)} extras
+                    </p>
+                  )}
+                </div>
+                <div className="pt-3 border-t border-gray-100">
+                  {p.status !== 'paid' && ownerPaymentInfo.upiId ? (
+                    <a
+                      href={buildUpiLink(ownerPaymentInfo.upiId, p.totalAmount, owner?.name ?? 'Manager', paymentMonth(p)) ?? '#'}
+                      className="w-full flex items-center justify-center py-2.5 rounded-lg text-sm font-semibold text-white transition-opacity hover:opacity-90"
+                      style={{ background: 'linear-gradient(135deg, #4F46E5, #5B21B6)' }}
+                    >
+                      Pay Now
+                    </a>
+                  ) : p.status === 'paid' ? (
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs text-gray-500">Paid on {p.paidDate ? fmtDate(p.paidDate) : '—'}</p>
+                      <button
+                        onClick={() => handleOpenDocument(p)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-lg text-xs font-medium text-gray-700 transition-colors"
+                      >
+                        <Download className="w-3.5 h-3.5" /> Receipt
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-center text-gray-500">Awaiting processing</p>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>
@@ -2527,7 +2583,7 @@ export function TenantPortal() {
         </div>
       )}
 
-      <div className="flex h-screen bg-[#F8FAFC] overflow-hidden">
+      <div className="flex h-[100dvh] bg-[#F8FAFC] overflow-hidden">
 
         {/* Desktop Sidebar */}
         <aside
@@ -2696,7 +2752,7 @@ export function TenantPortal() {
         {/* Main content area */}
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* Mobile header */}
-          <header className="lg:hidden bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between flex-shrink-0">
+          <header className="lg:hidden bg-white border-b border-gray-200 px-4 py-3 pt-safe min-h-[52px] flex items-center justify-between flex-shrink-0">
             <button onClick={() => setSidebarOpen(true)} className="p-1.5 hover:bg-gray-100 rounded-lg">
               <Menu className="w-5 h-5 text-gray-600" />
             </button>
@@ -2716,23 +2772,35 @@ export function TenantPortal() {
 
           {/* Desktop top bar */}
           <header className="hidden lg:flex bg-white border-b border-gray-100 px-6 py-3.5 items-center justify-between flex-shrink-0">
-            <div className="flex items-center gap-2 text-sm text-gray-600">
+            <div className="flex items-center gap-2 flex-shrink-0">
               <button
                 onClick={toggleSidebar}
                 aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-                title={sidebarCollapsed ? 'Expand sidebar (Ctrl+B)' : 'Collapse sidebar (Ctrl+B)'}
-                className="flex items-center justify-center w-8 h-8 -ml-1 mr-1 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors"
+                className="flex items-center justify-center rounded-md hover:bg-zinc-100 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                style={{ width: 32, height: 32, color: '#71717A', flexShrink: 0 }}
               >
-                <PanelLeft className="w-4 h-4" />
+                <PanelLeft style={{ width: 16, height: 16 }} />
               </button>
-              <Building2 className="w-4 h-4 text-gray-400" />
-              <span className="font-medium text-gray-800">{ownerPaymentInfo.pgName || property?.name}</span>
-              {tenant.room && (
-                <>
-                  <span className="text-gray-300 mx-1">·</span>
-                  <span className="text-gray-600">Room {tenant.room}</span>
-                </>
-              )}
+
+              <div className="flex items-center gap-2 ml-1" style={{ color: '#0A0A0B', fontSize: 14, fontWeight: 600 }}>
+                <div
+                  className="flex items-center justify-center rounded-lg"
+                  style={{ width: 24, height: 24, background: 'linear-gradient(135deg, #6366F1, #4F46E5)' }}
+                >
+                  <Building2 style={{ width: 12, height: 12, color: '#fff' }} />
+                </div>
+                <span className="hidden sm:block">RentCare</span>
+              </div>
+              
+              <div className="flex items-center ml-2 border-l border-gray-200 pl-3">
+                <span className="font-medium text-gray-800 text-sm">{ownerPaymentInfo.pgName || property?.name}</span>
+                {tenant.room && (
+                  <>
+                    <span className="text-gray-300 mx-1.5">·</span>
+                    <span className="text-gray-600 text-sm">Room {tenant.room}</span>
+                  </>
+                )}
+              </div>
             </div>
             <div className="flex items-center gap-3">
               <button

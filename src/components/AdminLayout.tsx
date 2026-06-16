@@ -15,6 +15,7 @@ import {
   X,
   Bell,
   ChevronRight,
+  Building2,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -253,7 +254,7 @@ export function AdminLayout({ current, onNavigate, profileName, profileRole, not
   };
 
   return (
-    <div className="flex h-screen bg-[#F4F5F9] overflow-hidden">
+    <div className="flex h-[100dvh] bg-[#F4F5F9] overflow-hidden">
       {/* Desktop sidebar */}
       <aside className={`hidden lg:block shrink-0 border-r border-black/10 transition-all duration-300 ease-in-out relative ${
         collapsed ? 'w-[56px]' : 'w-[220px]'
@@ -267,14 +268,6 @@ export function AdminLayout({ current, onNavigate, profileName, profileRole, not
           onSignOut={handleSignOut}
           collapsed={collapsed}
         />
-        {/* Toggle Button */}
-        <button
-          onClick={() => setCollapsed(!collapsed)}
-          className="absolute top-7 -right-3 z-50 flex h-6 w-6 items-center justify-center rounded-full border border-slate-800 bg-[#0B1120] text-slate-400 hover:text-white hover:bg-slate-800 transition-all shadow-md focus:outline-none focus:ring-1 focus:ring-[#7C3AED]"
-          title={collapsed ? "Expand sidebar (Ctrl+B)" : "Collapse sidebar (Ctrl+B)"}
-        >
-          <ChevronRight className={`h-3.5 w-3.5 transition-transform duration-300 ${collapsed ? '' : 'rotate-180'}`} />
-        </button>
       </aside>
 
       {/* Mobile sidebar overlay */}
@@ -303,24 +296,35 @@ export function AdminLayout({ current, onNavigate, profileName, profileRole, not
 
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         {/* Topbar — matching reference */}
-        <header className="h-14 shrink-0 bg-white border-b border-gray-200 px-5 flex items-center gap-3">
-          <button onClick={() => setMobileOpen(true)} className="lg:hidden p-2 -ml-2 rounded-lg text-gray-500 hover:bg-gray-100">
-            <Menu className="w-5 h-5" />
-          </button>
-          <button
-            onClick={() => setCollapsed((prev) => !prev)}
-            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            title={collapsed ? 'Expand sidebar (Ctrl+B)' : 'Collapse sidebar (Ctrl+B)'}
-            className="hidden lg:flex items-center justify-center w-9 h-9 -ml-2 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors"
-          >
-            <PanelLeft className="w-5 h-5" />
-          </button>
-          <div className="min-w-0 flex items-center gap-3">
-            <p className="text-[15px] font-semibold text-gray-900">RentCare Admin</p>
-            <span className="hidden sm:flex items-center gap-1.5 text-xs text-emerald-600 font-medium">
-              <span className="w-2 h-2 rounded-full bg-emerald-500" />
-              All systems operational
-            </span>
+        <header className="min-h-[56px] pt-safe shrink-0 bg-white border-b border-gray-200 px-5 flex items-center justify-between">
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <button onClick={() => setMobileOpen(true)} className="lg:hidden p-2 -ml-2 rounded-lg text-gray-500 hover:bg-gray-100">
+              <Menu className="w-5 h-5" />
+            </button>
+            <button
+              onClick={() => setCollapsed((prev) => !prev)}
+              aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+              className="hidden lg:flex items-center justify-center rounded-md hover:bg-zinc-100 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+              style={{ width: 32, height: 32, color: '#71717A', flexShrink: 0 }}
+            >
+              <PanelLeft style={{ width: 16, height: 16 }} />
+            </button>
+            <div className="flex items-center gap-2 ml-1" style={{ color: '#0A0A0B', fontSize: 14, fontWeight: 600 }}>
+              <div
+                className="flex items-center justify-center rounded-lg"
+                style={{ width: 24, height: 24, background: 'linear-gradient(135deg, #6366F1, #4F46E5)' }}
+              >
+                <Building2 style={{ width: 12, height: 12, color: '#fff' }} />
+              </div>
+              <span className="hidden sm:block">RentCare</span>
+            </div>
+            <div className="flex items-center ml-2 border-l border-gray-200 pl-3">
+              <p className="text-[15px] font-semibold text-gray-900">Admin</p>
+              <span className="hidden sm:flex items-center gap-1.5 text-xs text-emerald-600 font-medium ml-3">
+                <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                All systems operational
+              </span>
+            </div>
           </div>
           <div className="ml-auto flex items-center gap-3">
             <button className="relative p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600">

@@ -489,7 +489,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
       )}
 
       {/* ── KPI Cards ───────────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <StatCard
           label="Total Revenue"
           prefix="₹"
@@ -542,10 +542,10 @@ export function Dashboard({ onNavigate }: DashboardProps) {
       </div>
 
       {/* ── Revenue chart + Activity ─────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 2fr) minmax(0, 1fr)', gap: 12, alignItems: 'start' }}>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 items-start">
 
         {/* Revenue Overview */}
-        <div className="ds-card" style={{ padding: '18px 20px' }}>
+        <div className="ds-card lg:col-span-2 flex flex-col" style={{ padding: '18px 20px', height: '100%' }}>
           <div className="flex items-center justify-between mb-5">
             <div>
               <h2 style={{ fontSize: 14, fontWeight: 600, color: '#0A0A0B', letterSpacing: '-0.01em' }}>Revenue Overview</h2>
@@ -608,7 +608,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
         </div>
 
         {/* Recent Activity */}
-        <div className="ds-card" style={{ padding: '18px 20px', height: '100%' }}>
+        <div className="ds-card lg:col-span-1 flex flex-col" style={{ padding: '18px 20px', height: '100%' }}>
           <SectionHeader title="Recent Activity" action="View all" onAction={() => onNavigate?.('notifications')} />
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
@@ -650,7 +650,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
       </div>
 
       {/* ── Bottom 3-col ─────────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12, alignItems: 'start' }}>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 items-start">
 
         {/* Occupancy by Property */}
         <div className="ds-card" style={{ padding: '18px 20px' }}>

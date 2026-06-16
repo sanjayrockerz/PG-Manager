@@ -794,7 +794,7 @@ export function AdminSection() {
         </div>
 
         {/* 8 KPI Cards (2 rows of 4) */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="bg-white/80 backdrop-blur-sm rounded-[20px] p-6 shadow-[0_4px_24px_rgba(0,0,0,0.02)] border border-gray-100 hover:-translate-y-0.5 hover:shadow-[0_8px_32px_rgba(0,0,0,0.04)] transition-all duration-300 flex items-start justify-between">
             <div className="min-w-0">
               <p className="text-[11px] text-gray-500 uppercase tracking-widest font-semibold mb-2">Monthly Recurring Revenue</p>
@@ -934,7 +934,7 @@ export function AdminSection() {
         </div>
 
         {/* 4 KPI Cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="bg-white/80 backdrop-blur-sm rounded-[20px] p-6 shadow-[0_4px_24px_rgba(0,0,0,0.02)] border border-gray-100 hover:-translate-y-0.5 hover:shadow-[0_8px_32px_rgba(0,0,0,0.04)] transition-all duration-300 flex items-start justify-between">
             <div className="min-w-0">
               <p className="text-[11px] text-gray-500 uppercase tracking-widest font-semibold mb-2">Total Owners</p>
@@ -1120,9 +1120,9 @@ export function AdminSection() {
     const subscription = ownerDetail?.subscription ?? summary?.subscriptions.find((s) => s.ownerId === selectedOwner.id);
 
     return (
-      <div className="fixed inset-0 z-50 flex justify-end">
+      <div className="fixed inset-0 z-[100] flex flex-col justify-end md:flex-row">
         <div className="absolute inset-0 bg-black/30 backdrop-blur-sm transition-opacity" onClick={() => setIsOwnerDrawerOpen(false)} />
-        <div className="relative w-full max-w-3xl bg-white h-full shadow-2xl flex flex-col animate-in slide-in-from-right duration-300">
+        <div className="relative w-full h-[90dvh] md:h-full md:max-w-3xl bg-white shadow-2xl flex flex-col animate-in slide-in-from-bottom md:slide-in-from-right duration-300 rounded-t-2xl md:rounded-none">
           <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 shrink-0">
             <div>
               <h2 className="text-xl font-semibold text-gray-900">{selectedOwner.name}</h2>
@@ -1165,7 +1165,7 @@ export function AdminSection() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
                   <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
                     <p className="text-xs text-gray-500 uppercase">Properties</p>
                     <p className="text-2xl font-semibold text-gray-900 mt-1">{selectedOwner.propertyCount}</p>
@@ -1384,7 +1384,7 @@ export function AdminSection() {
         </div>
 
         {/* 4 MRR KPI Cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="bg-white rounded-xl border border-gray-200 p-5">
             <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-1">Total MRR</p>
             <p className="text-2xl font-bold text-gray-900 tabular-nums">{formatRs(summary.stats.monthlyRevenue)}</p>
@@ -1536,7 +1536,7 @@ export function AdminSection() {
         </div>
 
         {/* 4 KPI Cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
             <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-1">Total Processed</p>
             <p className="text-2xl font-bold text-gray-900 tabular-nums">{formatRs(stats.totalRevenue)}</p>

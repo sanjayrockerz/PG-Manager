@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Check,
   ChevronDown,
@@ -928,9 +928,9 @@ export function TeamMembers() {
           </div>
         )}
         {isManager && workspaceMembers.length > 0 && (
-          <div className="divide-y divide-gray-100">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 p-4 bg-gray-50/50">
             {workspaceMembers.map((member) => (
-              <div key={member.id} className="px-5 py-4">
+              <div key={member.id} className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm hover:shadow-md transition-shadow">
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -940,7 +940,7 @@ export function TeamMembers() {
                       </span>
                     </div>
                     <p className="text-xs text-gray-500 mt-0.5">{member.email}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">{member.propertyIds.length} propert{member.propertyIds.length === 1 ? 'y' : 'ies'} shared</p>
+                    <p className="text-xs text-gray-400 mt-2">{member.propertyIds.length} propert{member.propertyIds.length === 1 ? 'y' : 'ies'} shared</p>
                   </div>
                 </div>
               </div>
@@ -955,12 +955,12 @@ export function TeamMembers() {
             <p className="text-sm text-gray-500">No active members yet. Invite someone to get started.</p>
           </div>
         ) : !isManager && (
-          <div className="divide-y divide-gray-100">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 p-4 bg-gray-50/50">
             {members.map((member) => (
-              <div key={member.id} className="px-5 py-4">
+              <div key={member.id} className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm hover:shadow-md transition-shadow flex flex-col">
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
+                    <div className="flex items-center gap-2 flex-wrap mb-1">
                       <p className="text-sm font-medium text-gray-900 truncate">
                         {member.name || member.email}
                       </p>
@@ -968,12 +968,12 @@ export function TeamMembers() {
                         {member.displayRole}
                       </span>
                     </div>
-                    <p className="text-xs text-gray-500 mt-0.5">{member.email}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">
+                    <p className="text-xs text-gray-500">{member.email}</p>
+                    <p className="text-xs text-gray-400 mt-2 font-medium">
                       {member.propertyAssignments.length} propert{member.propertyAssignments.length === 1 ? 'y' : 'ies'} assigned
                     </p>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1">
                     <button
                       onClick={() => setExpandedMemberId(expandedMemberId === member.id ? null : member.id)}
                       className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors"
@@ -1092,16 +1092,16 @@ export function TeamMembers() {
             <p className="text-sm text-gray-500">No pending invites.</p>
           </div>
         ) : (
-          <div className="divide-y divide-gray-100">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 p-4 bg-gray-50/50">
             {pendingInvites.map((invite) => {
               const expiresDate = new Date(invite.expiresAt);
               const isAlmostExpired = (expiresDate.getTime() - Date.now()) < 24 * 60 * 60 * 1000;
 
               return (
-                <div key={invite.id} className="px-5 py-4">
+                <div key={invite.id} className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm hover:shadow-md transition-shadow flex flex-col">
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
+                      <div className="flex items-center gap-2 flex-wrap mb-1">
                         <p className="text-sm font-medium text-gray-900 truncate">{invite.invitedEmail}</p>
                         <span className={`px-2 py-0.5 rounded text-xs font-medium ${roleColor(invite.displayRole)}`}>
                           {invite.displayRole}
@@ -1110,15 +1110,15 @@ export function TeamMembers() {
                           {invite.status}
                         </span>
                       </div>
-                      <p className="text-xs text-gray-400 mt-0.5">
+                      <p className="text-xs text-gray-400 mt-2">
                         Properties: {invite.propertyIds.map(getPropertyName).join(', ')}
                       </p>
-                      <p className={`text-xs mt-0.5 ${isAlmostExpired ? 'text-red-500' : 'text-gray-400'}`}>
+                      <p className={`text-xs mt-1 font-medium ${isAlmostExpired ? 'text-red-500' : 'text-gray-400'}`}>
                         Expires: {expiresDate.toLocaleDateString('en-IN')}
                         {isAlmostExpired ? ' (expires soon)' : ''}
                       </p>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1">
                       <button
                         onClick={() => void handleCopyInvite(invite.token)}
                         className="p-1.5 hover:bg-slate-50 rounded-lg transition-colors"

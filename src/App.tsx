@@ -448,7 +448,7 @@ function AppContent() {
   return (
     <PropertyProvider>
       <WorkspaceProvider>
-      <div className="flex flex-col h-screen bg-[#F8FAFC] overflow-hidden">
+      <div className="flex flex-col h-[100dvh] bg-[#F8FAFC] overflow-hidden">
         {/* Full-width workspace header */}
         <Header
           setSidebarOpen={setSidebarOpen}

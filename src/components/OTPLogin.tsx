@@ -425,14 +425,14 @@ export function OTPLogin({ onSwitchToSignup, portalType, onBack }: OTPLoginProps
               <div className="space-y-2">
                 <label className="text-sm font-medium text-slate-700" htmlFor="owner-email">Email address</label>
                 <div className="relative">
-                  <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                   <input
                     id="owner-email"
                     type="email"
                     value={email}
                     onChange={(e) => { setEmail(e.target.value); if (error) setError(''); }}
                     maxLength={EMAIL_MAX_LENGTH}
-                    className="w-full pl-9 pr-3 py-2.5 text-sm border border-[#E5E7EB] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#6366F1]/30 focus:border-[#6366F1] transition-all"
+                    className="w-full h-12 pl-10 pr-4 text-sm border border-[#E5E7EB] rounded-xl focus:outline-none focus:ring-2 focus:ring-[#6366F1]/30 focus:border-[#6366F1] transition-all"
                     placeholder="you@example.com"
                   />
                 </div>
@@ -441,7 +441,7 @@ export function OTPLogin({ onSwitchToSignup, portalType, onBack }: OTPLoginProps
               {error && <p className="text-sm text-red-600">! {error}</p>}
 
               {isSent && (
-                <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">
+                <div className="rounded-lg border border-green-200 bg-green-50 px-3 py-3 text-sm text-green-700">
                   Sign-in link sent to {email.trim().toLowerCase()}. Check your inbox.
                 </div>
               )}
@@ -449,13 +449,13 @@ export function OTPLogin({ onSwitchToSignup, portalType, onBack }: OTPLoginProps
               <button
                 type="submit"
                 disabled={isLoading}
-                className="w-full py-2.5 bg-[#6366F1] text-white rounded-xl text-sm font-semibold hover:bg-[#4F46E5] transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                className="w-full h-12 bg-[#6366F1] text-white rounded-xl text-sm font-semibold hover:bg-[#4F46E5] transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {isLoading ? 'Sending…' : 'Send Magic Link'}
                 {!isLoading && <ArrowRight className="w-4 h-4" />}
               </button>
 
-              <div className="relative">
+              <div className="relative py-2">
                 <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-[#E5E7EB]" /></div>
                 <div className="relative flex justify-center text-xs"><span className="px-3 bg-white text-slate-500">or</span></div>
               </div>
@@ -464,7 +464,7 @@ export function OTPLogin({ onSwitchToSignup, portalType, onBack }: OTPLoginProps
                 type="button"
                 onClick={() => void handleGoogleSignIn()}
                 disabled={isLoading}
-                className="w-full py-2.5 border border-[#E5E7EB] text-slate-700 rounded-xl text-sm font-semibold hover:bg-slate-50 transition-colors disabled:opacity-50"
+                className="w-full h-12 border border-[#E5E7EB] text-slate-700 rounded-xl text-sm font-semibold hover:bg-slate-50 transition-colors disabled:opacity-50"
               >
                 Continue with Google
               </button>

@@ -11,7 +11,7 @@ import {
   AlertTriangle, Archive, ChevronRight, ChevronLeft,
   ReceiptText, Plus, Trash2, Printer, History,
   Upload, Eye, Download, Activity, CreditCard, X,
-  ImageIcon, Receipt, UserCheck,
+  ImageIcon, Receipt, UserCheck, ChevronDown,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useProperty } from '../contexts/PropertyContext';
@@ -1457,78 +1457,56 @@ function DocumentsTab({
   const paidPayments = payments.filter((p) => p.status === 'paid');
 
   return (
-    <div className="space-y-4">
-      {/* Category nav pills */}
-      <div className="flex gap-2 overflow-x-auto pb-1">
-        {DOC_CATEGORY_CONFIG.map(({ id, label }) => (
-          <button
-            key={id}
-            onClick={() => setCategory(id)}
-            className={`flex-shrink-0 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
-              category === id
-                ? 'bg-indigo-600 text-white'
-                : 'bg-white border border-gray-200 text-gray-600 hover:bg-gray-50'
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {category === 'agreements' && (
-        <AgreementTab tenant={tenant} property={property} />
-      )}
-
-      {category === 'receipts' && (
-        <Card className="border-gray-200">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <ReceiptText className="w-4 h-4 text-indigo-600" /> Payment Receipts
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {paidPayments.length === 0 ? (
-              <p className="text-center py-8 text-gray-400 text-sm">
-                No receipts yet — receipts are generated when payments are marked as paid
-              </p>
-            ) : (
-              <div className="space-y-2">
-                {paidPayments.map((p) => (
-                  <div key={p.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
-                    <div>
-                      <p className="text-sm font-medium text-gray-900">
-                        {new Date(p.dueDate).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}
-                      </p>
-                      <p className="text-xs text-gray-500">
-                        ₹{p.totalAmount.toLocaleString('en-IN')} · Paid {p.paidDate ? new Date(p.paidDate).toLocaleDateString('en-IN') : '—'}
-                      </p>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-7 text-xs gap-1"
-                      onClick={() => onOpenDocument(p)}
-                    >
-                      <Printer className="w-3.5 h-3.5" /> Receipt
-                    </Button>
+    <div className="space-y-3">
+      {DOC_CATEGORY_CONFIG.map(({ id, label }) => {
+        const isOpen = category === id;
+        return (
+          <div key={id} className="border border-gray-200 rounded-lg bg-white overflow-hidden">
+            <button
+              onClick={() => setCategory(isOpen ? ('' as DocCategory) : id)}
+              className="w-full flex items-center justify-between p-4 bg-gray-50 hover:bg-gray-100 transition-colors text-left"
+            >
+              <span className="font-medium text-gray-900">{label}</span>
+              <ChevronDown className={`w-5 h-5 text-gray-500 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+            </button>
+            {isOpen && (
+              <div className="p-4 border-t border-gray-200 bg-white">
+                {id === 'agreements' && <AgreementTab tenant={tenant} property={property} />}
+                {id === 'receipts' && (
+                  <div className="space-y-2">
+                    {paidPayments.length === 0 ? (
+                      <p className="text-center py-4 text-gray-400 text-sm">No receipts yet</p>
+                    ) : (
+                      paidPayments.map((p) => (
+                        <div key={p.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
+                          <div>
+                            <p className="text-sm font-medium text-gray-900">
+                              {new Date(p.dueDate).toLocaleDateString('en-IN', { month: 'long', year: 'numeric' })}
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              ₹{p.totalAmount.toLocaleString('en-IN')} · Paid {p.paidDate ? new Date(p.paidDate).toLocaleDateString('en-IN') : '—'}
+                            </p>
+                          </div>
+                          <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => onOpenDocument(p)}>
+                            <Printer className="w-3.5 h-3.5" /> Receipt
+                          </Button>
+                        </div>
+                      ))
+                    )}
                   </div>
-                ))}
+                )}
+                {id === 'identity' && (
+                  <div className="grid grid-cols-1 gap-6">
+                    <IdProofSection tenant={tenant} onUpdate={onTenantUpdate} />
+                    <DocumentVaultTab tenant={tenant} allowedGroups={['id_proof']} />
+                  </div>
+                )}
+                {id === 'other' && <DocumentVaultTab tenant={tenant} allowedGroups={['other']} />}
               </div>
             )}
-          </CardContent>
-        </Card>
-      )}
-
-      {category === 'identity' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <IdProofSection tenant={tenant} onUpdate={onTenantUpdate} />
-          <DocumentVaultTab tenant={tenant} allowedGroups={['id_proof']} />
-        </div>
-      )}
-
-      {category === 'other' && (
-        <DocumentVaultTab tenant={tenant} allowedGroups={['other']} />
-      )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -1763,21 +1741,21 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-                <div className="flex items-center gap-2 text-gray-600">
-                  <Mail className="w-4 h-4 flex-shrink-0" />
-                  <span className="text-sm truncate">{tenant.email}</span>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="flex items-center gap-2 text-gray-600 bg-gray-50 border border-gray-100 rounded-lg p-3">
+                  <Mail className="w-4 h-4 flex-shrink-0 text-indigo-500" />
+                  <span className="text-sm truncate">{tenant.email || 'No email'}</span>
                 </div>
-                <div className="flex items-center gap-2 text-gray-600">
-                  <Phone className="w-4 h-4 flex-shrink-0" />
-                  <span className="text-sm">{tenant.phone}</span>
+                <div className="flex items-center gap-2 text-gray-600 bg-gray-50 border border-gray-100 rounded-lg p-3">
+                  <Phone className="w-4 h-4 flex-shrink-0 text-indigo-500" />
+                  <span className="text-sm">{tenant.phone || 'No phone'}</span>
                 </div>
-                <div className="flex items-center gap-2 text-gray-600">
-                  <MapPin className="w-4 h-4 flex-shrink-0" />
+                <div className="flex items-center gap-2 text-gray-600 bg-gray-50 border border-gray-100 rounded-lg p-3">
+                  <MapPin className="w-4 h-4 flex-shrink-0 text-indigo-500" />
                   <span className="text-sm truncate">{getPropertyName(tenant.propertyId)}</span>
                 </div>
-                <div className="flex items-center gap-2 text-gray-600">
-                  <User className="w-4 h-4 flex-shrink-0" />
+                <div className="flex items-center gap-2 text-gray-600 bg-gray-50 border border-gray-100 rounded-lg p-3">
+                  <User className="w-4 h-4 flex-shrink-0 text-indigo-500" />
                   <span className="text-sm">Floor {tenant.floor} · Room {tenant.room}{tenant.bed ? ` · Bed ${tenant.bed}` : ''}</span>
                 </div>
               </div>

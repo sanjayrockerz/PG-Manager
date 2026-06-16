@@ -405,7 +405,7 @@ export function Tenants({ onViewTenant }: TenantsProps) {
               <FieldError msg={addErrors.email} />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="flex flex-col gap-1">
                 <Label className="text-xs font-semibold">Date of Birth</Label>
                 <Input
@@ -592,7 +592,7 @@ export function Tenants({ onViewTenant }: TenantsProps) {
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="flex flex-col gap-1">
                 <Label className="text-xs font-semibold">Monthly Rent (₹) <span className="text-red-500">*</span></Label>
                 <Input
@@ -618,7 +618,7 @@ export function Tenants({ onViewTenant }: TenantsProps) {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="flex flex-col gap-1">
                 <Label className="text-xs font-semibold">Rent Due Day (1–28)</Label>
                 <Input
@@ -647,7 +647,7 @@ export function Tenants({ onViewTenant }: TenantsProps) {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="flex flex-col gap-1">
                 <Label className="text-xs font-semibold">Join Date <span className="text-red-500">*</span></Label>
                 <Input
@@ -668,7 +668,7 @@ export function Tenants({ onViewTenant }: TenantsProps) {
             <WizardStepIndicator />
             <p className="text-sm font-semibold text-gray-900">ID &amp; Documents</p>
 
-            <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg grid grid-cols-2 gap-1.5">
+            <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg grid grid-cols-1 sm:grid-cols-2 gap-1.5">
               {([
                 ['Name', addForm.name || '—'],
                 ['Phone', addForm.phone || '—'],
@@ -692,7 +692,7 @@ export function Tenants({ onViewTenant }: TenantsProps) {
               ))}
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="flex flex-col gap-1">
                 <Label className="text-xs font-semibold">ID Type <span className="text-red-500">*</span></Label>
                 <select
