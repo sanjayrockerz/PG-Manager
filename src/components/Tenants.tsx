@@ -859,38 +859,42 @@ export function Tenants({ onViewTenant }: TenantsProps) {
 
       {/* ── Operational alerts (compact single-line) ───── */}
       {(overdueTenants.length > 0 || vacatingTenants.length > 0) && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {overdueTenants.length > 0 && (
-            <div className="flex items-center justify-between rounded-lg"
-              style={{ padding: '7px 12px', background: '#FEF2F2', border: '1px solid #FECACA', gap: 10 }}>
-              <div className="flex items-center gap-2">
-                <AlertCircle style={{ width: 13, height: 13, color: '#DC2626', flexShrink: 0 }} />
-                <p style={{ fontSize: 12, fontWeight: 500, color: '#991B1B' }}>
-                  <strong>{overdueTenants.length}</strong> overdue —{' '}
-                  {overdueTenants.slice(0, 3).map((t) => t.name).join(', ')}{overdueTenants.length > 3 ? ` +${overdueTenants.length - 3}` : ''}
-                </p>
+            <button
+              onClick={() => setFilterStatus('payment_overdue')}
+              className="ds-action-card"
+              style={{ '--action-1': 'var(--ds-danger)', '--action-wash': 'var(--ds-danger-subtle)' } as React.CSSProperties}
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="ds-action-icon"><AlertCircle style={{ width: 16, height: 16 }} /></div>
+                <div className="min-w-0">
+                  <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--ds-danger-text)' }}>
+                    <span className="ds-badge ds-badge-danger" style={{ marginRight: 6 }}>{overdueTenants.length} overdue</span>
+                    {overdueTenants.slice(0, 3).map((t) => t.name).join(', ')}{overdueTenants.length > 3 ? ` +${overdueTenants.length - 3}` : ''}
+                  </p>
+                </div>
               </div>
-              <button onClick={() => setFilterStatus('payment_overdue')} className="ds-btn ds-btn-secondary flex-shrink-0"
-                style={{ fontSize: 11, padding: '3px 8px', borderColor: '#FECACA', color: '#991B1B' }}>
-                Filter
-              </button>
-            </div>
+              <ChevronRight className="ds-action-chevron" style={{ width: 15, height: 15 }} />
+            </button>
           )}
           {vacatingTenants.length > 0 && (
-            <div className="flex items-center justify-between rounded-lg"
-              style={{ padding: '7px 12px', background: '#FFFBEB', border: '1px solid #FDE68A', gap: 10 }}>
-              <div className="flex items-center gap-2">
-                <Clock style={{ width: 13, height: 13, color: '#D97706', flexShrink: 0 }} />
-                <p style={{ fontSize: 12, fontWeight: 500, color: '#92400E' }}>
-                  <strong>{vacatingTenants.length}</strong> vacating —{' '}
-                  {vacatingTenants.slice(0, 3).map((t) => `${t.name}${t.vacateDate ? ` (${new Date(t.vacateDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })})` : ''}`).join(', ')}
-                </p>
+            <button
+              onClick={() => setFilterStatus('notice_submitted')}
+              className="ds-action-card"
+              style={{ '--action-1': 'var(--ds-warning)', '--action-wash': 'var(--ds-warning-subtle)' } as React.CSSProperties}
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="ds-action-icon"><Clock style={{ width: 16, height: 16 }} /></div>
+                <div className="min-w-0">
+                  <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--ds-warning-text)' }}>
+                    <span className="ds-badge ds-badge-warning" style={{ marginRight: 6 }}>{vacatingTenants.length} vacating</span>
+                    {vacatingTenants.slice(0, 3).map((t) => `${t.name}${t.vacateDate ? ` (${new Date(t.vacateDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })})` : ''}`).join(', ')}
+                  </p>
+                </div>
               </div>
-              <button onClick={() => setFilterStatus('notice_submitted')} className="ds-btn ds-btn-secondary flex-shrink-0"
-                style={{ fontSize: 11, padding: '3px 8px', borderColor: '#FDE68A', color: '#92400E' }}>
-                Filter
-              </button>
-            </div>
+              <ChevronRight className="ds-action-chevron" style={{ width: 15, height: 15 }} />
+            </button>
           )}
         </div>
       )}
@@ -900,22 +904,18 @@ export function Tenants({ onViewTenant }: TenantsProps) {
 
         {/* Filter + search merged */}
         <div style={{ padding: '8px 12px', borderBottom: '1px solid #F4F4F6', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div className="flex items-center gap-1.5" style={{ flexShrink: 0, overflowX: 'auto' }}>
+          <div className="ds-tab-bar" style={{ flexShrink: 0, overflowX: 'auto', flexWrap: 'nowrap' }}>
             {(['all', 'active', 'payment_overdue', 'notice_submitted', 'vacating', 'inactive', 'archived'] as const).map((s) => (
               <button
                 key={s}
                 onClick={() => setFilterStatus(s)}
-                style={{
-                  fontSize: 11, fontWeight: 500, padding: '3px 9px', borderRadius: 99, cursor: 'pointer',
-                  whiteSpace: 'nowrap', flexShrink: 0,
-                  border: `1px solid ${filterStatus === s ? '#6366F1' : '#E4E4E7'}`,
-                  background: filterStatus === s ? '#6366F1' : '#fff',
-                  color: filterStatus === s ? '#fff' : '#52525B',
-                  transition: 'all 0.15s',
-                }}
+                className={`ds-tab ${filterStatus === s ? 'ds-tab-active' : ''}`}
               >
                 {s === 'all' ? 'All' : TENANT_STATUS_LABELS[s as TenantStatus]}
-                <span style={{ marginLeft: 4, opacity: 0.75, fontSize: 10 }}>
+                <span
+                  className={filterStatus === s ? 'ds-kpi-badge' : 'ds-badge ds-badge-neutral'}
+                  style={{ fontSize: 10, padding: '1px 5px', marginLeft: 3 }}
+                >
                   {filterCounts[s as keyof typeof filterCounts] ?? 0}
                 </span>
               </button>
