@@ -57,18 +57,18 @@ const DEFAULT_CAPS_FOR_ROLE: Record<DisplayRole, InviteCapabilities> = {
 
 function roleColor(role: DisplayRole) {
   switch (role) {
-    case 'viewer': return 'bg-gray-100 text-gray-600';
-    case 'editor': return 'bg-indigo-50 text-indigo-700';
-    case 'manager': return 'bg-indigo-100 text-indigo-800';
+    case 'viewer': return 'ds-badge ds-badge-neutral';
+    case 'editor': return 'ds-badge ds-badge-accent';
+    case 'manager': return 'ds-badge ds-badge-accent';
   }
 }
 
 function statusColor(status: InviteRecord['status']) {
   switch (status) {
-    case 'pending': return 'bg-amber-50 text-amber-700';
-    case 'accepted': return 'bg-green-50 text-green-700';
-    case 'revoked': return 'bg-red-50 text-red-700';
-    case 'expired': return 'bg-gray-100 text-gray-500';
+    case 'pending': return 'ds-badge ds-badge-warning';
+    case 'accepted': return 'ds-badge ds-badge-success';
+    case 'revoked': return 'ds-badge ds-badge-danger';
+    case 'expired': return 'ds-badge ds-badge-neutral';
   }
 }
 
@@ -170,15 +170,15 @@ function EditScopeDialog({
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl">
+    <div className="fixed inset-0 flex items-center justify-center p-4 z-50" style={{ background: 'rgba(0,0,0,0.45)' }}>
+      <div className="ds-card max-w-sm w-full" style={{ padding: 0 }}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
           <div>
             <h3 className="text-sm font-semibold text-gray-900">Edit Property Access</h3>
             <p className="text-xs text-gray-500 mt-0.5 truncate max-w-[220px]">{propertyName} Â· {memberEmail}</p>
           </div>
-          <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-lg">
-            <X className="w-4 h-4 text-gray-500" />
+          <button onClick={onClose} className="ds-btn ds-btn-secondary" style={{ padding: '4px 8px' }}>
+            <X className="w-4 h-4" />
           </button>
         </div>
 
@@ -239,14 +239,14 @@ function EditScopeDialog({
             <button
               type="button"
               onClick={onClose}
-              className="flex-1 py-2 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50"
+              className="ds-btn ds-btn-secondary flex-1"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="flex-1 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 disabled:opacity-60"
+              className="ds-btn ds-btn-primary flex-1"
             >
               {isSubmitting ? 'Saving...' : 'Save Changes'}
             </button>
@@ -304,15 +304,15 @@ function AddPropertyScopeDialog({
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-2xl max-w-sm w-full shadow-2xl">
+    <div className="fixed inset-0 flex items-center justify-center p-4 z-50" style={{ background: 'rgba(0,0,0,0.45)' }}>
+      <div className="ds-card max-w-sm w-full" style={{ padding: 0 }}>
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
           <div>
             <h3 className="text-sm font-semibold text-gray-900">Add Property Access</h3>
             <p className="text-xs text-gray-500 mt-0.5 truncate max-w-[220px]">{memberEmail}</p>
           </div>
-          <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-lg">
-            <X className="w-4 h-4 text-gray-500" />
+          <button onClick={onClose} className="ds-btn ds-btn-secondary" style={{ padding: '4px 8px' }}>
+            <X className="w-4 h-4" />
           </button>
         </div>
 
@@ -407,14 +407,14 @@ function AddPropertyScopeDialog({
                 <button
                   type="button"
                   onClick={onClose}
-                  className="flex-1 py-2 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50"
+                  className="ds-btn ds-btn-secondary flex-1"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={isSubmitting || !selectedPropertyId}
-                  className="flex-1 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700 disabled:opacity-60"
+                  className="ds-btn ds-btn-primary flex-1"
                 >
                   {isSubmitting ? 'Granting...' : 'Grant Access'}
                 </button>
@@ -426,7 +426,7 @@ function AddPropertyScopeDialog({
             <button
               type="button"
               onClick={onClose}
-              className="w-full py-2 border border-gray-300 rounded-lg text-sm text-gray-600 hover:bg-gray-50"
+              className="ds-btn ds-btn-secondary w-full"
             >
               Close
             </button>
@@ -692,7 +692,7 @@ function InviteDialog({ onClose, onSuccess, allowedRoles, workspaceOwnerId, scop
               <button
                 type="submit"
                 disabled={isSubmitting || !formData.propertyIds.length}
-                className="px-5 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-60"
+                className="ds-btn ds-btn-primary"
               >
                 {isSubmitting ? 'Creating...' : 'Create Invite'}
               </button>
@@ -890,7 +890,7 @@ export function TeamMembers() {
         </div>
         <button
           onClick={() => setShowInviteDialog(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition-colors"
+          className="ds-btn ds-btn-primary flex items-center gap-2"
         >
           <Plus className="w-4 h-4" />
           {isManager ? 'Invite Editor / Viewer' : 'Invite Member'}
