@@ -170,7 +170,7 @@ export function Support() {
             }));
             setShowCreateModal(true);
           }}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+          className="ds-btn ds-btn-primary flex items-center gap-2"
         >
           <Plus className="w-4 h-4" />
           Raise Ticket
@@ -178,42 +178,44 @@ export function Support() {
       </div>
 
       {errorMessage && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div className="ds-card" style={{ padding: '10px 14px', background: 'var(--ds-danger-subtle)', borderColor: 'var(--ds-danger-border)', color: 'var(--ds-danger-text)', fontSize: 13 }}>
           {errorMessage}
         </div>
       )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white rounded-xl p-4 border border-gray-200">
-          <p className="text-xs text-gray-500 uppercase tracking-wide">Total</p>
-          <p className="text-2xl text-gray-900 mt-2">{stats.total}</p>
+        <div className="ds-card" style={{ padding: 16 }}>
+          <p className="ds-label" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Total</p>
+          <p className="ds-kpi-value" style={{ fontSize: 24, marginTop: 8 }}>{stats.total}</p>
         </div>
-        <div className="bg-white rounded-xl p-4 border border-gray-200">
-          <p className="text-xs text-gray-500 uppercase tracking-wide">Open</p>
-          <p className="text-2xl text-red-700 mt-2">{stats.open}</p>
+        <div className="ds-card" style={{ padding: 16 }}>
+          <p className="ds-label" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Open</p>
+          <p style={{ fontSize: 24, fontWeight: 700, color: 'var(--ds-danger)', marginTop: 8 }}>{stats.open}</p>
         </div>
-        <div className="bg-white rounded-xl p-4 border border-gray-200">
-          <p className="text-xs text-gray-500 uppercase tracking-wide">In Progress</p>
-          <p className="text-2xl text-yellow-700 mt-2">{stats.inProgress}</p>
+        <div className="ds-card" style={{ padding: 16 }}>
+          <p className="ds-label" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>In Progress</p>
+          <p style={{ fontSize: 24, fontWeight: 700, color: 'var(--ds-warning)', marginTop: 8 }}>{stats.inProgress}</p>
         </div>
-        <div className="bg-white rounded-xl p-4 border border-gray-200">
-          <p className="text-xs text-gray-500 uppercase tracking-wide">Resolved</p>
-          <p className="text-2xl text-green-700 mt-2">{stats.resolved}</p>
+        <div className="ds-card" style={{ padding: 16 }}>
+          <p className="ds-label" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Resolved</p>
+          <p style={{ fontSize: 24, fontWeight: 700, color: 'var(--ds-success)', marginTop: 8 }}>{stats.resolved}</p>
         </div>
       </div>
 
       <div className="space-y-3">
         {isLoading ? (
-          <div className="bg-white rounded-xl border border-gray-200 p-8 text-center text-sm text-gray-500">
-            Loading support tickets...
+          <div className="ds-card" style={{ padding: 32, textAlign: 'center' }}>
+            <div className="ds-skeleton" style={{ height: 14, width: 160, margin: '0 auto', borderRadius: 99 }} />
           </div>
         ) : tickets.length === 0 ? (
-          <div className="bg-white rounded-xl border border-gray-200 p-8 text-center text-sm text-gray-500">
-            No support tickets raised yet.
+          <div className="ds-empty-state">
+            <div className="ds-empty-icon"><HeadphonesIcon /></div>
+            <p className="ds-empty-title">No support tickets yet</p>
+            <p className="ds-empty-description">Raise a ticket to escalate billing or technical issues.</p>
           </div>
         ) : (
           tickets.map((ticket) => (
-            <div key={ticket.id} className="bg-white rounded-xl border border-gray-200 p-4 space-y-4">
+            <div key={ticket.id} className="ds-card" style={{ padding: 16 }}>
               <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
                 <div>
                   <div className="flex items-center gap-2">
@@ -229,7 +231,7 @@ export function Support() {
                 <select
                   value={ticket.status}
                   onChange={(event) => void updateTicketStatus(ticket.id, event.target.value as SupportTicketStatus)}
-                  className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                  className="ds-select"
                 >
                   <option value="open">Open</option>
                   <option value="in_progress">In Progress</option>
@@ -240,7 +242,7 @@ export function Support() {
 
               <div className="space-y-2">
                 {ticket.comments.length > 0 ? (
-                  <div className="bg-gray-50 rounded-lg p-3 space-y-2">
+                  <div className="ds-card" style={{ padding: '10px 12px', background: 'var(--ds-bg)' }}>
                     {ticket.comments.map((comment) => (
                       <div key={comment.id} className="text-sm text-gray-700">
                         <p>{comment.message}</p>
@@ -257,12 +259,12 @@ export function Support() {
                     value={commentDrafts[ticket.id] ?? ''}
                     onChange={(event) => setCommentDrafts((current) => ({ ...current, [ticket.id]: event.target.value }))}
                     placeholder="Add a comment..."
-                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                    className="ds-input flex-1"
                   />
                   <button
                     onClick={() => void addComment(ticket.id)}
                     disabled={isSaving}
-                    className="px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60"
+                    className="ds-btn ds-btn-primary"
                   >
                     <Send className="w-4 h-4" />
                   </button>
@@ -274,23 +276,23 @@ export function Support() {
       </div>
 
       {showCreateModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={() => setShowCreateModal(false)}>
-          <div className="bg-white rounded-xl max-w-2xl w-full" onClick={(event) => event.stopPropagation()}>
-            <div className="p-5 border-b border-gray-200 flex items-center justify-between">
+        <div className="fixed inset-0 flex items-center justify-center p-4 z-50" style={{ background: 'rgba(0,0,0,0.45)' }} onClick={() => setShowCreateModal(false)}>
+          <div className="ds-card max-w-2xl w-full" style={{ padding: 0 }} onClick={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between" style={{ padding: '16px 20px', borderBottom: '1px solid var(--ds-border)' }}>
               <h2 className="text-gray-900">Raise Support Ticket</h2>
-              <button onClick={() => setShowCreateModal(false)} className="p-2 hover:bg-gray-100 rounded-lg transition-colors">
+              <button onClick={() => setShowCreateModal(false)} className="ds-btn ds-btn-secondary" style={{ padding: '6px 8px' }}>
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <form onSubmit={(event) => void submitTicket(event)} className="p-5 space-y-4">
+            <form onSubmit={(event) => void submitTicket(event)} style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm text-gray-600 mb-2">Property</label>
+                  <label className="ds-label" style={{ display: 'block', marginBottom: 6 }}>Property</label>
                   <select
                     value={formData.propertyId}
                     onChange={(event) => setFormData((current) => ({ ...current, propertyId: event.target.value }))}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-white"
+                    className="ds-select w-full"
                   >
                     <option value="">General owner-level ticket</option>
                     {properties.map((property) => (
@@ -299,11 +301,11 @@ export function Support() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm text-gray-600 mb-2">Category</label>
+                  <label className="ds-label" style={{ display: 'block', marginBottom: 6 }}>Category</label>
                   <select
                     value={formData.category}
                     onChange={(event) => setFormData((current) => ({ ...current, category: event.target.value as SupportTicketCategory }))}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg bg-white"
+                    className="ds-select w-full"
                   >
                     {categoryOptions.map((option) => (
                       <option key={option} value={option}>{option}</option>
@@ -331,7 +333,7 @@ export function Support() {
                   required
                   value={formData.subject}
                   onChange={(event) => setFormData((current) => ({ ...current, subject: event.target.value }))}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                  className="ds-input w-full"
                   placeholder="Short summary of the issue"
                 />
               </div>
@@ -343,16 +345,16 @@ export function Support() {
                   rows={4}
                   value={formData.description}
                   onChange={(event) => setFormData((current) => ({ ...current, description: event.target.value }))}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                  className="ds-input w-full"
                   placeholder="Include details, impact, and desired resolution"
                 />
               </div>
 
-              <div className="flex justify-end gap-3 pt-2">
-                <button type="button" onClick={() => setShowCreateModal(false)} className="px-5 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">
+              <div className="flex justify-end gap-3" style={{ paddingTop: 8 }}>
+                <button type="button" onClick={() => setShowCreateModal(false)} className="ds-btn ds-btn-secondary">
                   Cancel
                 </button>
-                <button type="submit" disabled={isSaving} className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-60">
+                <button type="submit" disabled={isSaving} className="ds-btn ds-btn-primary" style={{ opacity: isSaving ? 0.6 : 1 }}>
                   {isSaving ? 'Creating...' : 'Create Ticket'}
                 </button>
               </div>
