@@ -30,6 +30,7 @@ import type { TenantRecord, TenantCreateInput, TenantStatus } from '../services/
 import { TENANT_STATUS_LABELS, TENANT_STATUS_COLORS } from '../services/supabaseData';
 import { downloadCSVTemplate } from '../services/csvImport';
 import type { CSVImportResult } from '../services/supabaseData';
+import { KpiCard } from './ui/KpiCard';
 
 interface TenantsProps {
   onViewTenant: (tenantId: string) => void;
@@ -846,45 +847,14 @@ export function Tenants({ onViewTenant }: TenantsProps) {
 
       {/* ── KPI Cards ───────────────────────── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <div className="bg-[#FAF5FF] rounded-2xl border border-[#F3E8FF] p-4 flex items-center justify-between shadow-xs">
-          <div>
-            <p className="text-xs text-gray-500 font-medium">Total Tenants</p>
-            <p className="text-xl font-bold text-gray-900 mt-1">{filterCounts.all}</p>
-          </div>
-          <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-purple-100 text-purple-600">
-            <Users className="w-5 h-5" />
-          </div>
-        </div>
-
-        <div className="bg-[#ECFDF5] rounded-2xl border border-[#A7F3D0] p-4 flex items-center justify-between shadow-xs">
-          <div>
-            <p className="text-xs text-gray-500 font-medium">Active</p>
-            <p className="text-xl font-bold text-gray-900 mt-1">{activeInRoom.length}</p>
-          </div>
-          <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-emerald-100 text-emerald-600">
-            <CheckCircle className="w-5 h-5" />
-          </div>
-        </div>
-
-        <div className="bg-[#FEF2F2] rounded-2xl border border-[#FECACA] p-4 flex items-center justify-between shadow-xs">
-          <div>
-            <p className="text-xs text-gray-500 font-medium">Inactive</p>
-            <p className="text-xl font-bold text-gray-900 mt-1">{filterCounts.inactive + filterCounts.archived}</p>
-          </div>
-          <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-rose-100 text-rose-600">
-            <XCircle className="w-5 h-5" />
-          </div>
-        </div>
-
-        <div className="bg-[#EFF6FF] rounded-2xl border border-[#BFDBFE] p-4 flex items-center justify-between shadow-xs">
-          <div>
-            <p className="text-xs text-gray-500 font-medium">Monthly Revenue</p>
-            <p className="text-xl font-bold text-gray-900 mt-1">{fmt(activeInRoom.reduce((s, t) => s + t.rent, 0))}</p>
-          </div>
-          <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-blue-100 text-blue-600">
-            <IndianRupee className="w-5 h-5" />
-          </div>
-        </div>
+        <KpiCard label="Total Tenants" value={filterCounts.all} accent="violet" icon={Users}
+          format={(n) => Math.round(n).toString()} meta={`${properties.length} ${properties.length === 1 ? 'property' : 'properties'}`} />
+        <KpiCard label="Active" value={activeInRoom.length} accent="emerald" icon={CheckCircle}
+          format={(n) => Math.round(n).toString()} meta="In room" />
+        <KpiCard label="Inactive" value={filterCounts.inactive + filterCounts.archived} accent="rose" icon={XCircle}
+          format={(n) => Math.round(n).toString()} meta="Inactive / archived" />
+        <KpiCard label="Monthly Revenue" value={activeInRoom.reduce((s, t) => s + t.rent, 0)} prefix="₹" accent="blue" icon={IndianRupee}
+          meta="Active tenants" />
       </div>
 
       {/* ── Operational alerts (compact single-line) ───── */}

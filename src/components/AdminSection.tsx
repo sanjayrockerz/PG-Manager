@@ -50,6 +50,7 @@ import { supabase } from '../lib/supabase';
 import { buildDemoAdminSummary } from '../data/demoData';
 import { useRealtimeRefresh } from '../hooks/useRealtimeRefresh';
 import { LiveStatusBadge } from './LiveStatusBadge';
+import { KpiCard } from './ui/KpiCard';
 import { useDateRange } from '../contexts/DateRangeContext';
 
 type AdminView =
@@ -795,87 +796,22 @@ export function AdminSection() {
 
         {/* 8 KPI Cards (2 rows of 4) */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="bg-white/80 backdrop-blur-sm rounded-[20px] p-6 shadow-[0_4px_24px_rgba(0,0,0,0.02)] border border-gray-100 hover:-translate-y-0.5 hover:shadow-[0_8px_32px_rgba(0,0,0,0.04)] transition-all duration-300 flex items-start justify-between">
-            <div className="min-w-0">
-              <p className="text-[11px] text-gray-500 uppercase tracking-widest font-semibold mb-2">Monthly Recurring Revenue</p>
-              <p className="text-[28px] font-bold text-gray-900 tabular-nums leading-none tracking-tight">{formatRs(summary.stats.monthlyRevenue)}</p>
-              <p className="text-[13px] text-emerald-600 font-medium mt-2">+{mrrGrowth.toFixed(1)}% this month</p>
-            </div>
-            <div className="w-10 h-10 rounded-xl bg-purple-100 flex items-center justify-center text-purple-600 shrink-0">
-              <TrendingUp className="w-5 h-5" />
-            </div>
-          </div>
-          <div className="bg-white/80 backdrop-blur-sm rounded-[20px] p-6 shadow-[0_4px_24px_rgba(0,0,0,0.02)] border border-gray-100 hover:-translate-y-0.5 hover:shadow-[0_8px_32px_rgba(0,0,0,0.04)] transition-all duration-300 flex items-start justify-between">
-            <div className="min-w-0">
-              <p className="text-[11px] text-gray-500 uppercase tracking-widest font-semibold mb-2">Paying Customers</p>
-              <p className="text-[28px] font-bold text-gray-900 tabular-nums leading-none tracking-tight">{summary.stats.ownersActive}</p>
-              <p className="text-[13px] text-gray-500 mt-2">Active subscriptions</p>
-            </div>
-            <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center text-blue-600 shrink-0">
-              <Users className="w-5 h-5" />
-            </div>
-          </div>
-          <div className="bg-white/80 backdrop-blur-sm rounded-[20px] p-6 shadow-[0_4px_24px_rgba(0,0,0,0.02)] border border-gray-100 hover:-translate-y-0.5 hover:shadow-[0_8px_32px_rgba(0,0,0,0.04)] transition-all duration-300 flex items-start justify-between">
-            <div className="min-w-0">
-              <p className="text-[11px] text-gray-500 uppercase tracking-widest font-semibold mb-2">Free Users</p>
-              <p className="text-[28px] font-bold text-gray-900 tabular-nums leading-none tracking-tight">{freeUsers}</p>
-              <p className="text-[13px] text-gray-500 mt-2">Unconverted accounts</p>
-            </div>
-            <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-600 shrink-0">
-              <User className="w-5 h-5" />
-            </div>
-          </div>
-          <div className="bg-white/80 backdrop-blur-sm rounded-[20px] p-6 shadow-[0_4px_24px_rgba(0,0,0,0.02)] border border-gray-100 hover:-translate-y-0.5 hover:shadow-[0_8px_32px_rgba(0,0,0,0.04)] transition-all duration-300 flex items-start justify-between">
-            <div className="min-w-0">
-              <p className="text-[11px] text-gray-500 uppercase tracking-widest font-semibold mb-2">Churn Rate</p>
-              <p className="text-[28px] font-bold text-gray-900 tabular-nums leading-none tracking-tight">{formatRs(summary.stats.churnMrr)}</p>
-              <p className="text-[13px] text-rose-500 font-medium mt-2">MRR lost this month</p>
-            </div>
-            <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center text-amber-600 shrink-0">
-              <TrendingDown className="w-5 h-5" />
-            </div>
-          </div>
-          
-          <div className="bg-white/80 backdrop-blur-sm rounded-[20px] p-6 shadow-[0_4px_24px_rgba(0,0,0,0.02)] border border-gray-100 hover:-translate-y-0.5 hover:shadow-[0_8px_32px_rgba(0,0,0,0.04)] transition-all duration-300 flex items-start justify-between">
-            <div className="min-w-0">
-              <p className="text-[11px] text-gray-500 uppercase tracking-widest font-semibold mb-2">Total Properties</p>
-              <p className="text-[28px] font-bold text-gray-900 tabular-nums leading-none tracking-tight">{summary.stats.totalProperties}</p>
-              <p className="text-[13px] text-gray-500 mt-2">Managed on platform</p>
-            </div>
-            <div className="w-10 h-10 rounded-xl bg-sky-100 flex items-center justify-center text-sky-600 shrink-0">
-              <Building2 className="w-5 h-5" />
-            </div>
-          </div>
-          <div className="bg-white/80 backdrop-blur-sm rounded-[20px] p-6 shadow-[0_4px_24px_rgba(0,0,0,0.02)] border border-gray-100 hover:-translate-y-0.5 hover:shadow-[0_8px_32px_rgba(0,0,0,0.04)] transition-all duration-300 flex items-start justify-between">
-            <div className="min-w-0">
-              <p className="text-[11px] text-gray-500 uppercase tracking-widest font-semibold mb-2">Total Tenants</p>
-              <p className="text-[28px] font-bold text-gray-900 tabular-nums leading-none tracking-tight">{summary.stats.totalTenants}</p>
-              <p className="text-[13px] text-emerald-600 font-medium mt-2">+{summary.stats.newTenantsThisMonth} this month</p>
-            </div>
-            <div className="w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center text-indigo-600 shrink-0">
-              <Users className="w-5 h-5" />
-            </div>
-          </div>
-          <div className="bg-white/80 backdrop-blur-sm rounded-[20px] p-6 shadow-[0_4px_24px_rgba(0,0,0,0.02)] border border-gray-100 hover:-translate-y-0.5 hover:shadow-[0_8px_32px_rgba(0,0,0,0.04)] transition-all duration-300 flex items-start justify-between">
-            <div className="min-w-0">
-              <p className="text-[11px] text-gray-500 uppercase tracking-widest font-semibold mb-2">Open Tickets</p>
-              <p className="text-[28px] font-bold text-gray-900 tabular-nums leading-none tracking-tight">{summary.stats.openSupportTickets}</p>
-              <p className={`text-[13px] mt-2 font-medium ${summary.stats.urgentSupportTickets > 0 ? 'text-rose-500' : 'text-gray-500'}`}>{summary.stats.urgentSupportTickets} urgent</p>
-            </div>
-            <div className="w-10 h-10 rounded-xl bg-rose-100 flex items-center justify-center text-rose-600 shrink-0">
-              <AlertCircle className="w-5 h-5" />
-            </div>
-          </div>
-          <div className="bg-white/80 backdrop-blur-sm rounded-[20px] p-6 shadow-[0_4px_24px_rgba(0,0,0,0.02)] border border-gray-100 hover:-translate-y-0.5 hover:shadow-[0_8px_32px_rgba(0,0,0,0.04)] transition-all duration-300 flex items-start justify-between">
-            <div className="min-w-0">
-              <p className="text-[11px] text-gray-500 uppercase tracking-widest font-semibold mb-2">Occupancy</p>
-              <p className="text-[28px] font-bold text-gray-900 tabular-nums leading-none tracking-tight">{Math.round(summary.stats.occupancyRate * 100)}%</p>
-              <p className="text-[13px] text-gray-500 mt-2">Platform average</p>
-            </div>
-            <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-600 shrink-0">
-              <Bed className="w-5 h-5" />
-            </div>
-          </div>
+          <KpiCard label="Monthly Recurring Revenue" value={summary.stats.monthlyRevenue} prefix="₹" accent="purple" icon={TrendingUp}
+            trend={mrrGrowth} trendLabel="vs last month" />
+          <KpiCard label="Paying Customers" value={summary.stats.ownersActive} accent="blue" icon={Users}
+            format={(n) => Math.round(n).toString()} meta="Active subscriptions" />
+          <KpiCard label="Free Users" value={freeUsers} accent="cyan" icon={User}
+            format={(n) => Math.round(n).toString()} meta="Unconverted accounts" />
+          <KpiCard label="Churn (MRR Lost)" value={summary.stats.churnMrr} prefix="₹" accent="rose" icon={TrendingDown}
+            meta="This month" />
+          <KpiCard label="Total Properties" value={summary.stats.totalProperties} accent="cyan" icon={Building2}
+            format={(n) => Math.round(n).toString()} meta="Managed on platform" />
+          <KpiCard label="Total Tenants" value={summary.stats.totalTenants} accent="violet" icon={Users}
+            format={(n) => Math.round(n).toString()} meta={`+${summary.stats.newTenantsThisMonth} this month`} />
+          <KpiCard label="Open Tickets" value={summary.stats.openSupportTickets} accent="amber" icon={AlertCircle}
+            format={(n) => Math.round(n).toString()} meta={`${summary.stats.urgentSupportTickets} urgent`} />
+          <KpiCard label="Occupancy" value={Math.round(summary.stats.occupancyRate * 100)} suffix="%" accent="emerald" icon={Bed}
+            format={(n) => Math.round(n).toString()} meta="Platform average" />
         </div>
 
         {/* Full-width Activity Feed */}
@@ -935,42 +871,10 @@ export function AdminSection() {
 
         {/* 4 KPI Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="bg-white/80 backdrop-blur-sm rounded-[20px] p-6 shadow-[0_4px_24px_rgba(0,0,0,0.02)] border border-gray-100 hover:-translate-y-0.5 hover:shadow-[0_8px_32px_rgba(0,0,0,0.04)] transition-all duration-300 flex items-start justify-between">
-            <div className="min-w-0">
-              <p className="text-[11px] text-gray-500 uppercase tracking-widest font-semibold mb-2">Total Owners</p>
-              <p className="text-[28px] font-bold text-gray-900 tabular-nums leading-none tracking-tight">{totalOwners}</p>
-            </div>
-            <div className="w-10 h-10 rounded-xl bg-purple-100 flex items-center justify-center text-purple-600 shrink-0">
-              <Users className="w-5 h-5" />
-            </div>
-          </div>
-          <div className="bg-white/80 backdrop-blur-sm rounded-[20px] p-6 shadow-[0_4px_24px_rgba(0,0,0,0.02)] border border-gray-100 hover:-translate-y-0.5 hover:shadow-[0_8px_32px_rgba(0,0,0,0.04)] transition-all duration-300 flex items-start justify-between">
-            <div className="min-w-0">
-              <p className="text-[11px] text-gray-500 uppercase tracking-widest font-semibold mb-2">Active Subscriptions</p>
-              <p className="text-[28px] font-bold text-gray-900 tabular-nums leading-none tracking-tight">{activeSubs}</p>
-            </div>
-            <div className="w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center text-emerald-600 shrink-0">
-              <CheckCircle className="w-5 h-5" />
-            </div>
-          </div>
-          <div className="bg-white/80 backdrop-blur-sm rounded-[20px] p-6 shadow-[0_4px_24px_rgba(0,0,0,0.02)] border border-gray-100 hover:-translate-y-0.5 hover:shadow-[0_8px_32px_rgba(0,0,0,0.04)] transition-all duration-300 flex items-start justify-between">
-            <div className="min-w-0">
-              <p className="text-[11px] text-gray-500 uppercase tracking-widest font-semibold mb-2">Suspended Accounts</p>
-              <p className="text-[28px] font-bold text-gray-900 tabular-nums leading-none tracking-tight">{suspended}</p>
-            </div>
-            <div className="w-10 h-10 rounded-xl bg-rose-100 flex items-center justify-center text-rose-600 shrink-0">
-              <AlertCircle className="w-5 h-5" />
-            </div>
-          </div>
-          <div className="bg-white/80 backdrop-blur-sm rounded-[20px] p-6 shadow-[0_4px_24px_rgba(0,0,0,0.02)] border border-gray-100 hover:-translate-y-0.5 hover:shadow-[0_8px_32px_rgba(0,0,0,0.04)] transition-all duration-300 flex items-start justify-between">
-            <div className="min-w-0">
-              <p className="text-[11px] text-gray-500 uppercase tracking-widest font-semibold mb-2">Trialing Accounts</p>
-              <p className="text-[28px] font-bold text-gray-900 tabular-nums leading-none tracking-tight">{trialing}</p>
-            </div>
-            <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center text-blue-600 shrink-0">
-              <Clock className="w-5 h-5" />
-            </div>
-          </div>
+          <KpiCard label="Total Owners" value={totalOwners} accent="purple" icon={Users} format={(n) => Math.round(n).toString()} />
+          <KpiCard label="Active Subscriptions" value={activeSubs} accent="emerald" icon={CheckCircle} format={(n) => Math.round(n).toString()} />
+          <KpiCard label="Suspended Accounts" value={suspended} accent="rose" icon={AlertCircle} format={(n) => Math.round(n).toString()} />
+          <KpiCard label="Trialing Accounts" value={trialing} accent="blue" icon={Clock} format={(n) => Math.round(n).toString()} />
         </div>
 
         {/* Filters & Search */}

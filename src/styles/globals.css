@@ -68,10 +68,29 @@
   --ds-danger-border: #FECACA;
   --ds-danger-text:   #991B1B;
 
-  /* Shadows */
+  /* Shadows — elevation scale */
   --ds-shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.04);
   --ds-shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.06), 0 1px 2px -1px rgb(0 0 0 / 0.04);
   --ds-shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.06), 0 2px 4px -2px rgb(0 0 0 / 0.04);
+  --ds-shadow-lg: 0 12px 24px -6px rgb(16 24 40 / 0.10), 0 4px 8px -4px rgb(16 24 40 / 0.06);
+  --ds-shadow-hover: 0 10px 28px -8px rgb(16 24 40 / 0.14), 0 4px 10px -6px rgb(16 24 40 / 0.08);
+
+  /* Motion — premium micro-interactions */
+  --ds-ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --ds-dur-fast: 150ms;
+  --ds-dur: 200ms;
+
+  /* ── KPI Accent Palette ────────────────────────
+     Each accent: solid icon color, soft gradient pair,
+     and a faint surface wash for the card corner. */
+  /* Strong, saturated gradient pairs — deep at both ends (no pale drift) */
+  --kpi-violet-1:  #6D28D9;  --kpi-violet-2:  #4F46E5;  --kpi-violet-wash:  rgba(79,70,229,0.45);
+  --kpi-rose-1:    #E11D48;  --kpi-rose-2:    #F43F5E;  --kpi-rose-wash:    rgba(225,29,72,0.45);
+  --kpi-blue-1:    #1D4ED8;  --kpi-blue-2:    #2563EB;  --kpi-blue-wash:    rgba(29,78,216,0.45);
+  --kpi-emerald-1: #047857;  --kpi-emerald-2: #059669;  --kpi-emerald-wash: rgba(4,120,87,0.45);
+  --kpi-amber-1:   #D97706;  --kpi-amber-2:   #F59E0B;  --kpi-amber-wash:   rgba(217,119,6,0.45);
+  --kpi-cyan-1:    #0E7490;  --kpi-cyan-2:    #0891B2;  --kpi-cyan-wash:    rgba(14,116,144,0.45);
+  --kpi-purple-1:  #7E22CE;  --kpi-purple-2:  #9333EA;  --kpi-purple-wash:  rgba(126,34,206,0.45);
 
   /* Legacy shadcn tokens (kept for compatibility) */
   --background:           #FFFFFF;
@@ -256,6 +275,219 @@
 
 .ds-card-body {
   padding: 16px 20px;
+}
+
+/* Interactive card — gentle hover lift for clickable surfaces */
+.ds-card-hover {
+  transition: box-shadow var(--ds-dur) var(--ds-ease),
+              transform var(--ds-dur) var(--ds-ease),
+              border-color var(--ds-dur) var(--ds-ease);
+  cursor: pointer;
+}
+.ds-card-hover:hover {
+  box-shadow: var(--ds-shadow-hover);
+  transform: translateY(-2px);
+  border-color: var(--ds-border);
+}
+
+/* ─────────────────────────────────────────────
+   PREMIUM KPI CARD SYSTEM
+   White surface · gradient icon · corner wash · hover lift
+   Drive the accent by setting --kpi-1 / --kpi-2 / --kpi-wash
+   (or via the .kpi-{name} helper classes below).
+───────────────────────────────────────────── */
+.ds-kpi {
+  --kpi-1: var(--ds-accent);
+  --kpi-2: var(--ds-accent-hover);
+  --kpi-wash: var(--ds-accent-subtle);
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px;
+  border: none;
+  border-radius: var(--radius-xl);
+  color: #fff;
+  background: linear-gradient(135deg, var(--kpi-1) 0%, var(--kpi-2) 100%);
+  box-shadow: 0 10px 24px -10px var(--kpi-1), var(--ds-shadow-sm);
+  transition: box-shadow var(--ds-dur) var(--ds-ease),
+              transform var(--ds-dur) var(--ds-ease);
+}
+/* Decorative blurred light blobs for depth */
+.ds-kpi::after {
+  content: '';
+  position: absolute;
+  top: -50px;
+  right: -40px;
+  width: 150px;
+  height: 150px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255,255,255,0.22) 0%, transparent 70%);
+  pointer-events: none;
+}
+.ds-kpi::before {
+  content: '';
+  position: absolute;
+  bottom: -60px;
+  left: -30px;
+  width: 140px;
+  height: 140px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255,255,255,0.10) 0%, transparent 70%);
+  pointer-events: none;
+}
+.ds-kpi-clickable { cursor: pointer; }
+.ds-kpi-clickable:hover {
+  box-shadow: 0 16px 32px -12px var(--kpi-1), var(--ds-shadow-hover);
+  transform: translateY(-2px);
+}
+
+.ds-kpi-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  position: relative;
+  z-index: 1;
+}
+
+.ds-kpi-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255,255,255,0.85);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.ds-kpi-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 13px;
+  color: #fff;
+  background: rgba(255,255,255,0.18);
+  backdrop-filter: blur(4px);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.18);
+}
+
+.ds-kpi-metric {
+  position: relative;
+  z-index: 1;
+  font-size: 32px;
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.10);
+}
+.ds-kpi-metric .ds-kpi-affix {
+  font-size: 20px;
+  font-weight: 700;
+  color: rgba(255,255,255,0.92);
+}
+
+.ds-kpi-foot {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ds-kpi-foot-text {
+  font-size: 12px;
+  color: rgba(255,255,255,0.82);
+}
+
+/* Translucent pill badge for use on filled KPI cards */
+.ds-kpi-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: rgba(255,255,255,0.20);
+  color: #fff;
+  border: 1px solid rgba(255,255,255,0.25);
+  white-space: nowrap;
+}
+
+/* KPI accent helpers */
+.kpi-violet  { --kpi-1: var(--kpi-violet-1);  --kpi-2: var(--kpi-violet-2);  --kpi-wash: var(--kpi-violet-wash); }
+.kpi-rose    { --kpi-1: var(--kpi-rose-1);    --kpi-2: var(--kpi-rose-2);    --kpi-wash: var(--kpi-rose-wash); }
+.kpi-blue    { --kpi-1: var(--kpi-blue-1);    --kpi-2: var(--kpi-blue-2);    --kpi-wash: var(--kpi-blue-wash); }
+.kpi-emerald { --kpi-1: var(--kpi-emerald-1); --kpi-2: var(--kpi-emerald-2); --kpi-wash: var(--kpi-emerald-wash); }
+.kpi-amber   { --kpi-1: var(--kpi-amber-1);   --kpi-2: var(--kpi-amber-2);   --kpi-wash: var(--kpi-amber-wash); }
+.kpi-cyan    { --kpi-1: var(--kpi-cyan-1);    --kpi-2: var(--kpi-cyan-2);    --kpi-wash: var(--kpi-cyan-wash); }
+.kpi-purple  { --kpi-1: var(--kpi-purple-1);  --kpi-2: var(--kpi-purple-2);  --kpi-wash: var(--kpi-purple-wash); }
+
+/* ─────────────────────────────────────────────
+   PREMIUM ACTION CARD — elevated, fully clickable
+   Used for Today's Priorities / alert surfaces.
+───────────────────────────────────────────── */
+.ds-action-card {
+  --action-1: var(--ds-accent);
+  --action-wash: var(--ds-accent-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  text-align: left;
+  background: var(--ds-surface);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--ds-shadow-xs);
+  cursor: pointer;
+  transition: box-shadow var(--ds-dur) var(--ds-ease),
+              transform var(--ds-dur) var(--ds-ease),
+              border-color var(--ds-dur) var(--ds-ease);
+}
+.ds-action-card:hover {
+  box-shadow: var(--ds-shadow-md);
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--action-1) 35%, var(--ds-border));
+}
+.ds-action-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  color: var(--action-1);
+  background: var(--action-wash);
+}
+.ds-action-chevron {
+  flex-shrink: 0;
+  color: var(--ds-text-3);
+  transition: transform var(--ds-dur) var(--ds-ease), color var(--ds-dur) var(--ds-ease);
+}
+.ds-action-card:hover .ds-action-chevron {
+  transform: translateX(2px);
+  color: var(--action-1);
+}
+
+/* ─────────────────────────────────────────────
+   EVENT ROW — Recent Activity items
+───────────────────────────────────────────── */
+.ds-event-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
 }
 
 /* ─────────────────────────────────────────────
@@ -498,4 +730,446 @@
 
 .animate-loading-bar {
   animation: loading-bar 1.5s infinite ease-in-out;
+}
+
+/* Premium entrance — subtle rise + fade for cards/charts */
+@keyframes ds-fade-rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.ds-fade-rise {
+  animation: ds-fade-rise 0.32s var(--ds-ease, cubic-bezier(0.4,0,0.2,1)) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ds-fade-rise { animation: none; }
+  .ds-kpi-clickable:hover,
+  .ds-card-hover:hover,
+  .ds-action-card:hover { transform: none; }
+}
+
+/* ─────────────────────────────────────────────
+   EXECUTIVE HERO HEADER
+   Used at the top of every major page to create
+   a command-center feel rather than a title row.
+───────────────────────────────────────────── */
+.ds-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding-bottom: 4px;
+}
+
+.ds-hero-greeting {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--ds-text-1);
+  letter-spacing: -0.03em;
+  line-height: 1.2;
+}
+
+.ds-hero-summary {
+  font-size: 13px;
+  color: var(--ds-text-3);
+  margin-top: 3px;
+  line-height: 1.4;
+}
+
+.ds-hero-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+/* ─────────────────────────────────────────────
+   STATUS STRIP
+   Thin executive-overview bar. Sits between the
+   hero and KPI cards. Communicates health at a glance.
+───────────────────────────────────────────── */
+.ds-status-strip {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  background: var(--ds-surface);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--ds-shadow-xs);
+  overflow: hidden;
+  flex-wrap: wrap;
+}
+
+.ds-status-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-right: 1px solid var(--ds-border-subtle);
+  flex: 1;
+  min-width: 0;
+}
+
+.ds-status-item:last-child {
+  border-right: none;
+}
+
+.ds-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.ds-status-dot-healthy { background: var(--ds-success); box-shadow: 0 0 0 2px var(--ds-success-subtle); }
+.ds-status-dot-warning { background: var(--ds-warning); box-shadow: 0 0 0 2px var(--ds-warning-subtle); }
+.ds-status-dot-danger  { background: var(--ds-danger);  box-shadow: 0 0 0 2px var(--ds-danger-subtle); }
+.ds-status-dot-muted   { background: var(--ds-text-4);  }
+
+.ds-status-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ds-text-3);
+  white-space: nowrap;
+}
+
+.ds-status-value {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ds-text-1);
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ─────────────────────────────────────────────
+   TIMELINE ACTIVITY FEED
+   Adds a vertical connector line between events
+   for a proper event-stream / audit-trail look.
+───────────────────────────────────────────── */
+.ds-timeline {
+  display: flex;
+  flex-direction: column;
+}
+
+.ds-timeline-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 0;
+  position: relative;
+}
+
+.ds-timeline-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex-shrink: 0;
+  position: relative;
+  width: 34px;
+}
+
+.ds-timeline-connector {
+  position: absolute;
+  top: 38px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 1px;
+  bottom: -10px;
+  background: var(--ds-border-subtle);
+}
+
+/* ─────────────────────────────────────────────
+   ICON BOX — universal icon container
+   Replaces ad-hoc inline colored squares.
+───────────────────────────────────────────── */
+.ds-icon-box {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+}
+
+.ds-icon-box-sm  { width: 28px; height: 28px; border-radius: 8px; }
+.ds-icon-box-md  { width: 34px; height: 34px; border-radius: 10px; }
+.ds-icon-box-lg  { width: 40px; height: 40px; border-radius: 12px; }
+.ds-icon-box-xl  { width: 48px; height: 48px; border-radius: 14px; }
+
+/* Semantic icon box fills */
+.ds-icon-box-success  { background: var(--ds-success-subtle); color: var(--ds-success); }
+.ds-icon-box-warning  { background: var(--ds-warning-subtle); color: var(--ds-warning); }
+.ds-icon-box-danger   { background: var(--ds-danger-subtle);  color: var(--ds-danger); }
+.ds-icon-box-accent   { background: var(--ds-accent-subtle);  color: var(--ds-accent); }
+.ds-icon-box-neutral  { background: var(--ds-subtle);         color: var(--ds-text-2); }
+
+/* ─────────────────────────────────────────────
+   PREMIUM FORM INPUT SYSTEM
+   Consistent focus ring, label, group layout.
+───────────────────────────────────────────── */
+.ds-input {
+  width: 100%;
+  height: 38px;
+  padding: 0 12px;
+  font-size: 13.5px;
+  font-family: var(--font-sans);
+  color: var(--ds-text-1);
+  background: var(--ds-surface);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--radius-md);
+  outline: none;
+  transition: border-color var(--ds-dur-fast) var(--ds-ease),
+              box-shadow var(--ds-dur-fast) var(--ds-ease);
+  -webkit-appearance: none;
+}
+
+.ds-input:focus {
+  border-color: var(--ds-accent);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
+}
+
+.ds-input::placeholder { color: var(--ds-text-4); }
+
+.ds-input-error {
+  border-color: var(--ds-danger);
+}
+.ds-input-error:focus {
+  border-color: var(--ds-danger);
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.10);
+}
+
+.ds-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ds-text-2);
+  letter-spacing: 0.01em;
+  margin-bottom: 5px;
+}
+
+.ds-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ds-form-hint {
+  font-size: 11px;
+  color: var(--ds-text-3);
+  margin-top: 3px;
+}
+
+.ds-form-error {
+  font-size: 11px;
+  color: var(--ds-danger-text);
+  margin-top: 3px;
+}
+
+.ds-select {
+  width: 100%;
+  height: 38px;
+  padding: 0 12px;
+  font-size: 13.5px;
+  font-family: var(--font-sans);
+  color: var(--ds-text-1);
+  background: var(--ds-surface);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--radius-md);
+  outline: none;
+  cursor: pointer;
+  transition: border-color var(--ds-dur-fast) var(--ds-ease),
+              box-shadow var(--ds-dur-fast) var(--ds-ease);
+}
+.ds-select:focus {
+  border-color: var(--ds-accent);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
+}
+
+/* ─────────────────────────────────────────────
+   EMPTY STATE — reusable pattern for zero-data views
+───────────────────────────────────────────── */
+.ds-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 48px 24px;
+  gap: 12px;
+}
+
+.ds-empty-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ds-subtle);
+  color: var(--ds-text-4);
+  margin-bottom: 4px;
+}
+
+.ds-empty-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ds-text-1);
+  letter-spacing: -0.01em;
+}
+
+.ds-empty-description {
+  font-size: 13px;
+  color: var(--ds-text-3);
+  line-height: 1.5;
+  max-width: 300px;
+}
+
+/* ─────────────────────────────────────────────
+   CHART SUMMARY ROW
+   Sits above a chart to show key totals inline.
+───────────────────────────────────────────── */
+.ds-chart-summary {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  border-radius: var(--radius-md);
+  background: var(--ds-subtle);
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+
+.ds-chart-summary-item {
+  flex: 1;
+  padding: 10px 14px;
+  border-right: 1px solid var(--ds-border-subtle);
+}
+
+.ds-chart-summary-item:last-child {
+  border-right: none;
+}
+
+.ds-chart-summary-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--ds-text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  white-space: nowrap;
+}
+
+.ds-chart-summary-value {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ds-text-1);
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  margin-top: 1px;
+}
+
+/* ─────────────────────────────────────────────
+   SECTION DIVIDER with label
+───────────────────────────────────────────── */
+.ds-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ds-text-4);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.ds-divider::before,
+.ds-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--ds-border-subtle);
+}
+
+/* ─────────────────────────────────────────────
+   METRIC PILL — inline stat chips (header bars)
+───────────────────────────────────────────── */
+.ds-metric-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--ds-border);
+  background: var(--ds-surface);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ds-text-1);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ds-metric-pill-label {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--ds-text-3);
+}
+
+/* ─────────────────────────────────────────────
+   SCOPE TABS — pill-style tab switcher
+   Used inside card headers and filter bars.
+───────────────────────────────────────────── */
+.ds-tab-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  background: var(--ds-subtle);
+  border-radius: var(--radius-md);
+}
+
+.ds-tab {
+  padding: 5px 12px;
+  border-radius: calc(var(--radius-md) - 2px);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ds-text-3);
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  transition: background var(--ds-dur-fast) var(--ds-ease),
+              color var(--ds-dur-fast) var(--ds-ease),
+              box-shadow var(--ds-dur-fast) var(--ds-ease);
+  white-space: nowrap;
+}
+
+.ds-tab:hover:not(.ds-tab-active) {
+  color: var(--ds-text-2);
+  background: rgba(0,0,0,0.04);
+}
+
+.ds-tab-active {
+  background: var(--ds-surface);
+  color: var(--ds-text-1);
+  font-weight: 600;
+  box-shadow: var(--ds-shadow-xs);
+}
+
+/* ─────────────────────────────────────────────
+   PREMIUM SKELETON LOADER
+───────────────────────────────────────────── */
+.ds-skeleton {
+  border-radius: var(--radius-md);
+  background: linear-gradient(90deg, #f4f4f6 25%, #ececef 50%, #f4f4f6 75%);
+  background-size: 200% 100%;
+  animation: premium-shimmer 1.6s infinite linear;
+}
+
+/* ─────────────────────────────────────────────
+   GRADIENT TEXT UTILITY
+───────────────────────────────────────────── */
+.ds-gradient-text {
+  background: linear-gradient(135deg, var(--ds-accent), #9333EA);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }

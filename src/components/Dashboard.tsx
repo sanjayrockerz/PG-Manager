@@ -1,15 +1,18 @@
-import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense, type CSSProperties } from 'react';
 
 const QuickStartGuide = lazy(() => import('./QuickStartGuide').then((m) => ({ default: m.QuickStartGuide })));
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer,
+  ResponsiveContainer, Cell,
 } from 'recharts';
 import {
-  ArrowUpRight, ArrowDownRight, Bed, Calendar, CheckCircle2,
+  Bed, Calendar, CheckCircle2,
   Clock, CreditCard, TrendingUp, Users, Wrench,
   UserPlus, AlertCircle, ChevronRight, Building2, Plus, ChevronDown,
+  Zap, Activity, Sun, Moon, Sunset,
 } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+import { KpiCard } from './ui/KpiCard';
 import { useProperty } from '../contexts/PropertyContext';
 import type { DashboardSnapshot } from '../services/supabaseData';
 import { getDashboardData, isDemoModeEnabled } from '../services/dataService';
@@ -59,82 +62,7 @@ const relTime = (iso: string) => {
 
 /* ─── Subcomponents ──────────────────────── */
 
-function StatCard({
-  label, value, prefix, suffix,
-  trend, trendLabel, meta, icon: Icon, iconBg, iconColor,
-  tag, tagColor, cardBg = '#ffffff', borderColor = '#E4E4E7'
-}: {
-  label: string; value: string; prefix?: string; suffix?: string;
-  trend?: number; trendLabel?: string; meta?: string;
-  icon: typeof CreditCard; iconBg: string; iconColor: string;
-  tag?: string; tagColor?: 'warning' | 'danger';
-  cardBg?: string; borderColor?: string;
-}) {
-  const up = trend !== undefined && trend >= 0;
-  return (
-    <div
-      className="rounded-2xl border flex items-start justify-between shadow-xs"
-      style={{ padding: '16px 20px', gap: 10, background: cardBg, borderColor: borderColor }}
-    >
-      <div className="flex-1 min-w-0">
-        <p style={{ fontSize: 10, fontWeight: 600, color: '#71717A', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 5 }}>
-          {label}
-        </p>
-        <p style={{ fontSize: 24, fontWeight: 800, color: '#0A0A0B', letterSpacing: '-0.03em', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
-          {prefix && <span style={{ fontSize: 18, fontWeight: 700, color: '#27272A', marginRight: 1 }}>{prefix}</span>}
-          {value}
-          {suffix && <span style={{ fontSize: 18, fontWeight: 700, color: '#27272A', marginLeft: 1 }}>{suffix}</span>}
-        </p>
-
-        <div className="flex items-center gap-2 flex-wrap mt-2">
-          {trend !== undefined && (
-            <span
-              className="inline-flex items-center gap-1"
-              style={{
-                fontSize: 11, fontWeight: 500, padding: '2px 7px',
-                borderRadius: 99,
-                background: up ? '#ECFDF5' : '#FEF2F2',
-                color: up ? '#065F46' : '#991B1B',
-                border: `1px solid ${up ? '#A7F3D0' : '#FECACA'}`,
-              }}
-            >
-              {up
-                ? <ArrowUpRight style={{ width: 11, height: 11 }} />
-                : <ArrowDownRight style={{ width: 11, height: 11 }} />}
-              {Math.abs(trend).toFixed(1)}%
-            </span>
-          )}
-          {trendLabel && (
-            <span style={{ fontSize: 11, color: '#A1A1AA' }}>{trendLabel}</span>
-          )}
-          {tag && (
-            <span
-              style={{
-                fontSize: 11, fontWeight: 500, padding: '2px 7px', borderRadius: 99,
-                background: tagColor === 'danger' ? '#FEF2F2' : '#FFFBEB',
-                color: tagColor === 'danger' ? '#991B1B' : '#92400E',
-                border: `1px solid ${tagColor === 'danger' ? '#FECACA' : '#FDE68A'}`,
-              }}
-            >
-              {tag}
-            </span>
-          )}
-        </div>
-
-        {meta && (
-          <p style={{ fontSize: 11, color: '#A1A1AA', marginTop: 4 }}>{meta}</p>
-        )}
-      </div>
-
-      <div
-        className="flex-shrink-0 flex items-center justify-center rounded-lg"
-        style={{ width: 32, height: 32, background: iconBg }}
-      >
-        <Icon style={{ width: 14, height: 14, color: iconColor, strokeWidth: 1.75 }} />
-      </div>
-    </div>
-  );
-}
+const StatCard = KpiCard;
 
 function SectionHeader({ title, subtitle, action, onAction }: {
   title: string; subtitle?: string;
@@ -288,13 +216,24 @@ function DateRangePicker() {
   );
 }
 
+/* ─── Greeting helper ─────────────────────── */
+function getGreeting() {
+  const h = new Date().getHours();
+  if (h < 12) return { text: 'Good morning', Icon: Sun };
+  if (h < 17) return { text: 'Good afternoon', Icon: Sunset };
+  return { text: 'Good evening', Icon: Moon };
+}
+
 export function Dashboard({ onNavigate }: DashboardProps) {
   const { selectedProperty, properties } = useProperty();
+  const { user } = useAuth();
   const isDemoMode = isDemoModeEnabled();
   const { range, label: rangeLabel } = useDateRange();
   const [data, setData] = useState<DashboardSnapshot>(empty);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const firstName = (user?.name ?? '').split(' ')[0] || 'there';
+  const { text: greetingText, Icon: GreetIcon } = getGreeting();
 
   const load = useCallback(async (showLoader: boolean) => {
     if (showLoader) setLoading(true);
@@ -351,15 +290,23 @@ export function Dashboard({ onNavigate }: DashboardProps) {
 
   if (loading) {
     return (
-      <div className="space-y-4 animate-pulse">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {/* Hero skeleton */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+          <div>
+            <div className="ds-skeleton" style={{ width: 240, height: 26, marginBottom: 8 }} />
+            <div className="ds-skeleton" style={{ width: 320, height: 14 }} />
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {[120, 100, 90].map((w, i) => <div key={i} className="ds-skeleton" style={{ width: w, height: 34, borderRadius: 8 }} />)}
+          </div>
+        </div>
+        {/* Status strip skeleton */}
+        <div className="ds-skeleton" style={{ height: 52, borderRadius: 12 }} />
+        {/* KPI skeleton */}
         <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
           {[1,2,3,4].map(i => (
-            <div key={i} className="ds-card" style={{ height: 120 }}>
-              <div style={{ padding: 16 }}>
-                <div style={{ height: 10, background: '#F4F4F6', borderRadius: 4, width: '50%', marginBottom: 10 }} />
-                <div style={{ height: 26, background: '#F4F4F6', borderRadius: 4, width: '70%' }} />
-              </div>
-            </div>
+            <div key={i} className="ds-skeleton" style={{ height: 130, borderRadius: 16 }} />
           ))}
         </div>
       </div>
@@ -376,21 +323,37 @@ export function Dashboard({ onNavigate }: DashboardProps) {
         </Suspense>
       )}
 
-      {/* ── Page header ─────────────────────── */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
+      {/* ── Executive Hero ───────────────────── */}
+      <div className="ds-hero">
         <div>
-          <h1 className="ds-page-title">Dashboard</h1>
-          <p style={{ fontSize: 13, color: '#A1A1AA', marginTop: 2 }}>
-            Overview of your properties and operations
+          <h1 className="ds-hero-greeting">
+            {greetingText}, {firstName}
+            <GreetIcon
+              style={{ display: 'inline', verticalAlign: 'middle', width: 22, height: 22, marginLeft: 8, opacity: 0.7 }}
+            />
+          </h1>
+          <p className="ds-hero-summary">
             {isDemoMode
-              ? <span style={{ marginLeft: 8, padding: '1px 7px', background: '#EEF2FF', color: '#6366F1', borderRadius: 99, fontSize: 11, fontWeight: 500 }}>Demo</span>
-              : isSyncing ? <span style={{ marginLeft: 8, color: '#A1A1AA', fontSize: 11 }}>Syncing…</span>
-              : lastUpdatedAt ? <span style={{ marginLeft: 8, color: '#A1A1AA', fontSize: 11 }}>Live</span> : null
+              ? 'Exploring in demo mode — data is simulated'
+              : (() => {
+                  const items: string[] = [];
+                  if (overdueCt > 0) items.push(`${overdueCt} overdue payment${overdueCt > 1 ? 's' : ''}`);
+                  if (data.pendingIssues > 0) items.push(`${data.pendingIssues} open maintenance ticket${data.pendingIssues > 1 ? 's' : ''}`);
+                  return items.length > 0
+                    ? `You have ${items.join(' and ')} requiring attention today`
+                    : 'All operations running smoothly today';
+                })()
             }
+            {isDemoMode && (
+              <span style={{ marginLeft: 8, padding: '1px 7px', background: '#EEF2FF', color: '#6366F1', borderRadius: 99, fontSize: 11, fontWeight: 600 }}>Demo</span>
+            )}
+            {!isDemoMode && isSyncing && (
+              <span style={{ marginLeft: 8, color: '#A1A1AA', fontSize: 11 }}>· Syncing…</span>
+            )}
           </p>
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="ds-hero-actions">
           <DateRangePicker />
           <button
             onClick={() => onNavigate?.('building-view')}
@@ -398,7 +361,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
             style={{ fontSize: 12, padding: '6px 12px', gap: 6 }}
           >
             <Building2 style={{ width: 13, height: 13, color: '#6366F1' }} />
-            Building View
+            <span className="hidden sm:inline">Building View</span>
           </button>
           <button
             onClick={() => onNavigate?.('tenants')}
@@ -408,6 +371,51 @@ export function Dashboard({ onNavigate }: DashboardProps) {
             <Plus style={{ width: 13, height: 13 }} />
             Add Tenant
           </button>
+        </div>
+      </div>
+
+      {/* ── Status Strip ─────────────────────── */}
+      <div className="ds-status-strip">
+        <div className="ds-status-item" style={{ minWidth: 0, flex: '0 0 auto' }}>
+          <div
+            className={`ds-status-dot ${isDemoMode ? 'ds-status-dot-muted' : overdueCt > 0 ? 'ds-status-dot-danger' : data.pendingIssues > 0 ? 'ds-status-dot-warning' : 'ds-status-dot-healthy'}`}
+          />
+          <div>
+            <div className="ds-status-label">Platform</div>
+            <div className="ds-status-value" style={{ fontSize: 12 }}>
+              {isDemoMode ? 'Demo' : overdueCt > 0 ? 'Action Needed' : data.pendingIssues > 0 ? 'Alerts' : 'Healthy'}
+            </div>
+          </div>
+        </div>
+        <div className="ds-status-item">
+          <div>
+            <div className="ds-status-label">Properties</div>
+            <div className="ds-status-value">{properties.length}</div>
+          </div>
+        </div>
+        <div className="ds-status-item">
+          <div>
+            <div className="ds-status-label">Occupancy</div>
+            <div className="ds-status-value">{occ}%</div>
+          </div>
+        </div>
+        <div className="ds-status-item">
+          <div>
+            <div className="ds-status-label">Collection Rate</div>
+            <div className="ds-status-value">
+              {data.monthlyRevenue > 0 && (data.monthlyRevenue + data.pendingAmount) > 0
+                ? `${Math.round((data.monthlyRevenue / (data.monthlyRevenue + data.pendingAmount)) * 100)}%`
+                : '—'}
+            </div>
+          </div>
+        </div>
+        <div className="ds-status-item" style={{ borderRight: 'none' }}>
+          <div>
+            <div className="ds-status-label">Open Tickets</div>
+            <div className="ds-status-value" style={{ color: data.pendingIssues > 0 ? 'var(--ds-warning)' : 'var(--ds-text-1)' }}>
+              {data.pendingIssues}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -426,62 +434,61 @@ export function Dashboard({ onNavigate }: DashboardProps) {
               {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}
             </span>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {overdueCt > 0 && (
               <button
                 onClick={() => onNavigate?.('payments')}
-                className="flex items-center justify-between w-full rounded-lg"
-                style={{ padding: '9px 12px', background: '#FEF2F2', border: '1px solid #FECACA', cursor: 'pointer', textAlign: 'left' }}
+                className="ds-action-card"
+                style={{ '--action-1': 'var(--ds-danger)', '--action-wash': 'var(--ds-danger-subtle)' } as CSSProperties}
               >
-                <div className="flex items-center gap-2.5">
-                  <div className="flex-shrink-0 flex items-center justify-center rounded-md" style={{ width: 28, height: 28, background: '#FEE2E2' }}>
-                    <AlertCircle style={{ width: 14, height: 14, color: '#DC2626' }} />
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="ds-action-icon">
+                    <AlertCircle style={{ width: 18, height: 18 }} />
                   </div>
-                  <div>
-                    <p style={{ fontSize: 12, fontWeight: 600, color: '#991B1B' }}>{overdueCt} overdue payment{overdueCt > 1 ? 's' : ''} need collection</p>
-                    <p style={{ fontSize: 11, color: '#B91C1C', marginTop: 1 }}>
+                  <div className="min-w-0">
+                    <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--ds-text-1)' }}>{overdueCt} overdue payment{overdueCt > 1 ? 's' : ''} need collection</p>
+                    <p style={{ fontSize: 12, color: 'var(--ds-text-3)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {data.recentPayments.filter(p => p.status === 'overdue').slice(0, 2).map(p => p.tenant).join(', ')}
                       {overdueCt > 2 ? ` +${overdueCt - 2} more` : ''}
                     </p>
                   </div>
                 </div>
-                <ChevronRight style={{ width: 12, height: 12, color: '#991B1B', flexShrink: 0 }} />
+                <ChevronRight className="ds-action-chevron" style={{ width: 16, height: 16 }} />
               </button>
             )}
             {data.pendingIssues > 0 && (
               <button
                 onClick={() => onNavigate?.('maintenance')}
-                className="flex items-center justify-between w-full rounded-lg"
-                style={{ padding: '9px 12px', background: '#FFFBEB', border: '1px solid #FDE68A', cursor: 'pointer', textAlign: 'left' }}
+                className="ds-action-card"
+                style={{ '--action-1': 'var(--ds-warning)', '--action-wash': 'var(--ds-warning-subtle)' } as CSSProperties}
               >
-                <div className="flex items-center gap-2.5">
-                  <div className="flex-shrink-0 flex items-center justify-center rounded-md" style={{ width: 28, height: 28, background: '#FEF3C7' }}>
-                    <Wrench style={{ width: 14, height: 14, color: '#D97706' }} />
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="ds-action-icon">
+                    <Wrench style={{ width: 18, height: 18 }} />
                   </div>
-                  <div>
-                    <p style={{ fontSize: 12, fontWeight: 600, color: '#92400E' }}>{data.pendingIssues} open maintenance ticket{data.pendingIssues > 1 ? 's' : ''}</p>
-                    <p style={{ fontSize: 11, color: '#B45309', marginTop: 1 }}>Click to view and assign tickets</p>
+                  <div className="min-w-0">
+                    <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--ds-text-1)' }}>{data.pendingIssues} open maintenance ticket{data.pendingIssues > 1 ? 's' : ''}</p>
+                    <p style={{ fontSize: 12, color: 'var(--ds-text-3)', marginTop: 1 }}>Click to view and assign tickets</p>
                   </div>
                 </div>
-                <ChevronRight style={{ width: 12, height: 12, color: '#92400E', flexShrink: 0 }} />
+                <ChevronRight className="ds-action-chevron" style={{ width: 16, height: 16 }} />
               </button>
             )}
             {data.pendingAmount > 0 && overdueCt === 0 && (
               <button
                 onClick={() => onNavigate?.('payments')}
-                className="flex items-center justify-between w-full rounded-lg"
-                style={{ padding: '9px 12px', background: '#F8FAFC', border: '1px solid #E4E4E7', cursor: 'pointer', textAlign: 'left' }}
+                className="ds-action-card"
               >
-                <div className="flex items-center gap-2.5">
-                  <div className="flex-shrink-0 flex items-center justify-center rounded-md" style={{ width: 28, height: 28, background: '#EEF2FF' }}>
-                    <Clock style={{ width: 14, height: 14, color: '#6366F1' }} />
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="ds-action-icon">
+                    <Clock style={{ width: 18, height: 18 }} />
                   </div>
-                  <div>
-                    <p style={{ fontSize: 12, fontWeight: 600, color: '#3730A3' }}>₹{data.pendingAmount.toLocaleString('en-IN')} pending collection</p>
-                    <p style={{ fontSize: 11, color: '#6366F1', marginTop: 1 }}>Review upcoming payments</p>
+                  <div className="min-w-0">
+                    <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--ds-text-1)' }}>₹{data.pendingAmount.toLocaleString('en-IN')} pending collection</p>
+                    <p style={{ fontSize: 12, color: 'var(--ds-text-3)', marginTop: 1 }}>Review upcoming payments</p>
                   </div>
                 </div>
-                <ChevronRight style={{ width: 12, height: 12, color: '#6366F1', flexShrink: 0 }} />
+                <ChevronRight className="ds-action-chevron" style={{ width: 16, height: 16 }} />
               </button>
             )}
           </div>
@@ -493,51 +500,42 @@ export function Dashboard({ onNavigate }: DashboardProps) {
         <StatCard
           label="Total Revenue"
           prefix="₹"
-          value={fmt(data.monthlyRevenue)}
+          value={data.monthlyRevenue}
           icon={CreditCard}
-          iconBg="#EEF2FF"
-          iconColor="#6366F1"
+          accent="violet"
           trend={prevRev > 0 ? revDelta : undefined}
-          trendLabel={prevRev > 0 ? `vs prior period` : undefined}
+          trendLabel={prevRev > 0 ? `${rangeLabel} · vs prior period` : rangeLabel}
           meta={`${rangeLabel}`}
-          cardBg="#EFF6FF"
-          borderColor="#BFDBFE"
+          onClick={() => onNavigate?.('payments')}
         />
         <StatCard
           label="Pending Payments"
           prefix="₹"
-          value={fmt(data.pendingAmount)}
+          value={data.pendingAmount}
           icon={Clock}
-          iconBg="#FFFBEB"
-          iconColor="#D97706"
+          accent="rose"
           meta={pendingCt > 0 ? `${pendingCt} invoices open` : 'All cleared'}
           tag={overdueCt > 0 ? `${overdueCt} Overdue` : undefined}
-          tagColor="danger"
-          cardBg="#FEF2F2"
-          borderColor="#FECACA"
+          onClick={() => onNavigate?.('payments')}
         />
         <StatCard
           label="Total Tenants"
-          value={data.totalTenants.toString()}
+          value={data.totalTenants}
+          format={(n) => Math.round(n).toString()}
           icon={Users}
-          iconBg="#FAF5FF"
-          iconColor="#9333EA"
+          accent="blue"
           meta={`Across ${properties.length} ${properties.length === 1 ? 'property' : 'properties'}`}
-          cardBg="#FAF5FF"
-          borderColor="#F3E8FF"
+          onClick={() => onNavigate?.('tenants')}
         />
         <StatCard
           label="Occupancy Rate"
-          value={occ.toString()}
+          value={occ}
+          format={(n) => Math.round(n).toString()}
           suffix="%"
           icon={Bed}
-          iconBg="#ECFDF5"
-          iconColor="#059669"
+          accent="emerald"
           meta={`${data.occupiedRooms} / ${data.totalRooms} rooms occupied`}
-          trend={occ > 50 ? occ - 50 : -(50 - occ)}
-          trendLabel="vs 50% baseline"
-          cardBg="#ECFDF5"
-          borderColor="#A7F3D0"
+          onClick={() => onNavigate?.('building-view')}
         />
       </div>
 
@@ -546,10 +544,10 @@ export function Dashboard({ onNavigate }: DashboardProps) {
 
         {/* Revenue Overview */}
         <div className="ds-card lg:col-span-2 flex flex-col" style={{ padding: '18px 20px', height: '100%' }}>
-          <div className="flex items-center justify-between mb-5">
+          <div className="flex items-center justify-between" style={{ marginBottom: 14 }}>
             <div>
               <h2 style={{ fontSize: 14, fontWeight: 600, color: '#0A0A0B', letterSpacing: '-0.01em' }}>Revenue Overview</h2>
-              <p style={{ fontSize: 12, color: '#A1A1AA', marginTop: 1 }}>Collections vs Expected</p>
+              <p style={{ fontSize: 12, color: '#A1A1AA', marginTop: 1 }}>Collections vs Expected · {rangeLabel}</p>
             </div>
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-1.5">
@@ -560,23 +558,50 @@ export function Dashboard({ onNavigate }: DashboardProps) {
                 <div style={{ width: 8, height: 8, borderRadius: 2, background: '#E4E4E7' }} />
                 <span style={{ fontSize: 11, color: '#71717A' }}>Expected</span>
               </div>
-              <span style={{ fontSize: 11, color: '#A1A1AA' }}>{rangeLabel}</span>
             </div>
           </div>
 
+          {/* Collection summary strip */}
+          {chartSeries.length > 0 && (
+            <div className="ds-chart-summary">
+              <div className="ds-chart-summary-item">
+                <div className="ds-chart-summary-label">Collected</div>
+                <div className="ds-chart-summary-value" style={{ color: '#6366F1' }}>
+                  ₹{fmtK(chartSeries.reduce((s, d) => s + (d.revenue ?? 0), 0))}
+                </div>
+              </div>
+              <div className="ds-chart-summary-item">
+                <div className="ds-chart-summary-label">Expected</div>
+                <div className="ds-chart-summary-value">
+                  ₹{fmtK(chartSeries.reduce((s, d) => s + (d.target ?? 0), 0))}
+                </div>
+              </div>
+              <div className="ds-chart-summary-item">
+                <div className="ds-chart-summary-label">Gap</div>
+                <div className="ds-chart-summary-value" style={{ color: 'var(--ds-danger)' }}>
+                  ₹{fmtK(Math.max(0, chartSeries.reduce((s, d) => s + (d.target ?? 0) - (d.revenue ?? 0), 0)))}
+                </div>
+              </div>
+              {revDelta !== 0 && (
+                <div className="ds-chart-summary-item">
+                  <div className="ds-chart-summary-label">vs Prev Period</div>
+                  <div className="ds-chart-summary-value" style={{ color: revDelta >= 0 ? 'var(--ds-success)' : 'var(--ds-danger)' }}>
+                    {revDelta >= 0 ? '+' : ''}{revDelta.toFixed(1)}%
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {chartSeries.length > 0 ? (
-            <ResponsiveContainer width="100%" height={300}>
+            <ResponsiveContainer width="100%" height={260}>
               <BarChart
                 data={chartSeries}
                 barCategoryGap="28%"
                 barGap={4}
-                margin={{ top: 8, right: 8, left: -8, bottom: 0 }}
+                margin={{ top: 4, right: 8, left: -8, bottom: 0 }}
               >
-                <CartesianGrid
-                  strokeDasharray="3 3"
-                  stroke="#F1F1F3"
-                  vertical={false}
-                />
+                <CartesianGrid strokeDasharray="3 3" stroke="#F1F1F3" vertical={false} />
                 <XAxis
                   dataKey="name"
                   axisLine={false}
@@ -592,60 +617,68 @@ export function Dashboard({ onNavigate }: DashboardProps) {
                   width={48}
                 />
                 <Tooltip content={<ChartTooltip />} cursor={{ fill: 'rgba(99,102,241,0.05)', radius: 4 }} />
-                <Bar dataKey="target" radius={[5, 5, 0, 0]} maxBarSize={36} fill="#E4E4E7" name="target" />
-                <Bar dataKey="revenue" radius={[5, 5, 0, 0]} maxBarSize={36} fill="#6366F1" name="revenue" />
+                <Bar dataKey="target" radius={[5, 5, 0, 0]} maxBarSize={36} name="target">
+                  {chartSeries.map((_, i) => <Cell key={i} fill="#E4E4E7" />)}
+                </Bar>
+                <Bar dataKey="revenue" radius={[5, 5, 0, 0]} maxBarSize={36} name="revenue">
+                  {chartSeries.map((entry, i) => (
+                    <Cell
+                      key={i}
+                      fill={entry.revenue >= (entry.target ?? 0) ? '#059669' : '#6366F1'}
+                    />
+                  ))}
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
           ) : (
-            <div
-              className="flex flex-col items-center justify-center rounded-lg"
-              style={{ height: 300, background: '#FAFAFA', border: '1px dashed #E4E4E7' }}
-            >
-              <TrendingUp style={{ width: 24, height: 24, color: '#D4D4D8', marginBottom: 8 }} />
-              <p style={{ fontSize: 13, color: '#A1A1AA' }}>No revenue data yet</p>
+            <div className="ds-empty-state" style={{ height: 280 }}>
+              <div className="ds-empty-icon">
+                <TrendingUp style={{ width: 26, height: 26 }} />
+              </div>
+              <p className="ds-empty-title">No revenue data yet</p>
+              <p className="ds-empty-description">Revenue data will appear here as payments are recorded.</p>
             </div>
           )}
         </div>
 
-        {/* Recent Activity */}
+        {/* Recent Activity — timeline */}
         <div className="ds-card lg:col-span-1 flex flex-col" style={{ padding: '18px 20px', height: '100%' }}>
           <SectionHeader title="Recent Activity" action="View all" onAction={() => onNavigate?.('notifications')} />
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-            {data.recentActivity.length > 0 ? (
-              data.recentActivity.slice(0, 6).map((a, i) => {
+          {data.recentActivity.length > 0 ? (
+            <div className="ds-timeline">
+              {data.recentActivity.slice(0, 6).map((a, i, arr) => {
                 const { icon: Icon, bg, color } = activityIcon(a.action);
+                const isLast = i === arr.length - 1;
                 return (
-                  <div
-                    key={i}
-                    className="flex items-start gap-3"
-                    style={{
-                      padding: '10px 0',
-                      borderBottom: i < Math.min(data.recentActivity.length, 6) - 1 ? '1px solid #F4F4F6' : 'none',
-                    }}
-                  >
-                    <div
-                      className="flex-shrink-0 flex items-center justify-center rounded-lg"
-                      style={{ width: 30, height: 30, background: bg, marginTop: 1 }}
-                    >
-                      <Icon style={{ width: 13, height: 13, color, strokeWidth: 2 }} />
+                  <div key={i} className="ds-timeline-item">
+                    <div className="ds-timeline-rail">
+                      <div
+                        className="ds-event-icon"
+                        style={{ background: bg, position: 'relative', zIndex: 1 }}
+                      >
+                        <Icon style={{ width: 15, height: 15, color, strokeWidth: 2 }} />
+                      </div>
+                      {!isLast && <div className="ds-timeline-connector" />}
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p style={{ fontSize: 12.5, fontWeight: 500, color: '#0A0A0B', lineHeight: 1.35 }}>{a.action}</p>
-                      <p style={{ fontSize: 11.5, color: '#A1A1AA', marginTop: 1 }}>{a.detail}</p>
+                    <div className="flex-1 min-w-0" style={{ paddingTop: 6 }}>
+                      <p style={{ fontSize: 12.5, fontWeight: 600, color: '#0A0A0B', lineHeight: 1.35 }}>{a.action}</p>
+                      <p style={{ fontSize: 11.5, color: '#71717A', marginTop: 1, lineHeight: 1.4 }}>{a.detail}</p>
+                      <p style={{ fontSize: 10.5, color: '#A1A1AA', marginTop: 3 }}>{relTime(a.createdAt)}</p>
                     </div>
-                    <p style={{ fontSize: 11, color: '#A1A1AA', flexShrink: 0, marginTop: 2 }}>
-                      {relTime(a.createdAt)}
-                    </p>
                   </div>
                 );
-              })
-            ) : (
-              <div className="flex items-center justify-center" style={{ height: 120 }}>
-                <p style={{ fontSize: 12, color: '#A1A1AA' }}>No recent activity</p>
+              })}
+            </div>
+          ) : (
+            <div className="ds-empty-state" style={{ padding: '32px 16px' }}>
+              <div className="ds-empty-icon" style={{ width: 44, height: 44 }}>
+                <Activity style={{ width: 20, height: 20 }} />
               </div>
-            )}
-          </div>
+              <p className="ds-empty-title" style={{ fontSize: 13 }}>No recent activity</p>
+              <p className="ds-empty-description" style={{ fontSize: 12 }}>Events will appear here as your team works.</p>
+            </div>
+          )}
         </div>
       </div>
 
@@ -664,17 +697,18 @@ export function Dashboard({ onNavigate }: DashboardProps) {
                 <div key={i}>
                   <div className="flex items-center justify-between mb-1.5">
                     <p style={{ fontSize: 13, fontWeight: 500, color: '#0A0A0B' }}>{prop.name}</p>
-                    <p style={{ fontSize: 12, color: '#A1A1AA' }}>
-                      {propOccupied}/{propTotal}
-                    </p>
+                    <span className="ds-badge ds-badge-neutral">{propOccupied}/{propTotal}</span>
                   </div>
                   <div className="ds-progress-track">
                     <div
-                      className="ds-progress-fill-success"
                       style={{
-                        height: 4,
+                        height: '100%',
                         width: `${propPct}%`,
-                        background: 'linear-gradient(90deg, #059669, #10B981)',
+                        background: propPct >= 80
+                          ? 'linear-gradient(90deg, #6366F1, #8B5CF6)'
+                          : propPct >= 50
+                          ? 'linear-gradient(90deg, #059669, #10B981)'
+                          : 'linear-gradient(90deg, #D97706, #F59E0B)',
                         borderRadius: 99,
                         transition: 'width 0.5s ease',
                       }}
@@ -684,9 +718,11 @@ export function Dashboard({ onNavigate }: DashboardProps) {
                 </div>
               );
             }) : (
-              <div className="flex items-center gap-2.5">
-                <Building2 style={{ width: 28, height: 28, color: '#E4E4E7' }} />
-                <p style={{ fontSize: 12, color: '#A1A1AA' }}>No properties added yet</p>
+              <div className="ds-empty-state" style={{ padding: '24px 0' }}>
+                <div className="ds-empty-icon">
+                  <Building2 style={{ width: 22, height: 22 }} />
+                </div>
+                <p className="ds-empty-description">Add your first property to see occupancy stats.</p>
               </div>
             )}
           </div>

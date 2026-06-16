@@ -30,19 +30,26 @@ import type {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const STATUS_CONFIG: Record<MaintenanceStatus, { label: string; color: string; dot: string; border: string }> = {
-  open:         { label: 'Open',        color: 'bg-red-50 text-red-700',     dot: 'bg-red-500',     border: 'border-l-red-500' },
-  assigned:     { label: 'Assigned',    color: 'bg-indigo-50 text-indigo-700',dot: 'bg-indigo-500', border: 'border-l-indigo-500' },
-  'in-progress':{ label: 'In Progress', color: 'bg-amber-50 text-amber-700', dot: 'bg-amber-500',   border: 'border-l-amber-500' },
-  waiting:      { label: 'Waiting',     color: 'bg-blue-50 text-blue-700',   dot: 'bg-blue-400',    border: 'border-l-blue-400' },
-  resolved:     { label: 'Resolved',    color: 'bg-green-50 text-green-700', dot: 'bg-green-500',   border: 'border-l-green-500' },
-  closed:       { label: 'Closed',      color: 'bg-gray-100 text-gray-500',  dot: 'bg-gray-400',    border: 'border-l-gray-400' },
+// Status config uses inline style objects so we can reference design tokens at runtime.
+// Priority/source configs use inline styles too for the same reason.
+const STATUS_CONFIG: Record<MaintenanceStatus, {
+  label: string;
+  badge: string;  // ds-badge-* class
+  dotColor: string;
+  borderColor: string;
+}> = {
+  open:          { label: 'Open',        badge: 'ds-badge-danger',  dotColor: 'var(--ds-danger)',  borderColor: 'var(--ds-danger)' },
+  assigned:      { label: 'Assigned',    badge: 'ds-badge-accent',  dotColor: 'var(--ds-accent)',  borderColor: 'var(--ds-accent)' },
+  'in-progress': { label: 'In Progress', badge: 'ds-badge-warning', dotColor: 'var(--ds-warning)', borderColor: 'var(--ds-warning)' },
+  waiting:       { label: 'Waiting',     badge: 'ds-badge-neutral', dotColor: '#60A5FA',            borderColor: '#60A5FA' },
+  resolved:      { label: 'Resolved',    badge: 'ds-badge-success', dotColor: 'var(--ds-success)', borderColor: 'var(--ds-success)' },
+  closed:        { label: 'Closed',      badge: 'ds-badge-neutral', dotColor: 'var(--ds-text-3)',  borderColor: 'var(--ds-border)' },
 };
 
-const PRIORITY_CONFIG: Record<MaintenancePriority, { label: string; color: string }> = {
-  high:   { label: 'HIGH',   color: 'bg-red-100 text-red-700' },
-  medium: { label: 'MED',    color: 'bg-amber-100 text-amber-700' },
-  low:    { label: 'LOW',    color: 'bg-green-100 text-green-700' },
+const PRIORITY_CONFIG: Record<MaintenancePriority, { label: string; badge: string }> = {
+  high:   { label: 'HIGH', badge: 'ds-badge-danger' },
+  medium: { label: 'MED',  badge: 'ds-badge-warning' },
+  low:    { label: 'LOW',  badge: 'ds-badge-success' },
 };
 
 const SOURCE_LABELS: Record<MaintenanceSource, string> = {
@@ -53,12 +60,12 @@ const SOURCE_LABELS: Record<MaintenanceSource, string> = {
   staff_created: 'Staff',
 };
 
-const SOURCE_COLORS: Record<MaintenanceSource, string> = {
-  manual:        'bg-purple-50 text-purple-600',
-  portal:        'bg-blue-50 text-blue-600',
-  admin_created: 'bg-indigo-50 text-indigo-600',
-  whatsapp:      'bg-green-50 text-green-700',
-  staff_created: 'bg-orange-50 text-orange-600',
+const SOURCE_BADGES: Record<MaintenanceSource, string> = {
+  manual:        'ds-badge-accent',
+  portal:        'ds-badge-accent',
+  admin_created: 'ds-badge-accent',
+  whatsapp:      'ds-badge-success',
+  staff_created: 'ds-badge-warning',
 };
 
 type FilterStatus = 'all' | MaintenanceStatus;
@@ -164,11 +171,11 @@ function ThreadTimeline({ ticketId }: { ticketId: string }) {
                   <span className="text-xs font-semibold text-zinc-800">{t.actorName}</span>
                   {t.statusTransition && (
                     <span className="inline-flex items-center gap-1 text-[10px] text-zinc-500">
-                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-semibold ${STATUS_CONFIG[t.statusTransition.from]?.color}`}>
+                      <span className={`ds-badge ${STATUS_CONFIG[t.statusTransition.from]?.badge ?? 'ds-badge-neutral'}`} style={{ fontSize: 9 }}>
                         {STATUS_CONFIG[t.statusTransition.from]?.label}
                       </span>
                       <ArrowRight className="w-2.5 h-2.5" />
-                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-semibold ${STATUS_CONFIG[t.statusTransition.to]?.color}`}>
+                      <span className={`ds-badge ${STATUS_CONFIG[t.statusTransition.to]?.badge ?? 'ds-badge-neutral'}`} style={{ fontSize: 9 }}>
                         {STATUS_CONFIG[t.statusTransition.to]?.label}
                       </span>
                     </span>
@@ -277,11 +284,10 @@ function StatusDropdown({ current, ticketId, onUpdate }: StatusDropdownProps) {
       <button
         onClick={() => setOpen((v) => !v)}
         disabled={saving || transitions.length === 0}
-        className={`flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full transition-all ${cfg.color} ${
-          transitions.length > 0 ? 'hover:opacity-80 cursor-pointer' : 'cursor-default'
-        }`}
+        className={`ds-badge ${cfg.badge} ${transitions.length > 0 ? 'hover:opacity-80 cursor-pointer' : 'cursor-default'}`}
+        style={{ gap: '6px', padding: '4px 10px', fontSize: 11 }}
       >
-        {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${cfg.dot}`} />}
+        {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <span style={{ width: 6, height: 6, borderRadius: '50%', background: cfg.dotColor, flexShrink: 0, display: 'inline-block' }} />}
         {cfg.label}
         {transitions.length > 0 && <ChevronDown className="w-3 h-3" />}
       </button>
@@ -304,8 +310,8 @@ function StatusDropdown({ current, ticketId, onUpdate }: StatusDropdownProps) {
                 onClick={() => void handleSelect(next)}
                 className="w-full text-left flex items-center gap-2 px-3 py-2 text-xs hover:bg-zinc-50 transition-colors"
               >
-                <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${nc.dot}`} />
-                <span className="font-medium text-zinc-800">{nc.label}</span>
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: nc.dotColor, flexShrink: 0, display: 'inline-block' }} />
+                <span className="font-medium" style={{ color: 'var(--ds-text-1)', fontSize: 12 }}>{nc.label}</span>
               </button>
             );
           })}
@@ -330,7 +336,14 @@ function TicketRow({ ticket, propertyName, onStatusUpdate, onView, highlight }: 
   const ub = urgencyBadge(urgencyScore(ticket));
 
   return (
-    <div className={`border rounded-xl overflow-hidden transition-shadow hover:shadow-sm border-l-4 ${sCfg.border} ${highlight ? 'border border-amber-200 bg-amber-50/30' : 'border border-zinc-200 bg-white'}`}>
+    <div
+      className={`ds-card transition-shadow hover:shadow-sm ${highlight ? '' : ''}`}
+      style={{
+        borderLeft: `3px solid ${sCfg.borderColor}`,
+        ...(highlight ? { background: 'var(--ds-warning-subtle)', borderColor: 'var(--ds-warning-border)' } : {}),
+        overflow: 'hidden',
+      }}
+    >
       <div className="flex items-center gap-3 px-4 py-3">
         {/* Urgency badge */}
         <span style={{ flexShrink: 0, fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 4, background: ub.bg, color: ub.color }}>
@@ -349,7 +362,7 @@ function TicketRow({ ticket, propertyName, onStatusUpdate, onView, highlight }: 
           <div className="flex items-center gap-3 mt-0.5 text-xs text-zinc-500 flex-wrap">
             <span className="flex items-center gap-1"><User className="w-3 h-3" />{ticket.tenant}</span>
             <span className="flex items-center gap-1"><MapPin className="w-3 h-3" />{propertyName} · Room {ticket.room}</span>
-            <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold ${pCfg.color}`}>{pCfg.label}</span>
+            <span className={`ds-badge ${pCfg.badge}`} style={{ fontSize: 9, padding: '1px 5px' }}>{pCfg.label}</span>
           </div>
         </div>
 
@@ -410,7 +423,7 @@ function TicketDetailSheet({
             </div>
             <div className="flex items-center gap-3 flex-wrap">
               <StatusDropdown current={ticket.status} ticketId={ticket.id} onUpdate={(s) => onStatusUpdate(ticket.id, s)} />
-              <span className={`px-2 py-0.5 rounded text-xs font-bold ${pCfg.color}`}>{pCfg.label} priority</span>
+              <span className={`ds-badge ${pCfg.badge}`}>{pCfg.label} priority</span>
               <span style={{ fontSize: 11, color: '#71717A' }}>{propertyName} · Room {ticket.room}</span>
             </div>
           </div>
@@ -712,7 +725,7 @@ export function Maintenance() {
                         {ticket.tenant} · Room {ticket.room} · {ageLabel(ticket.date)}
                       </p>
                     </div>
-                    <span style={{ flexShrink: 0, fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: 99, background: STATUS_CONFIG[ticket.status]?.color?.split(' ')[0] ?? '#F4F4F6', color: '#52525B' }}>
+                    <span className={`ds-badge ${STATUS_CONFIG[ticket.status]?.badge ?? 'ds-badge-neutral'}`} style={{ fontSize: 10 }}>
                       {STATUS_CONFIG[ticket.status]?.label ?? ticket.status}
                     </span>
                   </div>

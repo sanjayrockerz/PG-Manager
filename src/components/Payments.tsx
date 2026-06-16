@@ -8,7 +8,9 @@ import {
   CheckCircle2, Clock, AlertCircle, Plus, MessageCircle,
   Download, IndianRupee, Calendar, Save, Receipt,
   Loader2, TrendingUp, ChevronDown, Filter, ChevronLeft, ChevronRight, Lock,
+  Target, Percent,
 } from 'lucide-react';
+import { KpiCard } from './ui/KpiCard';
 import { useProperty } from '../contexts/PropertyContext';
 import { supabase } from '../lib/supabase';
 import { isDemoModeEnabled, getPayments, getTenants, updatePaymentStatusRecord, addPaymentChargeRecord, getTenantById, patchPaymentCache, invalidatePaymentCache } from '../services/dataService';
@@ -527,32 +529,13 @@ export function Payments({ onNavigate }: PaymentsProps) {
         </div>
       </div>
 
-      {/* ── Compact stats strip (replaces 5 KPI cards) ───── */}
-      <div className="ds-card flex items-center flex-wrap" style={{ padding: 0, overflow: 'hidden' }}>
-        {([
-          { label: 'Expected',  value: fmt(stats.expected),         color: '#0A0A0B' },
-          { label: 'Collected', value: fmt(stats.paid),             color: '#059669' },
-          { label: 'Pending',   value: fmt(stats.pending),          color: stats.pending > 0 ? '#D97706' : '#71717A' },
-          { label: 'Overdue',   value: fmt(stats.overdue),          color: stats.overdue > 0 ? '#DC2626' : '#71717A' },
-          { label: 'Recovery',  value: `${stats.recoveryRate}%`,    color: stats.recoveryRate >= 80 ? '#059669' : stats.recoveryRate >= 50 ? '#D97706' : '#DC2626' },
-        ] as const).map(({ label, value, color }, i, arr) => (
-          <div key={label} className="flex items-center" style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ padding: '10px 16px', flex: 1 }}>
-              <p style={{ fontSize: 10, color: '#A1A1AA', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>{label}</p>
-              <p style={{ fontSize: 15, fontWeight: 700, color, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{value}</p>
-            </div>
-            {i < arr.length - 1 && <div style={{ width: 1, height: 32, background: '#F1F1F3', flexShrink: 0 }} />}
-          </div>
-        ))}
-        <div style={{ width: 1, height: 32, background: '#F1F1F3', flexShrink: 0 }} />
-        <div style={{ padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 5 }}>
-          <Calendar style={{ width: 12, height: 12, color: '#A1A1AA' }} />
-          <span style={{ fontSize: 11, color: '#71717A', fontWeight: 500, whiteSpace: 'nowrap' }}>{periodLabel(period)}</span>
-          <span style={{ fontSize: 10, color: '#A1A1AA' }}>· {periodPayments.length}</span>
-          {projectedPayments.length > 0 && (
-            <span style={{ fontSize: 10, color: '#A1A1AA' }}>({projectedPayments.length} projected)</span>
-          )}
-        </div>
+      {/* ── KPI cards ───────────────────────────────────── */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        <KpiCard label="Expected"  value={stats.expected} prefix="₹" accent="violet"  icon={Target}       meta={periodLabel(period)} />
+        <KpiCard label="Collected" value={stats.paid}     prefix="₹" accent="emerald" icon={CheckCircle2} meta={`${periodPayments.length} payments`} />
+        <KpiCard label="Pending"   value={stats.pending}  prefix="₹" accent="amber"   icon={Clock}        meta={projectedPayments.length > 0 ? `${projectedPayments.length} projected` : 'In period'} />
+        <KpiCard label="Overdue"   value={stats.overdue}  prefix="₹" accent="rose"    icon={AlertCircle}  meta={stats.overdue > 0 ? 'Needs collection' : 'None'} />
+        <KpiCard label="Recovery"  value={stats.recoveryRate} suffix="%" accent="blue" icon={Percent}     format={(n) => Math.round(n).toString()} meta="Collection rate" />
       </div>
 
       {/* ── Compact overdue / mark-overdue banner ──── */}
