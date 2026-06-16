@@ -17,6 +17,8 @@ import type { TenantRecord } from '../services/supabaseData';
 import { TENANT_STATUS_LABELS, TENANT_STATUS_COLORS } from '../services/supabaseData';
 import type { Room } from '../contexts/PropertyContext';
 import type { OccupancyMode } from '../services/supabaseData';
+import { OCCUPANCY_TOKENS, occupancyDot } from '../utils/occupancyStatus';
+import type { OccupancyTokens } from '../utils/occupancyStatus';
 
 interface BuildingViewProps {
   onTenantClick?: (tenantId: string) => void;
@@ -26,32 +28,15 @@ interface BuildingViewProps {
   onBack?: () => void;
 }
 
-// Semantic palette — soft backgrounds, muted accents (never saturated blocks).
-// Priority: maintenance > overdue_risk > vacating > full > partial > vacant
-//
-// Business color semantics (do NOT invert):
-//   Vacant      → Green  (healthy availability — ready to earn)
-//   Occupied    → Neutral grey/blue (steady state, no action needed)
-//   Maintenance → Amber
-//   Vacating    → Purple   Overdue risk → Red
-const ROOM_STATUS_STYLES: Record<string, { bg: string; border: string; accent: string; dot: string; shadow: string }> = {
-  // Occupied = neutral grey/blue (no action needed)
-  occupied_full:    { bg: 'hsla(210, 40%, 98%, 0.8)', border: 'hsla(214, 32%, 91%, 0.8)', accent: 'hsl(215, 16%, 47%)', dot: 'hsl(215, 16%, 47%)', shadow: '0 4px 20px hsla(215, 16%, 47%, 0.03)' },
-  occupied_partial: { bg: 'hsla(210, 40%, 98%, 0.8)', border: 'hsla(214, 32%, 91%, 0.8)', accent: 'hsl(215, 16%, 47%)', dot: 'hsl(215, 16%, 47%)', shadow: '0 4px 20px hsla(215, 16%, 47%, 0.03)' },
-  // Vacant = green (healthy availability)
-  vacant:           { bg: 'hsla(142, 76%, 97%, 0.7)', border: 'hsla(142, 71%, 85%, 0.5)', accent: 'hsl(142, 71%, 45%)', dot: 'hsl(142, 71%, 45%)', shadow: '0 4px 20px hsla(142, 71%, 45%, 0.05)' },
-  maintenance:      { bg: 'hsla(45, 100%, 96%, 0.7)', border: 'hsla(45, 93%, 80%, 0.5)', accent: 'hsl(38, 92%, 50%)', dot: 'hsl(38, 92%, 50%)', shadow: '0 4px 20px hsla(38, 92%, 50%, 0.08)' },
-  vacating:         { bg: 'hsla(250, 100%, 98%, 0.7)', border: 'hsla(250, 80%, 90%, 0.5)', accent: 'hsl(262, 83%, 58%)', dot: 'hsl(262, 83%, 58%)', shadow: '0 4px 20px hsla(262, 83%, 58%, 0.08)' },
-  overdue_risk:     { bg: 'hsla(0, 100%, 98%, 0.7)', border: 'hsla(0, 93%, 90%, 0.5)', accent: 'hsl(0, 84%, 60%)', dot: 'hsl(0, 84%, 60%)', shadow: '0 4px 20px hsla(0, 84%, 60%, 0.08)' },
-};
-
-function getRoomStyle(occ: RoomOccupancy): typeof ROOM_STATUS_STYLES[string] {
-  if (occ.isUnderMaintenance) return ROOM_STATUS_STYLES.maintenance;
-  if (occ.hasOverdueRisk) return ROOM_STATUS_STYLES.overdue_risk;
-  if (occ.hasUpcomingVacate) return ROOM_STATUS_STYLES.vacating;
-  if (occ.isFullyOccupied) return ROOM_STATUS_STYLES.occupied_full;
-  if (occ.isPartiallyOccupied) return ROOM_STATUS_STYLES.occupied_partial;
-  return ROOM_STATUS_STYLES.vacant;
+// Occupancy colors come from the shared design tokens (utils/occupancyStatus)
+// so Building View, Dashboard, Analytics and Admin never diverge. Priority:
+// maintenance > overdue > vacating > occupied > vacant.
+function getRoomStyle(occ: RoomOccupancy): OccupancyTokens {
+  if (occ.isUnderMaintenance) return OCCUPANCY_TOKENS.maintenance;
+  if (occ.hasOverdueRisk) return OCCUPANCY_TOKENS.overdue;
+  if (occ.hasUpcomingVacate) return OCCUPANCY_TOKENS.vacating;
+  if (occ.isFullyOccupied || occ.isPartiallyOccupied) return OCCUPANCY_TOKENS.occupied;
+  return OCCUPANCY_TOKENS.vacant;
 }
 
 function getRoomStatusLabel(occ: RoomOccupancy): string {
@@ -73,14 +58,12 @@ function BedGrid({ occ, mode }: { occ: RoomOccupancy; mode: OccupancyMode }) {
         const tenant = occ.tenantsInRoom[i];
         const isVacating = tenant && (tenant.status === 'notice_submitted' || tenant.status === 'vacating');
         const isOverdue = tenant && tenant.status === 'payment_overdue';
-        // Semantics: vacant bed = green (available), occupied = neutral grey,
-        // overdue = red, vacating = purple.
+        // Shared semantics: vacant bed = green (available), occupied = neutral
+        // grey, overdue = red, vacating = purple. Tokens are the single source.
         const dotColor = tenant
-          ? isOverdue ? '#DC2626' : isVacating ? '#7C3AED' : '#64748B'
-          : '#16A34A';
-        const ringColor = tenant
-          ? isOverdue ? '#DC2626' : isVacating ? '#7C3AED' : '#64748B'
-          : '#16A34A';
+          ? isOverdue ? occupancyDot('overdue') : isVacating ? occupancyDot('vacating') : occupancyDot('occupied')
+          : occupancyDot('vacant');
+        const ringColor = dotColor;
         return (
           <span
             key={i}
@@ -166,19 +149,19 @@ function RoomCard({
           <div className="flex items-center gap-1.5">
             {occ.hasOverdueRisk && (
               <span title={`${occ.overdueCount} tenant(s) with overdue payment`}>
-                <AlertCircle className="w-4 h-4" style={{ color: ROOM_STATUS_STYLES.overdue_risk.accent }} />
+                <AlertCircle className="w-4 h-4" style={{ color: OCCUPANCY_TOKENS.overdue.accent }} />
               </span>
             )}
             {occ.hasUpcomingVacate && !occ.hasOverdueRisk && (
               <span title="Upcoming vacate">
-                <Clock className="w-4 h-4" style={{ color: ROOM_STATUS_STYLES.vacating.accent }} />
+                <Clock className="w-4 h-4" style={{ color: OCCUPANCY_TOKENS.vacating.accent }} />
               </span>
             )}
             {occ.isUnderMaintenance && (
-              <Wrench className="w-4 h-4" style={{ color: ROOM_STATUS_STYLES.maintenance.accent }} />
+              <Wrench className="w-4 h-4" style={{ color: OCCUPANCY_TOKENS.maintenance.accent }} />
             )}
             {occ.isFullyOccupied && !occ.hasUpcomingVacate && !occ.hasOverdueRisk && (
-              <CheckCircle className="w-4 h-4" style={{ color: ROOM_STATUS_STYLES.occupied_full.accent }} />
+              <CheckCircle className="w-4 h-4" style={{ color: OCCUPANCY_TOKENS.occupied.accent }} />
             )}
           </div>
         </div>

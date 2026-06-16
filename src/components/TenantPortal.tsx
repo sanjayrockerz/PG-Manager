@@ -955,6 +955,14 @@ export function TenantPortal() {
     return () => window.removeEventListener('keydown', handler);
   }, [toggleSidebar]);
 
+  // Prevent body scroll while the mobile slide-over drawer is open.
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const prev = document.body.style.overflow;
+    if (sidebarOpen) document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, [sidebarOpen]);
+
   // Guard inactive tenants
   useEffect(() => {
     if (!snapshot) return;

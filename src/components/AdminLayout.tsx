@@ -243,6 +243,13 @@ export function AdminLayout({ current, onNavigate, profileName, profileRole, not
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+  // Prevent body scroll while the mobile sidebar overlay is open.
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    if (mobileOpen) document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, [mobileOpen]);
+
   const handleSignOut = () => {
     setMobileOpen(false);
     void logout();

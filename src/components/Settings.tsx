@@ -34,6 +34,7 @@ import { PAYMENT_GATEWAY_OPTIONS, type PaymentGatewayName } from '../services/pa
 import type { SMSProviderAdapter } from '../services/smsProvider';
 import { SMS_PROVIDER_ADAPTERS } from '../services/smsProvider';
 import { PAYMENT_GATEWAY_ADAPTERS } from '../services/paymentGateway';
+import { WHATSAPP_PROVIDER_OPTIONS, WHATSAPP_PROVIDER_ADAPTERS, type WhatsAppProviderName } from '../services/whatsappProvider';
 
 // ─── Plan definitions ──────────────────────────────────────────────────────────
 const PLANS = [
@@ -214,10 +215,14 @@ function IntegrationsTab({
   const [gateway, setGateway] = useState<string>(settings.integrations?.paymentGateway?.gateway ?? 'manual');
   const [gatewayEnabled, setGatewayEnabled] = useState(settings.integrations?.paymentGateway?.enabled ?? false);
   const [gatewayConfig, setGatewayConfig] = useState<Record<string, string>>(settings.integrations?.paymentGateway?.config ?? {});
+  const [waProvider, setWaProvider] = useState<string>(settings.integrations?.whatsappProvider?.provider ?? 'none');
+  const [waEnabled, setWaEnabled] = useState(settings.integrations?.whatsappProvider?.enabled ?? false);
+  const [waConfig, setWaConfig] = useState<Record<string, string>>(settings.integrations?.whatsappProvider?.config ?? {});
   const [saving, setSaving] = useState(false);
 
   const smsAdapter = SMS_PROVIDER_ADAPTERS[smsProvider as SMSProviderName];
   const gwAdapter = PAYMENT_GATEWAY_ADAPTERS[gateway as PaymentGatewayName];
+  const waAdapter = WHATSAPP_PROVIDER_ADAPTERS[waProvider as WhatsAppProviderName];
 
   const handleSave = async () => {
     setSaving(true);
@@ -227,6 +232,7 @@ function IntegrationsTab({
         integrations: {
           smsProvider: { provider: smsProvider, enabled: smsEnabled, config: smsConfig },
           paymentGateway: { gateway, enabled: gatewayEnabled, config: gatewayConfig },
+          whatsappProvider: { provider: waProvider, enabled: waEnabled && waProvider !== 'none', config: waConfig },
         },
       };
       await onSave(updated);
@@ -279,6 +285,58 @@ function IntegrationsTab({
                   />
                 </div>
               ))}
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* WhatsApp Provider */}
+      <Card className="border-gray-200">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Globe className="w-4 h-4" /> WhatsApp Provider
+          </CardTitle>
+          <p className="text-sm text-gray-500">
+            Optional. When configured, new tenants automatically receive a WhatsApp invitation with their
+            secure portal magic-link alongside the email invite. Leave unconfigured to send email only.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <Label className="text-sm font-medium">Enable WhatsApp invitations</Label>
+            <Toggle checked={waEnabled} onChange={setWaEnabled} />
+          </div>
+          {waEnabled && (
+            <>
+              <div>
+                <Label className="text-xs font-semibold mb-1.5 block">Provider</Label>
+                <select
+                  value={waProvider}
+                  onChange={(e) => { setWaProvider(e.target.value); setWaConfig({}); }}
+                  className="w-full h-10 px-3 text-sm border border-gray-300 rounded-lg"
+                >
+                  {WHATSAPP_PROVIDER_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
+              {waAdapter?.requiredFields.map((field) => (
+                <div key={field.key}>
+                  <Label className="text-xs font-semibold mb-1.5 block">{field.label}</Label>
+                  <Input
+                    type={field.secret ? 'password' : 'text'}
+                    value={waConfig[field.key] ?? ''}
+                    onChange={(e) => setWaConfig({ ...waConfig, [field.key]: e.target.value })}
+                    className="h-10 text-sm font-mono"
+                    placeholder={field.secret ? '••••••••' : field.label}
+                  />
+                </div>
+              ))}
+              {waProvider === 'none' && (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                  <p className="text-sm text-amber-700">Select a provider above to send WhatsApp invitations.</p>
+                </div>
+              )}
             </>
           )}
         </CardContent>

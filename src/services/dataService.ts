@@ -710,12 +710,17 @@ export async function createTenantRecord(input: TenantCreateInput): Promise<Tena
     void (async () => {
       try {
         if (input.email && !input.email.includes('noemail.')) {
+          const propertyName = await getProperties()
+            .then((list) => list.find((p) => p.id === created.propertyId)?.name ?? null)
+            .catch(() => null);
           await supabaseTenantProvisioningApi.inviteTenant({
             tenantId: created.id,
             email: input.email,
             name: created.name,
             ownerId: created.ownerId,
             propertyId: created.propertyId,
+            phone: created.phone,
+            propertyName,
           });
         }
       } catch (provisionErr) {
@@ -783,11 +788,13 @@ export async function resendTenantInvitation(tenant: {
   name: string;
   ownerId: string;
   propertyId: string;
-}): Promise<{ invitationSentAt: string }> {
+  phone?: string | null;
+  propertyName?: string | null;
+}): Promise<{ invitationSentAt: string; whatsappSent: boolean }> {
   const mode = getAppMode();
   if (mode === 'demo') {
     // Demo mode never touches Supabase Auth — just simulate a successful send.
-    return { invitationSentAt: new Date().toISOString() };
+    return { invitationSentAt: new Date().toISOString(), whatsappSent: false };
   }
   if (!tenant.email || tenant.email.includes('noemail.')) {
     throw new Error('This tenant has no email address on file. Add an email before sending an invitation.');
@@ -798,6 +805,8 @@ export async function resendTenantInvitation(tenant: {
     name: tenant.name,
     ownerId: tenant.ownerId,
     propertyId: tenant.propertyId,
+    phone: tenant.phone ?? null,
+    propertyName: tenant.propertyName ?? null,
   }));
 }
 

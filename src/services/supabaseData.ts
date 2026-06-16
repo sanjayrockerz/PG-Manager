@@ -924,6 +924,11 @@ export interface OwnerSettingsRecord {
       enabled: boolean;
       config: Record<string, string>;
     };
+    whatsappProvider: {
+      provider: string;
+      enabled: boolean;
+      config: Record<string, string>;
+    };
   };
 }
 
@@ -2254,6 +2259,7 @@ export const defaultSettings: OwnerSettingsRecord = {
   integrations: {
     smsProvider: { provider: 'supabase', enabled: false, config: {} },
     paymentGateway: { gateway: 'manual', enabled: false, config: {} },
+    whatsappProvider: { provider: 'none', enabled: false, config: {} },
   },
 };
 
@@ -2323,6 +2329,7 @@ function parseOwnerSettings(row: OwnerSettingsRow | null): OwnerSettingsRecord {
       const wsIntegrations = (ws.integrations as Record<string, unknown> | undefined) ?? {};
       const smsCfg = (wsIntegrations.smsProvider as Record<string, unknown> | undefined) ?? {};
       const gwCfg = (wsIntegrations.paymentGateway as Record<string, unknown> | undefined) ?? {};
+      const waCfg = (wsIntegrations.whatsappProvider as Record<string, unknown> | undefined) ?? {};
       return {
         smsProvider: {
           provider: String(smsCfg.provider ?? 'supabase'),
@@ -2333,6 +2340,11 @@ function parseOwnerSettings(row: OwnerSettingsRow | null): OwnerSettingsRecord {
           gateway: String(gwCfg.gateway ?? 'manual'),
           enabled: Boolean(gwCfg.enabled ?? false),
           config: (typeof gwCfg.config === 'object' && gwCfg.config !== null ? gwCfg.config : {}) as Record<string, string>,
+        },
+        whatsappProvider: {
+          provider: String(waCfg.provider ?? 'none'),
+          enabled: Boolean(waCfg.enabled ?? false),
+          config: (typeof waCfg.config === 'object' && waCfg.config !== null ? waCfg.config : {}) as Record<string, string>,
         },
       };
     })(),
@@ -6132,7 +6144,9 @@ export const supabaseTenantProvisioningApi = {
     name: string;
     ownerId: string;
     propertyId: string;
-  }): Promise<{ invitationSentAt: string }> {
+    phone?: string | null;
+    propertyName?: string | null;
+  }): Promise<{ invitationSentAt: string; whatsappSent: boolean }> {
     const email = args.email.trim().toLowerCase();
     if (!email || email.includes('noemail.') || email.includes(NO_EMAIL_MARKER)) {
       throw new Error('This tenant has no email address on file. Add an email before sending an invitation.');
@@ -6155,6 +6169,41 @@ export const supabaseTenantProvisioningApi = {
 
     const invitationSentAt = new Date().toISOString();
 
+    // 7 (WhatsApp): send the WhatsApp invitation only when a provider is
+    // configured for this owner. Fully provider-agnostic — the architecture
+    // supports a future provider without touching this business logic. Skipping
+    // is a soft no-op so the email invitation still succeeds on its own.
+    let whatsappSent = false;
+    const phone = (args.phone ?? '').trim();
+    if (phone) {
+      try {
+        const { data: settingsRow } = await supabase
+          .from('owner_settings')
+          .select('whatsapp_settings')
+          .eq('owner_id', args.ownerId)
+          .maybeSingle<Pick<OwnerSettingsRow, 'whatsapp_settings'>>();
+        const settings = parseOwnerSettings(
+          settingsRow ? ({ owner_id: args.ownerId, pg_rules: [], whatsapp_settings: settingsRow.whatsapp_settings } as OwnerSettingsRow) : null,
+        );
+        const waConfig = settings.integrations.whatsappProvider;
+        const { sendWhatsApp, isWhatsAppConfigured } = await import('./whatsappProvider');
+        if (isWhatsAppConfigured(waConfig as never)) {
+          const propertyName = (args.propertyName ?? 'your new home').trim() || 'your new home';
+          const magicLink = redirectTo ?? (configuredSiteUrl || origin || '');
+          const footer = settings.whatsappSettings.customFooter?.trim();
+          const body =
+            `Welcome to ${propertyName}! Your Tenant Portal has been created. ` +
+            `Access your account securely here: ${magicLink}` +
+            (footer ? `\n\n${footer}` : '');
+          const result = await sendWhatsApp(phone, body, waConfig as never);
+          whatsappSent = result.success && !result.skipped;
+        }
+      } catch (waErr) {
+        // Non-fatal — WhatsApp is best-effort; the email invitation already went out.
+        console.warn('WhatsApp invitation failed (non-blocking):', waErr);
+      }
+    }
+
     // Stamp the invitation time on the tenant row (graceful — column may not exist yet).
     const { error: stampError } = await supabase
       .from('tenants')
@@ -6164,24 +6213,26 @@ export const supabaseTenantProvisioningApi = {
       console.warn('Could not record invitation_sent_at:', stampError.message);
     }
 
-    // 7: audit log.
+    const channels = whatsappSent ? 'email + WhatsApp' : 'email';
+
+    // 8: audit log.
     void logActivity(
       args.ownerId,
       args.propertyId,
       'TENANT_INVITED',
-      `Invitation email sent to ${args.name} (${email})`,
-      { tenantId: args.tenantId, email, invitationSentAt },
+      `Invitation sent to ${args.name} (${email}) via ${channels}`,
+      { tenantId: args.tenantId, email, invitationSentAt, whatsappSent, phone: phone || null },
     ).catch(() => {});
 
-    // 8: welcome notification for the owner's activity feed.
+    // 9: welcome notification for the owner's activity feed.
     void createOwnerNotification(args.ownerId, {
       type: 'tenant',
       title: 'Tenant Invitation Sent',
-      message: `${args.name} has been invited to the Tenant Portal via ${email}.`,
+      message: `${args.name} has been invited to the Tenant Portal via ${channels}.`,
       propertyId: args.propertyId,
     }).catch(() => {});
 
-    return { invitationSentAt };
+    return { invitationSentAt, whatsappSent };
   },
 };
 

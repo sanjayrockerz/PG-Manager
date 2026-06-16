@@ -1541,15 +1541,21 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
     }
     setResendingInvite(true);
     try {
-      const { invitationSentAt } = await resendTenantInvitation({
+      const { invitationSentAt, whatsappSent } = await resendTenantInvitation({
         id: tenant.id,
         email: tenant.email,
         name: tenant.name,
         ownerId: tenant.ownerId,
         propertyId: tenant.propertyId,
+        phone: tenant.phone,
+        propertyName: property?.name ?? null,
       });
       setTenant((prev) => (prev ? { ...prev, invitationSentAt } : prev));
-      toast.success(`Invitation sent to ${tenant.email}.`);
+      toast.success(
+        whatsappSent
+          ? `Invitation sent to ${tenant.email} and WhatsApp.`
+          : `Invitation sent to ${tenant.email}.`,
+      );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to send invitation.');
     } finally {

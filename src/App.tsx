@@ -84,6 +84,14 @@ function AppContent() {
   );
   const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
 
+  // Prevent body scroll while the mobile slide-over drawer is open.
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const prev = document.body.style.overflow;
+    if (sidebarOpen) document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, [sidebarOpen]);
+
   // ── Navigation history ──────────────────────────────────────────────────────
   // State-based routing (activeTab + selectedTenantId) has no browser history, so
   // deep pages used to "back" via hardcoded redirects — e.g. a tenant opened from
