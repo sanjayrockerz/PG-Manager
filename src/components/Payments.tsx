@@ -61,29 +61,31 @@ function periodLabel(mode: PeriodMode): string {
 
 function ageBucket(dueDate: string): { label: string; color: string; days: number } {
   const days = Math.ceil((Date.now() - new Date(dueDate).getTime()) / 86400000);
-  if (days > 30) return { label: `${days}d overdue`, color: '#991B1B', days };
-  if (days > 15) return { label: `${days}d overdue`, color: '#B45309', days };
-  if (days > 7)  return { label: `${days}d overdue`, color: '#D97706', days };
-  return           { label: `${days}d overdue`, color: '#71717A', days };
+  if (days > 30) return { label: `${days}d overdue`, color: 'var(--ds-danger-text)', days };
+  if (days > 15) return { label: `${days}d overdue`, color: 'var(--ds-warning-text)', days };
+  if (days > 7)  return { label: `${days}d overdue`, color: 'var(--ds-warning)', days };
+  return           { label: `${days}d overdue`, color: 'var(--ds-text-secondary)', days };
 }
 
 const STATUS_LABEL: Record<PaymentStatus, string> = { paid: 'Paid', pending: 'Pending', overdue: 'Overdue' };
 
+const STATUS_BADGE_CLASS: Record<PaymentStatus, string> = {
+  paid:    'ds-badge ds-badge-success',
+  pending: 'ds-badge ds-badge-warning',
+  overdue: 'ds-badge ds-badge-danger',
+};
+
 const STATUS_STYLE: Record<PaymentStatus, { bg: string; color: string; border: string }> = {
-  paid:    { bg: '#ECFDF5', color: '#065F46', border: '#A7F3D0' },
-  pending: { bg: '#FFFBEB', color: '#92400E', border: '#FDE68A' },
-  overdue: { bg: '#FEF2F2', color: '#991B1B', border: '#FECACA' },
+  paid:    { bg: 'var(--ds-success-subtle)',  color: 'var(--ds-success-text)',  border: 'var(--ds-success-border)' },
+  pending: { bg: 'var(--ds-warning-subtle)', color: 'var(--ds-warning-text)', border: 'var(--ds-warning-border)' },
+  overdue: { bg: 'var(--ds-danger-subtle)',  color: 'var(--ds-danger-text)',  border: 'var(--ds-danger-border)' },
 };
 
 const fmt = (n: number) => `₹${n.toLocaleString('en-IN')}`;
 
 function StatusBadge({ status }: { status: PaymentStatus }) {
-  const s = STATUS_STYLE[status];
   return (
-    <span style={{
-      fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 99,
-      background: s.bg, color: s.color, border: `1px solid ${s.border}`,
-    }}>
+    <span className={STATUS_BADGE_CLASS[status]}>
       {STATUS_LABEL[status]}
     </span>
   );
@@ -541,22 +543,22 @@ export function Payments({ onNavigate }: PaymentsProps) {
       {/* ── Compact overdue / mark-overdue banner ──── */}
       {unstampedOverdue.length > 0 && (
         <div className="flex items-center justify-between rounded-lg"
-          style={{ padding: '7px 12px', background: '#FEF2F2', border: '1px solid #FECACA', gap: 10 }}>
+          style={{ padding: '7px 12px', background: 'var(--ds-danger-subtle)', border: '1px solid var(--ds-danger-border)', gap: 10 }}>
           <div className="flex items-center gap-2">
-            <AlertCircle style={{ width: 13, height: 13, color: '#DC2626', flexShrink: 0 }} />
-            <p style={{ fontSize: 12, fontWeight: 500, color: '#991B1B' }}>
+            <AlertCircle style={{ width: 13, height: 13, color: 'var(--ds-danger)', flexShrink: 0 }} />
+            <p style={{ fontSize: 12, fontWeight: 500, color: 'var(--ds-danger-text)' }}>
               <strong>{unstampedOverdue.length}</strong> pending past due — not yet stamped overdue
             </p>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
             {onNavigate && (
               <button onClick={() => onNavigate('tenants')} className="ds-btn ds-btn-secondary"
-                style={{ fontSize: 11, padding: '3px 8px', borderColor: '#FECACA', color: '#991B1B' }}>
+                style={{ fontSize: 11, padding: '3px 8px', borderColor: 'var(--ds-danger-border)', color: 'var(--ds-danger-text)' }}>
                 Tenants
               </button>
             )}
             <button onClick={() => void markAllOverdue()} className="ds-btn"
-              style={{ fontSize: 11, padding: '3px 9px', background: '#DC2626', color: '#fff', border: 'none' }}>
+              style={{ fontSize: 11, padding: '3px 9px', background: 'var(--ds-danger)', color: '#fff', border: 'none' }}>
               Mark Overdue
             </button>
           </div>
@@ -571,22 +573,21 @@ export function Payments({ onNavigate }: PaymentsProps) {
           className="flex items-center justify-between flex-wrap gap-3 sticky top-0 z-10 bg-white"
           style={{ padding: '8px 12px', borderBottom: '1px solid #F4F4F6' }}
         >
-          <div className="flex items-center gap-1.5">
-            <Filter style={{ width: 12, height: 12, color: '#A1A1AA' }} />
+          <div className="ds-tab-bar" style={{ flexShrink: 0 }}>
+            <Filter style={{ width: 12, height: 12, color: 'var(--ds-text-tertiary)', marginRight: 2, flexShrink: 0 }} />
             {(['all', 'paid', 'pending', 'overdue'] as const).map((s) => (
               <button
                 key={s}
                 onClick={() => setFilterStatus(s)}
-                style={{
-                  fontSize: 11, fontWeight: 500, padding: '3px 9px', borderRadius: 99, cursor: 'pointer',
-                  border: `1px solid ${filterStatus === s ? '#6366F1' : '#E4E4E7'}`,
-                  background: filterStatus === s ? '#6366F1' : '#fff',
-                  color: filterStatus === s ? '#fff' : '#52525B',
-                  transition: 'all 0.15s',
-                }}
+                className={`ds-tab ${filterStatus === s ? 'ds-tab-active' : ''}`}
               >
                 {s === 'all' ? 'All' : STATUS_LABEL[s]}
-                <span style={{ marginLeft: 4, opacity: 0.75, fontSize: 10 }}>{filterCounts[s]}</span>
+                <span
+                  className={filterStatus === s ? 'ds-kpi-badge' : 'ds-badge ds-badge-neutral'}
+                  style={{ fontSize: 10, padding: '1px 5px', marginLeft: 3 }}
+                >
+                  {filterCounts[s]}
+                </span>
               </button>
             ))}
           </div>
@@ -594,11 +595,11 @@ export function Payments({ onNavigate }: PaymentsProps) {
             {overdueQueue.length > 0 && (
               <div className="flex items-center gap-1.5">
                 {[
-                  { label: '>30d', count: overdueQueue.filter((p) => ageBucket(p.dueDate).days > 30).length, color: '#991B1B', bg: '#FEF2F2' },
-                  { label: '>15d', count: overdueQueue.filter((p) => ageBucket(p.dueDate).days > 15 && ageBucket(p.dueDate).days <= 30).length, color: '#92400E', bg: '#FFFBEB' },
-                  { label: '>7d',  count: overdueQueue.filter((p) => ageBucket(p.dueDate).days > 7  && ageBucket(p.dueDate).days <= 15).length, color: '#D97706', bg: '#FFFBEB' },
-                ].map(({ label, count, color, bg }) => count > 0 ? (
-                  <span key={label} style={{ fontSize: 10, fontWeight: 600, padding: '1px 6px', borderRadius: 99, background: bg, color, border: `1px solid ${bg === '#FEF2F2' ? '#FECACA' : '#FDE68A'}`, cursor: 'pointer' }}
+                  { label: '>30d', count: overdueQueue.filter((p) => ageBucket(p.dueDate).days > 30).length, cls: 'ds-badge ds-badge-danger' },
+                  { label: '>15d', count: overdueQueue.filter((p) => ageBucket(p.dueDate).days > 15 && ageBucket(p.dueDate).days <= 30).length, cls: 'ds-badge ds-badge-warning' },
+                  { label: '>7d',  count: overdueQueue.filter((p) => ageBucket(p.dueDate).days > 7  && ageBucket(p.dueDate).days <= 15).length, cls: 'ds-badge ds-badge-warning' },
+                ].map(({ label, count, cls }) => count > 0 ? (
+                  <span key={label} className={cls} style={{ cursor: 'pointer' }}
                     onClick={() => setFilterStatus('overdue')}>
                     {count} {label}
                   </span>
@@ -611,10 +612,10 @@ export function Payments({ onNavigate }: PaymentsProps) {
 
         {/* Bulk actions bar */}
         {selectedPaymentIds.size > 0 && (
-          <div style={{ padding: '7px 12px', background: '#EEF2FF', borderBottom: '1px solid #C7D2FE', display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span style={{ fontSize: 12, fontWeight: 600, color: '#4338CA' }}>{selectedPaymentIds.size} selected</span>
+          <div style={{ padding: '7px 12px', background: 'var(--ds-accent-subtle)', borderBottom: '1px solid var(--ds-accent-border)', display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--ds-accent)' }}>{selectedPaymentIds.size} selected</span>
             <button onClick={() => void handleBulkMarkPaid()} className="ds-btn ds-btn-secondary"
-              style={{ fontSize: 11, padding: '3px 9px', color: '#059669', borderColor: '#A7F3D0', gap: 4 }}>
+              style={{ fontSize: 11, padding: '3px 9px', color: 'var(--ds-success)', borderColor: 'var(--ds-success-border)', gap: 4 }}>
               <CheckCircle2 style={{ width: 12, height: 12 }} /> Mark Paid
             </button>
             <button onClick={() => setSelectedPaymentIds(new Set())} className="ds-btn ds-btn-secondary"
