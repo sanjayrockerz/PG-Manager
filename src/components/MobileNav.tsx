@@ -48,8 +48,15 @@ export function MobileNav({ activeTab, setActiveTab, userRole = 'owner' }: Mobil
       : ownerNavItems;
 
   return (
-    <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-30 pb-safe">
-      <div className="flex items-center justify-around">
+    <nav
+      className="md:hidden fixed bottom-0 left-0 right-0 z-30"
+      style={{
+        background: 'var(--ds-surface)',
+        borderTop: '1px solid var(--ds-border)',
+        paddingBottom: 'max(env(safe-area-inset-bottom), 6px)',
+      }}
+    >
+      <div className="flex items-stretch justify-around">
         {navItems.map((item) => {
           const Icon = item.icon;
           const isActive = activeTab === item.id;
@@ -58,22 +65,50 @@ export function MobileNav({ activeTab, setActiveTab, userRole = 'owner' }: Mobil
             <button
               key={item.id}
               onClick={() => setActiveTab(item.id)}
-              className={`
-                flex-1 flex flex-col items-center gap-1 py-3
-                transition-colors
-                ${isActive ? 'text-indigo-600' : 'text-gray-500'}
-              `}
+              aria-label={item.label}
+              aria-current={isActive ? 'page' : undefined}
+              style={{
+                flex: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 3,
+                minHeight: 52,
+                padding: '8px 4px',
+                border: 'none',
+                background: 'transparent',
+                cursor: 'pointer',
+                position: 'relative',
+                color: isActive ? 'var(--ds-accent)' : 'var(--ds-text-3)',
+                transition: 'color 150ms ease',
+              }}
             >
-              <Icon className="w-5 h-5" strokeWidth={isActive ? 2.25 : 1.75} />
-              <span className="text-xs font-medium">{
-                item.id === 'dashboard'     ? t('mobile.home', item.label)
-                : item.id === 'tenants'     ? t('mobile.tenants', item.label)
-                : item.id === 'payments'    ? t('mobile.payments', item.label)
-                : item.id === 'settings'    ? t('mobile.settings', item.label)
-                : item.id === 'admin-section' ? t('mobile.admin', item.label)
-                : item.id === 'tenant-portal' ? t(userRole === 'tenant' ? 'mobile.portal' : 'mobile.tenant', item.label)
-                : item.label
-              }</span>
+              {/* Active indicator pip */}
+              {isActive && (
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                    width: 20,
+                    height: 2,
+                    borderRadius: '0 0 2px 2px',
+                    background: 'var(--ds-accent)',
+                  }}
+                />
+              )}
+              <Icon style={{ width: 20, height: 20 }} strokeWidth={isActive ? 2.25 : 1.75} />
+              <span style={{ fontSize: 10, fontWeight: isActive ? 600 : 500, lineHeight: 1.2 }}>
+                {item.id === 'dashboard'       ? t('mobile.home', item.label)
+                : item.id === 'tenants'        ? t('mobile.tenants', item.label)
+                : item.id === 'payments'       ? t('mobile.payments', item.label)
+                : item.id === 'settings'       ? t('mobile.settings', item.label)
+                : item.id === 'admin-section'  ? t('mobile.admin', item.label)
+                : item.id === 'tenant-portal'  ? t(userRole === 'tenant' ? 'mobile.portal' : 'mobile.tenant', item.label)
+                : item.label}
+              </span>
             </button>
           );
         })}

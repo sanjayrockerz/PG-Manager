@@ -84,13 +84,13 @@
      Each accent: solid icon color, soft gradient pair,
      and a faint surface wash for the card corner. */
   /* Strong, saturated gradient pairs — deep at both ends (no pale drift) */
-  --kpi-violet-1:  #6D28D9;  --kpi-violet-2:  #4F46E5;  --kpi-violet-wash:  rgba(79,70,229,0.45);
-  --kpi-rose-1:    #E11D48;  --kpi-rose-2:    #F43F5E;  --kpi-rose-wash:    rgba(225,29,72,0.45);
-  --kpi-blue-1:    #1D4ED8;  --kpi-blue-2:    #2563EB;  --kpi-blue-wash:    rgba(29,78,216,0.45);
-  --kpi-emerald-1: #047857;  --kpi-emerald-2: #059669;  --kpi-emerald-wash: rgba(4,120,87,0.45);
-  --kpi-amber-1:   #D97706;  --kpi-amber-2:   #F59E0B;  --kpi-amber-wash:   rgba(217,119,6,0.45);
-  --kpi-cyan-1:    #0E7490;  --kpi-cyan-2:    #0891B2;  --kpi-cyan-wash:    rgba(14,116,144,0.45);
-  --kpi-purple-1:  #7E22CE;  --kpi-purple-2:  #9333EA;  --kpi-purple-wash:  rgba(126,34,206,0.45);
+  --kpi-violet-1:  #4F46E5;  --kpi-violet-2:  #7E22CE;  --kpi-violet-wash:  rgba(79,70,229,0.45);
+  --kpi-rose-1:    #E11D48;  --kpi-rose-2:    #BE123C;  --kpi-rose-wash:    rgba(225,29,72,0.45);
+  --kpi-blue-1:    #2563EB;  --kpi-blue-2:    #1D4ED8;  --kpi-blue-wash:    rgba(37,99,235,0.45);
+  --kpi-emerald-1: #10B981;  --kpi-emerald-2: #059669;  --kpi-emerald-wash: rgba(16,185,129,0.45);
+  --kpi-amber-1:   #F59E0B;  --kpi-amber-2:   #D97706;  --kpi-amber-wash:   rgba(245,158,11,0.45);
+  --kpi-cyan-1:    #0D9488;  --kpi-cyan-2:    #0F766E;  --kpi-cyan-wash:    rgba(13,148,136,0.45);
+  --kpi-purple-1:  #9333EA;  --kpi-purple-2:  #7E22CE;  --kpi-purple-wash:  rgba(147,51,234,0.45);
 
   /* Legacy shadcn tokens (kept for compatibility) */
   --background:           #FFFFFF;
@@ -219,14 +219,23 @@
    TYPOGRAPHY SCALE
 ───────────────────────────────────────────── */
 .ds-page-title {
-  font-size: 20px;
-  font-weight: 600;
+  font-size: 32px;
+  font-weight: 700;
   color: var(--ds-text-1);
   letter-spacing: -0.025em;
-  line-height: 1.3;
+  line-height: 1.2;
 }
 
 .ds-section-label {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--ds-text-1);
+  letter-spacing: -0.02em;
+}
+
+/* Small muted uppercase group label — sidebar nav groups, detail-card field groups.
+   Distinct from .ds-section-label (large page-section heading). */
+.ds-group-label {
   font-size: 11px;
   font-weight: 600;
   color: var(--ds-text-3);
@@ -235,8 +244,8 @@
 }
 
 .ds-kpi-value {
-  font-size: 26px;
-  font-weight: 700;
+  font-size: 42px;
+  font-weight: 800;
   color: var(--ds-text-1);
   letter-spacing: -0.04em;
   line-height: 1;
@@ -304,13 +313,13 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 20px;
+  gap: 10px;
+  padding: 22px;
   border: none;
-  border-radius: var(--radius-xl);
+  border-radius: 20px;
   color: #fff;
   background: linear-gradient(135deg, var(--kpi-1) 0%, var(--kpi-2) 100%);
-  box-shadow: 0 10px 24px -10px var(--kpi-1), var(--ds-shadow-sm);
+  box-shadow: 0 12px 28px -10px var(--kpi-1), 0 4px 6px -2px rgba(0,0,0,0.05);
   transition: box-shadow var(--ds-dur) var(--ds-ease),
               transform var(--ds-dur) var(--ds-ease);
 }
@@ -353,10 +362,10 @@
 }
 
 .ds-kpi-label {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   color: rgba(255,255,255,0.85);
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
@@ -365,19 +374,19 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 44px;
-  height: 44px;
-  border-radius: 13px;
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
   color: #fff;
-  background: rgba(255,255,255,0.18);
-  backdrop-filter: blur(4px);
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.18);
+  background: rgba(255,255,255,0.15);
+  backdrop-filter: blur(8px);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.2);
 }
 
 .ds-kpi-metric {
   position: relative;
   z-index: 1;
-  font-size: 32px;
+  font-size: 42px;
   font-weight: 800;
   color: #fff;
   letter-spacing: -0.04em;
@@ -386,9 +395,9 @@
   text-shadow: 0 1px 2px rgba(0,0,0,0.10);
 }
 .ds-kpi-metric .ds-kpi-affix {
-  font-size: 20px;
+  font-size: 24px;
   font-weight: 700;
-  color: rgba(255,255,255,0.92);
+  color: rgba(255,255,255,0.8);
 }
 
 .ds-kpi-foot {
@@ -544,12 +553,12 @@
 }
 
 .ds-table thead th {
-  padding: 10px 16px;
+  padding: 8px 16px;
   text-align: left;
-  font-size: 11px;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 500;
   color: var(--ds-text-3);
-  letter-spacing: 0.06em;
+  letter-spacing: 0.02em;
   text-transform: uppercase;
   border-bottom: 1px solid var(--ds-border);
   background: var(--ds-subtle);
@@ -1172,4 +1181,361 @@
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
+}
+
+/* ─────────────────────────────────────────────
+   RESPONSIVE ADAPTIVE LAYOUT SYSTEM
+   Universal — phone 320px → ultrawide 1920px+
+───────────────────────────────────────────── */
+
+/* ── Page frame: responsive content padding ── */
+.ds-page-frame {
+  padding: 12px 12px 88px;  /* mobile: tight sides, space for bottom nav */
+  min-height: 100%;
+  background: var(--ds-bg);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+@media (min-width: 480px) {
+  .ds-page-frame { padding: 16px 16px 88px; }
+}
+@media (min-width: 768px) {
+  .ds-page-frame { padding: 20px 24px 32px; }
+}
+@media (min-width: 1280px) {
+  .ds-page-frame { padding: 24px 32px 40px; }
+}
+
+/* ── Scrollable horizontal containers (no visible scrollbar) ── */
+.ds-scroll-x {
+  overflow-x: auto;
+  overflow-y: visible;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.ds-scroll-x::-webkit-scrollbar { display: none; }
+
+/* ── Status strip: horizontal scroll on mobile ── */
+.ds-status-strip {
+  overflow-x: auto;
+  flex-wrap: nowrap;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.ds-status-strip::-webkit-scrollbar { display: none; }
+
+@media (min-width: 768px) {
+  .ds-status-strip {
+    overflow-x: visible;
+    flex-wrap: wrap;
+  }
+}
+
+.ds-status-item {
+  flex: 0 0 auto;   /* never shrink below content on mobile */
+  min-width: 110px;
+}
+
+@media (min-width: 768px) {
+  .ds-status-item { flex: 1; min-width: 0; }
+}
+
+/* ── Mobile-safe modal / dialog ── */
+.ds-modal-wrap {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0;
+  background: rgba(0,0,0,0.45);
+}
+@media (min-width: 640px) {
+  .ds-modal-wrap { align-items: center; padding: 16px; }
+}
+
+.ds-modal-panel {
+  background: var(--ds-surface);
+  border-radius: 20px 20px 0 0;
+  width: 100%;
+  max-height: 92dvh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+@media (min-width: 640px) {
+  .ds-modal-panel {
+    border-radius: var(--radius-xl);
+    max-width: 560px;
+    max-height: calc(100dvh - 64px);
+  }
+}
+
+/* ── Sticky modal header / footer ── */
+.ds-modal-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--ds-surface);
+  border-bottom: 1px solid var(--ds-border);
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+
+.ds-modal-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+  background: var(--ds-surface);
+  border-top: 1px solid var(--ds-border);
+  padding: 14px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+/* ── Touch-safe minimum tap targets ── */
+.ds-touch-target {
+  min-width: 44px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ── Responsive KPI grid ── */
+.ds-kpi-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, 1fr);
+}
+@media (min-width: 768px)  { .ds-kpi-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (min-width: 1024px) { .ds-kpi-grid { grid-template-columns: repeat(4, 1fr); } }
+
+/* ── Responsive two-col → one-col form ── */
+.ds-form-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 1fr;
+}
+@media (min-width: 640px) {
+  .ds-form-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── Card list for mobile table replacement ── */
+.ds-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ds-card-list-item {
+  background: var(--ds-surface);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--radius-lg);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ds-card-list-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ds-card-list-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ds-text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.ds-card-list-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ds-text-1);
+}
+
+/* ── Tab bar: horizontal scroll on mobile ── */
+.ds-tab-bar {
+  overflow-x: auto;
+  overflow-y: visible;
+  flex-wrap: nowrap;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.ds-tab-bar::-webkit-scrollbar { display: none; }
+
+/* ── Responsive typography scale ── */
+.ds-hero-greeting {
+  font-size: 18px;
+}
+@media (min-width: 640px)  { .ds-hero-greeting { font-size: 20px; } }
+@media (min-width: 1024px) { .ds-hero-greeting { font-size: 22px; } }
+
+/* ── Bottom nav safe area ── */
+.ds-bottom-nav {
+  padding-bottom: max(env(safe-area-inset-bottom), 8px);
+}
+
+/* ── Hide scrollbar utility ── */
+.hide-scrollbar { scrollbar-width: none; }
+.hide-scrollbar::-webkit-scrollbar { display: none; }
+
+/* ── Responsive admin content padding ── */
+.ds-admin-content {
+  padding: 12px;
+}
+@media (min-width: 640px) { .ds-admin-content { padding: 16px 20px; } }
+@media (min-width: 1024px) { .ds-admin-content { padding: 24px 28px; } }
+
+/* ── Fluid max-width containers ── */
+.ds-page-container {
+  width: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+/* ── Mobile-first table wrapper ── */
+.ds-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: var(--radius-lg);
+}
+
+/* ── Responsive filter bar ── */
+.ds-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  padding: 2px 0;
+}
+.ds-filter-bar::-webkit-scrollbar { display: none; }
+
+/* ── Floor selector ── */
+.ds-floor-selector {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  padding-bottom: 4px;
+}
+.ds-floor-selector::-webkit-scrollbar { display: none; }
+
+/* ── Responsive text helpers ── */
+.ds-text-responsive-title {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+@media (min-width: 640px)  { .ds-text-responsive-title { font-size: 18px; } }
+@media (min-width: 1024px) { .ds-text-responsive-title { font-size: 20px; } }
+
+/* ── Mobile card for tenant/payment tables ── */
+.ds-mobile-record-card {
+  background: var(--ds-surface);
+  border: 1px solid var(--ds-border);
+  border-radius: var(--radius-lg);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: box-shadow var(--ds-dur-fast) var(--ds-ease);
+}
+.ds-mobile-record-card:hover {
+  box-shadow: var(--ds-shadow-sm);
+}
+
+.ds-mobile-record-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ds-mobile-record-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ── Make Radix Sheet full-screen on mobile ── */
+@media (max-width: 639px) {
+  [data-radix-popper-content-wrapper] {
+    width: 100% !important;
+  }
+  .sm\:max-w-md[data-state] {
+    max-width: 100% !important;
+  }
+}
+
+/* ── Ensure no content exceeds viewport width ── */
+@media (max-width: 767px) {
+  .ds-card {
+    /* Prevent cards from stretching beyond viewport */
+    max-width: 100%;
+  }
+
+  /* Tighten KPI card padding on mobile */
+  .ds-kpi {
+    padding: 14px !important;
+  }
+
+  .ds-kpi-value {
+    font-size: 22px !important;
+  }
+
+  /* Dashboard hero more compact on mobile */
+  .ds-hero {
+    padding-bottom: 2px;
+  }
+}
+
+@media (max-width: 479px) {
+  .ds-kpi-value { font-size: 20px !important; }
+  .ds-kpi { padding: 12px !important; }
+}
+
+/* ─────────────────────────────────────────────
+   SIDEBAR NAVIGATION
+───────────────────────────────────────────── */
+.ds-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  color: var(--ds-text-2);
+  font-weight: 500;
+  transition: background-color var(--ds-dur-fast) var(--ds-ease), color var(--ds-dur-fast) var(--ds-ease);
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+}
+
+.ds-nav-item:hover {
+  background-color: var(--ds-subtle);
+  color: var(--ds-text-1);
+}
+
+.ds-nav-item.active {
+  background-color: var(--ds-accent-subtle);
+  color: var(--ds-accent);
+  font-weight: 600;
 }

@@ -246,7 +246,7 @@ export function Sidebar({
           {sections.map((section, si) => (
             <div key={section.title} style={{ marginBottom: si < sections.length - 1 ? 20 : 0 }}>
               <p
-                className="ds-section-label"
+                className="ds-group-label"
                 style={{
                   padding: '0 10px', marginBottom: 4,
                   opacity: sidebarCollapsed ? 0 : 1,
@@ -267,7 +267,7 @@ export function Sidebar({
           {showSettings && (
             <div style={{ marginTop: 20 }}>
               <p
-                className="ds-section-label"
+                className="ds-group-label"
                 style={{
                   padding: '0 10px', marginBottom: 4,
                   opacity: sidebarCollapsed ? 0 : 1,

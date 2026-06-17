@@ -1338,7 +1338,7 @@ export function TenantPortal() {
     <div className="space-y-6 pb-8">
       {/* Page title */}
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">{greeting()}, {tenant.name.split(' ')[0]} 👋</h1>
+        <h1 className="ds-page-title">{greeting()}, {tenant.name.split(' ')[0]} 👋</h1>
         <p className="text-sm text-gray-500 mt-1">
           {ownerPaymentInfo.pgName || property?.name} · Room {tenant.room}{tenant.bed ? `, Bed ${tenant.bed}` : ''}{tenant.floor ? ` · Floor ${tenant.floor}` : ''}
         </p>
@@ -1615,7 +1615,7 @@ export function TenantPortal() {
   const viewPayments = (
     <div className="space-y-5 pb-8">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Payments</h1>
+        <h1 className="ds-page-title">Payments</h1>
         <p className="text-sm text-gray-500 mt-1">View your payment history and manage pending payments</p>
       </div>
 
@@ -1783,7 +1783,7 @@ export function TenantPortal() {
     <div className="space-y-5 pb-8">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Maintenance</h1>
+          <h1 className="ds-page-title">Maintenance</h1>
           <p className="text-sm text-gray-500 mt-1">Track and manage your maintenance requests</p>
         </div>
         <button
@@ -1891,7 +1891,7 @@ export function TenantPortal() {
         <button onClick={() => setView('maintenance')} className="p-1.5 hover:bg-gray-100 rounded-lg">
           <ArrowLeft className="w-4 h-4 text-gray-600" />
         </button>
-        <h1 className="text-xl font-bold text-gray-900 flex-1">Request Details</h1>
+        <h1 className="ds-page-title flex-1">Request Details</h1>
       </div>
       {detailTicket ? (
         <>
@@ -1943,7 +1943,7 @@ export function TenantPortal() {
         <button onClick={() => setView('maintenance')} className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700 mb-4 transition-colors">
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
-        <h1 className="text-2xl font-bold text-gray-900">New Maintenance Request</h1>
+        <h1 className="ds-page-title">New Maintenance Request</h1>
       </div>
 
       <div className="bg-white border border-gray-100 rounded-xl p-6">
@@ -2024,7 +2024,7 @@ export function TenantPortal() {
         <button onClick={() => setView('home')} className="p-1.5 hover:bg-gray-100 rounded-lg lg:hidden">
           <ArrowLeft className="w-4 h-4 text-gray-600" />
         </button>
-        <h1 className="text-xl font-bold text-gray-900 flex-1">Announcements</h1>
+        <h1 className="ds-page-title flex-1">Announcements</h1>
         {tenantUnreadCount > 0 && (
           <button
             onClick={() => { notifHighlightThresholdRef.current = notifLastSeen; markNotificationsSeen(tenant.id); }}
@@ -2120,7 +2120,7 @@ export function TenantPortal() {
         <button onClick={() => setView('home')} className="p-1.5 hover:bg-gray-100 rounded-lg lg:hidden">
           <ArrowLeft className="w-4 h-4 text-gray-600" />
         </button>
-        <h1 className="text-xl font-bold text-gray-900">Documents</h1>
+        <h1 className="ds-page-title">Documents</h1>
       </div>
 
       {/* 1. Agreements */}
@@ -2278,7 +2278,7 @@ export function TenantPortal() {
   const viewProfile = (
     <div className="space-y-5 pb-8">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">My Profile</h1>
+        <h1 className="ds-page-title">My Profile</h1>
         <p className="text-sm text-gray-500 mt-1">View your personal and tenancy information</p>
       </div>
 
@@ -2422,7 +2422,7 @@ export function TenantPortal() {
         <button onClick={() => setView('home')} className="p-1.5 hover:bg-gray-100 rounded-lg lg:hidden">
           <ArrowLeft className="w-4 h-4 text-gray-600" />
         </button>
-        <h1 className="text-xl font-bold text-gray-900">Help & Rules</h1>
+        <h1 className="ds-page-title">Help & Rules</h1>
       </div>
 
       {ownerPaymentInfo.pgRules.length > 0 && (
@@ -2480,7 +2480,7 @@ export function TenantPortal() {
         <button onClick={() => setView('profile')} className="p-1.5 hover:bg-gray-100 rounded-lg">
           <ArrowLeft className="w-4 h-4 text-gray-600" />
         </button>
-        <h1 className="text-xl font-bold text-gray-900">Submit Vacate Notice</h1>
+        <h1 className="ds-page-title">Submit Vacate Notice</h1>
       </div>
       <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
         <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
@@ -2862,14 +2862,21 @@ export function TenantPortal() {
           )}
 
           {/* Page content */}
-          <main className="flex-1 overflow-y-auto pb-24 lg:pb-6">
-            <div className="px-6 lg:px-8 py-6 w-full">
+          <main className="flex-1 overflow-y-auto" style={{ paddingBottom: 'calc(64px + max(env(safe-area-inset-bottom), 0px))' }}>
+            <div className="ds-page-frame lg:px-8">
               {renderView()}
             </div>
           </main>
 
           {/* Mobile bottom tabs */}
-          <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 z-30">
+          <nav
+            className="lg:hidden fixed bottom-0 left-0 right-0 z-30"
+            style={{
+              background: 'var(--ds-surface)',
+              borderTop: '1px solid var(--ds-border)',
+              paddingBottom: 'max(env(safe-area-inset-bottom), 6px)',
+            }}
+          >
             <div className="flex">
               {(isInactiveTenant ? BOTTOM_TABS.filter((t) => ['payments', 'documents'].includes(t.id)) : BOTTOM_TABS).map(({ id, label, icon: Icon }) => {
                 const isActive = activeNavTab === id;
@@ -2880,12 +2887,37 @@ export function TenantPortal() {
                       if (id === 'announcements') { notifHighlightThresholdRef.current = notifLastSeen; markNotificationsSeen(tenant.id); }
                       setView(id);
                     }}
-                    className={`flex-1 flex flex-col items-center justify-center py-3 gap-0.5 transition-colors ${
-                      isActive ? 'text-indigo-600' : 'text-gray-400 hover:text-gray-600'
-                    }`}
+                    style={{
+                      flex: 1,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      minHeight: 52,
+                      padding: '8px 4px',
+                      gap: 3,
+                      border: 'none',
+                      background: 'transparent',
+                      cursor: 'pointer',
+                      position: 'relative',
+                      color: isActive ? 'var(--ds-accent)' : 'var(--ds-text-3)',
+                      transition: 'color 150ms ease',
+                    }}
                   >
+                    {isActive && (
+                      <span style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: '50%',
+                        transform: 'translateX(-50%)',
+                        width: 20,
+                        height: 2,
+                        borderRadius: '0 0 2px 2px',
+                        background: 'var(--ds-accent)',
+                      }} />
+                    )}
                     <div className="relative">
-                      <Icon className="w-5 h-5" />
+                      <Icon style={{ width: 20, height: 20 }} />
                       {id === 'payments' && pendingPayments.length > 0 && (
                         <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center">
                           {pendingPayments.length}
@@ -2897,8 +2929,7 @@ export function TenantPortal() {
                         </span>
                       )}
                     </div>
-                    <span className="text-[10px] font-medium">{label}</span>
-                    {isActive && <div className="w-1 h-1 rounded-full bg-indigo-600 mt-0.5" />}
+                    <span style={{ fontSize: 10, fontWeight: isActive ? 600 : 500, lineHeight: 1.2 }}>{label}</span>
                   </button>
                 );
               })}

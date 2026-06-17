@@ -312,7 +312,7 @@ function TenantCard({
 function DetailSection({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="mb-3">
-      <p className="ds-section-label mb-2">{label}</p>
+      <p className="ds-group-label mb-2">{label}</p>
       <div className="ds-card" style={{ borderRadius: 16 }}>
         <div className="ds-card-body">{children}</div>
       </div>
@@ -488,7 +488,7 @@ function RoomDetailSheet({
             </div>
           )}
 
-          <p className="ds-section-label mb-2">
+          <p className="ds-group-label mb-2">
             {occ.tenantsInRoom.length > 0 ? `Current Occupants (${occ.tenantsInRoom.length})` : 'No Occupants'}
           </p>
           {occ.tenantsInRoom.length === 0 ? (
@@ -616,7 +616,7 @@ function RoomDetailSheet({
 
         {/* Actions */}
         <div className="mb-2">
-          <p className="ds-section-label mb-2">Actions</p>
+          <p className="ds-group-label mb-2">Actions</p>
           <div className="grid grid-cols-2 gap-2">
             {occ.isVacant && !occ.isUnderMaintenance && onNavigate && (
               <Button

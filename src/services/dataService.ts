@@ -1519,6 +1519,18 @@ export async function processVacateWorkflow(input: VacateWorkflowInput): Promise
   return runSupabase(mode, () => supabaseOwnerDataApi.processVacate(input));
 }
 
+/**
+ * Finalizes any tenant whose notice period has elapsed (status='notice_submitted',
+ * vacate_date <= today): frees the bed/room, archives agreements, generates the
+ * settlement document, and sends the closure WhatsApp — same as an immediate vacate.
+ * No-op in demo mode. Safe to call opportunistically (e.g. on dashboard load).
+ */
+export async function finalizeDueVacates(): Promise<number> {
+  const mode = getAppMode();
+  if (mode === 'demo') return 0;
+  return runSupabase(mode, () => supabaseOwnerDataApi.finalizeDueVacates());
+}
+
 export async function archiveTenantRecord(tenantId: string): Promise<TenantRecord> {
   const mode = getAppMode();
   if (mode === 'demo') {

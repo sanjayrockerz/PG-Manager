@@ -15,7 +15,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { KpiCard } from './ui/KpiCard';
 import { useProperty } from '../contexts/PropertyContext';
 import type { DashboardSnapshot } from '../services/supabaseData';
-import { getDashboardData, isDemoModeEnabled } from '../services/dataService';
+import { getDashboardData, isDemoModeEnabled, finalizeDueVacates } from '../services/dataService';
 import { useRealtimeRefresh } from '../hooks/useRealtimeRefresh';
 import {
   useDateRange,
@@ -71,8 +71,8 @@ function SectionHeader({ title, subtitle, action, onAction }: {
   return (
     <div className="flex items-start justify-between mb-4">
       <div>
-        <h2 style={{ fontSize: 14, fontWeight: 600, color: '#0A0A0B', letterSpacing: '-0.01em' }}>{title}</h2>
-        {subtitle && <p style={{ fontSize: 12, color: '#A1A1AA', marginTop: 1 }}>{subtitle}</p>}
+        <h2 className="ds-section-label" style={{ textTransform: 'none', letterSpacing: '-0.01em' }}>{title}</h2>
+        {subtitle && <p style={{ fontSize: 13, color: 'var(--ds-text-3)', marginTop: 2 }}>{subtitle}</p>}
       </div>
       {action && (
         <button
@@ -255,6 +255,17 @@ export function Dashboard({ onNavigate }: DashboardProps) {
     void load(true);
   }, [load]);
 
+  // Opportunistic reconciliation: there's no server-side cron in this deployment, so
+  // a tenant whose notice period has elapsed wouldn't otherwise have their bed/room
+  // freed until someone happens to act on it. Run once per dashboard mount.
+  useEffect(() => {
+    if (isDemoMode) return;
+    finalizeDueVacates()
+      .then((count) => { if (count > 0) void load(false); })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const { isSyncing, lastUpdatedAt } = useRealtimeRefresh({
     key: `dash-${selectedProperty}`,
     tables: ['properties', 'rooms', 'tenants', 'payments', 'maintenance_tickets', 'announcements', 'notifications'],
@@ -314,7 +325,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
 
       {/* ── Onboarding guide — shown while workspace is empty ─────────────── */}
       {properties.length === 0 && onNavigate && (
@@ -636,7 +647,10 @@ export function Dashboard({ onNavigate }: DashboardProps) {
                 <TrendingUp style={{ width: 26, height: 26 }} />
               </div>
               <p className="ds-empty-title">No revenue data yet</p>
-              <p className="ds-empty-description">Revenue data will appear here as payments are recorded.</p>
+              <p className="ds-empty-description">Revenue data will appear here as payments are recorded. Add tenants to generate invoices.</p>
+              <button onClick={() => onNavigate?.('tenants')} className="ds-btn ds-btn-secondary" style={{ marginTop: 8 }}>
+                Add Tenant
+              </button>
             </div>
           )}
         </div>
@@ -722,7 +736,11 @@ export function Dashboard({ onNavigate }: DashboardProps) {
                 <div className="ds-empty-icon">
                   <Building2 style={{ width: 22, height: 22 }} />
                 </div>
+                <p className="ds-empty-title" style={{ fontSize: 14 }}>No properties added</p>
                 <p className="ds-empty-description">Add your first property to see occupancy stats.</p>
+                <button onClick={() => onNavigate?.('building-view')} className="ds-btn ds-btn-secondary" style={{ marginTop: 8 }}>
+                  Building View
+                </button>
               </div>
             )}
           </div>

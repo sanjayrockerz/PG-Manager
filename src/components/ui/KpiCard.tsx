@@ -71,7 +71,7 @@ export function KpiCard({
       <div className="ds-kpi-top">
         <span className="ds-kpi-label">{label}</span>
         <div className="ds-kpi-icon">
-          <Icon style={{ width: 20, height: 20, strokeWidth: 2 }} />
+          <Icon style={{ width: 18, height: 18, strokeWidth: 2 }} />
         </div>
       </div>
 

@@ -86,12 +86,18 @@ function esc(s: string) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function sigBlock(sig: AgreementData['ownerSignature'] | undefined, placeholderComment: string): string {
-  if (!sig) return `<!-- ${placeholderComment} --><p style="margin-top:32px;">Signature: ____________________</p>`;
-  const imgHtml = sig.type === 'image'
-    ? `<img src="${sig.value}" style="height:54px;max-width:220px;margin-top:6px;display:block;" alt="signature" />`
-    : `<span style="font-family:cursive,serif;font-size:24px;color:#1a1a1a;">${esc(sig.value)}</span>`;
-  return imgHtml;
+// Owner signature is rendered inside a `data-sig-slot="owner"` wrapper so it can be
+// located and swapped later — both when the owner manually signs (signAgreement) and
+// when the owner updates their signature vault (propagateOwnerSignature), which must
+// retroactively refresh this slot on every not-yet-executed agreement.
+export function ownerSigSlotHtml(sig: AgreementData['ownerSignature'] | undefined, signedDateFormatted: string): string {
+  const inner = !sig
+    ? `<p style="margin-top:32px;">Signature: ____________________</p><p>Date: ____________________</p>`
+    : (sig.type === 'image'
+        ? `<img src="${sig.value}" style="height:54px;max-width:220px;margin-top:6px;display:block;" alt="signature" />`
+        : `<span style="font-family:cursive,serif;font-size:24px;color:#1a1a1a;">${esc(sig.value)}</span>`
+      ) + `<p style="font-size:11px;color:#555;margin-top:4px;">Signed: ${signedDateFormatted}</p>`;
+  return `<div data-sig-slot="owner">${inner}</div>`;
 }
 
 export function generateAgreementHtml(data: AgreementData): string {
@@ -320,8 +326,7 @@ export function generateAgreementHtml(data: AgreementData): string {
     <div class="sig-block">
       <p>Owner / Authorized Signatory</p>
       <strong>${eOwnerName}</strong>
-      ${sigBlock(ownerSignature, 'OWNER_SIGNATURE_SLOT')}
-      ${ownerSignature ? `<p style="font-size:11px;color:#555;margin-top:4px;">Signed: ${generatedDateFormatted}</p>` : `<p>Date: ____________________</p>`}
+      ${ownerSigSlotHtml(ownerSignature, generatedDateFormatted)}
     </div>
     <div class="sig-block" style="text-align:right;">
       <p>Tenant</p>

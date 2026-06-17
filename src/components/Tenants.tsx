@@ -951,7 +951,7 @@ export function Tenants({ onViewTenant }: TenantsProps) {
         {/* Desktop table */}
         <div className="hidden md:block overflow-x-auto">
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
+            <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
               <tr style={{ background: '#FAFAFA', borderBottom: '1px solid #F1F1F3' }}>
                 <th style={{ width: 36, padding: '8px 6px 8px 12px' }}>
                   <input
@@ -974,8 +974,12 @@ export function Tenants({ onViewTenant }: TenantsProps) {
             <tbody>
               {filteredTenants.length === 0 ? (
                 <tr>
-                  <td colSpan={9} style={{ padding: '40px 14px', textAlign: 'center', fontSize: 13, color: '#A1A1AA' }}>
-                    No tenants found
+                  <td colSpan={9} style={{ padding: 0 }}>
+                    <div className="ds-empty-state">
+                      <div className="ds-empty-icon"><Users style={{ width: 22, height: 22 }} /></div>
+                      <p className="ds-empty-title">No tenants found</p>
+                      <p className="ds-empty-description">Adjust your filters, or add a tenant to get started.</p>
+                    </div>
                   </td>
                 </tr>
               ) : filteredTenants.map((tenant, i) => (
@@ -1080,7 +1084,11 @@ export function Tenants({ onViewTenant }: TenantsProps) {
         {/* Mobile cards */}
         <div className="md:hidden flex flex-col gap-2" style={{ padding: 12 }}>
           {filteredTenants.length === 0 ? (
-            <p style={{ textAlign: 'center', fontSize: 13, color: '#A1A1AA', padding: '32px 0' }}>No tenants found</p>
+            <div className="ds-empty-state">
+              <div className="ds-empty-icon"><Users style={{ width: 22, height: 22 }} /></div>
+              <p className="ds-empty-title">No tenants found</p>
+              <p className="ds-empty-description">Adjust your filters, or add a tenant to get started.</p>
+            </div>
           ) : filteredTenants.map((tenant) => (
             <div
               key={tenant.id}

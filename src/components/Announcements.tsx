@@ -475,10 +475,10 @@ export function Announcements() {
       </div>
 
       {filtered.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20" style={{ color: '#A1A1AA' }}>
-          <Bell className="w-10 h-10 mb-3 opacity-30" />
-          <p style={{ fontSize: 14 }}>No announcements found</p>
-          <p style={{ fontSize: 12, marginTop: 4 }}>Create one to broadcast to your tenants</p>
+        <div className="ds-empty-state">
+          <div className="ds-empty-icon"><Bell style={{ width: 22, height: 22 }} /></div>
+          <p className="ds-empty-title">No announcements found</p>
+          <p className="ds-empty-description">Create one to broadcast to your tenants.</p>
         </div>
       ) : (
         <div className="space-y-6">

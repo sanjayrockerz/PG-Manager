@@ -1747,6 +1747,175 @@ async function syncRoomOccupancyForProperty(ownerId: string, propertyId: string)
   }));
 }
 
+// Shared "what happens after a tenant has actually left" consequences — used by every
+// vacate path (owner-initiated immediate vacate, tenant self-service immediate vacate,
+// and the scheduled-notice finalizer below) so the bed/room release, archiving, and
+// closure communication are uniform no matter how the vacate was triggered.
+async function finalizeVacateConsequences(args: {
+  ownerId: string;
+  tenantRow: TenantRow;
+  vacateDate: string;
+  depositRefund: number;
+  totalDeduction: number;
+  deductionItems?: VacateDeductionItem[];
+  isImmediateVacate: boolean;
+}): Promise<void> {
+  const { ownerId, tenantRow, vacateDate, depositRefund, totalDeduction, deductionItems, isImmediateVacate } = args;
+
+  // Archive all active agreements for this tenant (best-effort — missing table silently ignored)
+  const { data: activeAgreements, error: agreementFetchErr } = await supabase
+    .from('agreements')
+    .select('id')
+    .eq('tenant_id', tenantRow.id)
+    .eq('owner_id', ownerId)
+    .not('status', 'in', '(archived,cancelled,expired)')
+    .returns<Array<{ id: string }>>();
+
+  if (agreementFetchErr && !isMissingRelationError(agreementFetchErr, 'agreements')) {
+    console.warn('[finalizeVacateConsequences] agreement fetch for archive failed:', agreementFetchErr.message);
+  }
+
+  if (!agreementFetchErr && (activeAgreements ?? []).length > 0) {
+    const { error: archiveErr } = await supabase
+      .from('agreements')
+      .update({ status: 'archived' })
+      .eq('tenant_id', tenantRow.id)
+      .eq('owner_id', ownerId)
+      .not('status', 'in', '(archived,cancelled,expired)');
+
+    if (archiveErr && !isMissingRelationError(archiveErr, 'agreements')) {
+      console.warn('[finalizeVacateConsequences] agreement archive failed:', archiveErr.message);
+    }
+
+    if (!archiveErr) {
+      void Promise.all((activeAgreements ?? []).map((row) =>
+        supabase.from('agreement_events').insert({
+          agreement_id: row.id,
+          actor_id: ownerId,
+          actor_role: 'system',
+          event_type: 'archived',
+          event_detail: `Archived on tenant vacate — ${isImmediateVacate ? 'immediate' : 'notice period completed'}`,
+        })
+      )).catch(() => {});
+    }
+  }
+
+  // Free the bed/room the moment the tenant is no longer "currently in room" —
+  // syncRoomOccupancyForProperty recomputes occupancy from active tenant statuses,
+  // so once tenants.status is 'inactive' this flips the room (and its bed slots) to vacant.
+  if (tenantRow.property_id) {
+    try {
+      await syncRoomOccupancyForProperty(ownerId, tenantRow.property_id);
+    } catch {
+      // Non-fatal: room sync failure should not block vacate processing
+    }
+  }
+
+  // Notify owner
+  void createOwnerNotification(ownerId, {
+    type: 'tenant',
+    title: `${tenantRow.name} has vacated`,
+    message: `Room ${tenantRow.room} is now available · Refund ₹${depositRefund.toLocaleString('en-IN')}`,
+    propertyId: tenantRow.property_id,
+  }).catch(() => {});
+
+  // Farewell notification visible to tenant in their portal
+  void createOwnerNotification(ownerId, {
+    type: 'tenant',
+    title: `Thank you, ${tenantRow.name}`,
+    message: `Your stay in Room ${tenantRow.room} has been completed. Your deposit refund of ₹${depositRefund.toLocaleString('en-IN')} will be processed within 15 days. Your settlement, receipts, documents, and agreement are available in your portal under Documents. Thank you for being a valued resident.`,
+    propertyId: tenantRow.property_id,
+  }).catch(() => {});
+
+  // Auto-generate and store the final settlement receipt as a tenant document,
+  // mirroring the auto-receipt-on-payment pattern (storeReceiptAsDocument dedupes by label).
+  let settlementHtml: string | null = null;
+  try {
+    const [{ data: propertyRow }, { data: ownerProfile }] = await Promise.all([
+      supabase.from('properties').select('name').eq('id', tenantRow.property_id).maybeSingle<{ name: string | null }>(),
+      supabase.from('profiles').select('full_name, pg_name').eq('id', ownerId).maybeSingle<{ full_name: string | null; pg_name: string | null }>(),
+    ]);
+
+    settlementHtml = generateSettlementReceiptHtml({
+      tenantName: tenantRow.name,
+      room: tenantRow.room,
+      floor: String(tenantRow.floor ?? ''),
+      joinDate: tenantRow.join_date,
+      vacateDate,
+      reason: tenantRow.vacate_reason ?? '',
+      securityDeposit: Number(tenantRow.security_deposit ?? 0),
+      deductionBreakdown: (deductionItems ?? []).map((d) => ({
+        id: d.id,
+        category: d.category as SettlementDeductionItem['category'],
+        description: d.description,
+        amount: d.amount,
+      })),
+      totalDeductions: totalDeduction,
+      netRefund: depositRefund,
+      pendingRentTotal: 0,
+      settledAt: new Date().toISOString(),
+      propertyName: propertyRow?.name ?? '',
+      ownerName: ownerProfile?.full_name ?? ownerProfile?.pg_name ?? '',
+    });
+
+    await supabaseLifecycleApi.storeReceiptAsDocument({
+      tenantId: tenantRow.id,
+      paymentId: `settlement-${tenantRow.id}`,
+      htmlContent: settlementHtml,
+      label: `Settlement — ${vacateDate}`,
+    });
+  } catch {
+    // Non-fatal: settlement document generation should not block vacate processing
+  }
+
+  // Closure communication — WhatsApp summary pointing the tenant to their portal,
+  // where the settlement, receipts, document proofs, and agreement are all available.
+  // Soft no-op when the owner hasn't configured a WhatsApp provider (mirrors every
+  // other WhatsApp send in this app — see inviteTenant / handleWhatsAppReminder).
+  void sendVacateClosureWhatsApp({ ownerId, tenantRow, vacateDate, depositRefund, totalDeduction }).catch((err) => {
+    console.warn('[finalizeVacateConsequences] closure WhatsApp failed (non-blocking):', err);
+  });
+}
+
+async function sendVacateClosureWhatsApp(args: {
+  ownerId: string;
+  tenantRow: TenantRow;
+  vacateDate: string;
+  depositRefund: number;
+  totalDeduction: number;
+}): Promise<void> {
+  const { ownerId, tenantRow, vacateDate, depositRefund, totalDeduction } = args;
+  const phone = (tenantRow.phone ?? '').trim();
+  if (!phone) return;
+
+  const { data: settingsRow } = await supabase
+    .from('owner_settings')
+    .select('whatsapp_settings')
+    .eq('owner_id', ownerId)
+    .maybeSingle<Pick<OwnerSettingsRow, 'whatsapp_settings'>>();
+  const settings = parseOwnerSettings(
+    settingsRow ? ({ owner_id: ownerId, pg_rules: [], whatsapp_settings: settingsRow.whatsapp_settings } as OwnerSettingsRow) : null,
+  );
+  const waConfig = settings.integrations.whatsappProvider;
+  const { sendWhatsApp, isWhatsAppConfigured } = await import('./whatsappProvider');
+  if (!isWhatsAppConfigured(waConfig as never)) return;
+
+  const configuredSiteUrl = String((import.meta as any).env?.VITE_SITE_URL ?? '').trim();
+  const origin = typeof window !== 'undefined' && window.location?.origin ? window.location.origin : '';
+  const portalLink = configuredSiteUrl || origin || '';
+  const footer = settings.whatsappSettings.customFooter?.trim();
+
+  const body =
+    `Hi ${tenantRow.name}, your move-out from Room ${tenantRow.room} on ${vacateDate} is now closed out. ` +
+    `Deposit refund: ₹${depositRefund.toLocaleString('en-IN')}` +
+    (totalDeduction > 0 ? ` (after ₹${totalDeduction.toLocaleString('en-IN')} deductions)` : '') +
+    `. Your settlement receipt, payment receipts, document proofs, and agreement are all available in your Tenant Portal` +
+    (portalLink ? `: ${portalLink}` : '.') +
+    (footer ? `\n\n${footer}` : '');
+
+  await sendWhatsApp(phone, body, waConfig as never);
+}
+
 async function resolveTenantContextForCurrentUser(): Promise<{
   profile: AppUser;
   tenant: TenantRecord;
@@ -1956,6 +2125,72 @@ function mapAgreement(row: AgreementRow): AgreementRecord {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+// Refresh the embedded owner signature on every agreement that hasn't been executed
+// (countersigned by the tenant) yet, whenever the owner updates their signature vault.
+// Locked/executed agreements are legal records of what was actually signed and are
+// never touched. Best-effort: failures here must not block the signature save itself.
+async function propagateOwnerSignatureToAgreements(
+  ownerId: string,
+  actorUserId: string,
+  profile: OwnerSignatureProfile,
+): Promise<void> {
+  const { data: rows, error } = await supabase
+    .from('agreements')
+    .select('id, html_content, status')
+    .eq('owner_id', ownerId)
+    .eq('is_locked', false)
+    .returns<Pick<AgreementRow, 'id' | 'html_content' | 'status'>[]>();
+
+  if (error) {
+    if (isMissingRelationError(error, 'agreements')) return;
+    throw error;
+  }
+  if (!rows || rows.length === 0) return;
+
+  const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const now = new Date().toISOString();
+  const signedDateFormatted = new Date(now).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' });
+
+  const isImage = profile.signatureType !== 'typed' && !!profile.signatureImage;
+  const sigInnerHtml = isImage
+    ? `<img src="${profile.signatureImage}" style="height:54px;max-width:220px;margin-top:6px;display:block;" alt="Owner signature" />`
+    : `<span style="font-family:cursive,serif;font-size:24px;color:#1a1a1a;">${esc(profile.signatureText ?? '')}</span>`;
+  const newOwnerSlot = `<div data-sig-slot="owner">${sigInnerHtml}<p style="font-size:11px;color:#555;margin-top:4px;">Signed: ${signedDateFormatted}</p></div>`;
+
+  const { data: ownerProfile } = await supabase.from('profiles').select('name').eq('id', ownerId).maybeSingle<{ name: string | null }>();
+  const ownerName = ownerProfile?.name ?? null;
+
+  await Promise.all(rows.map(async (row) => {
+    const patch: Record<string, unknown> = {
+      owner_signature_name: ownerName,
+      owner_signature_image: isImage ? profile.signatureImage : null,
+      owner_signed_at: now,
+      ...(row.status === 'draft' ? { status: 'pending_tenant_signature' } : {}),
+    };
+    if (row.html_content) {
+      patch.html_content = /<div data-sig-slot="owner">[\s\S]*?<\/div>/.test(row.html_content)
+        ? row.html_content.replace(/<div data-sig-slot="owner">[\s\S]*?<\/div>/, newOwnerSlot)
+        : row.html_content;
+    }
+    const { error: updError } = await supabase.from('agreements').update(patch).eq('id', row.id);
+    if (updError) {
+      console.warn('[owner_signature] failed to update agreement', row.id, updError.message);
+      return;
+    }
+    void supabase.from('agreement_events').insert({
+      agreement_id: row.id,
+      actor_id: actorUserId,
+      actor_role: 'owner',
+      event_type: 'owner_signature_updated',
+      event_detail: 'Owner signature vault updated — re-applied to this unsigned agreement.',
+    }).then(({ error: evtError }) => {
+      if (evtError && !isMissingRelationError(evtError, 'agreement_events')) {
+        console.warn('[agreement_events] owner_signature_updated log failed:', evtError.message);
+      }
+    });
+  }));
 }
 
 function mapSignatureProfile(row: OwnerSignatureProfileRow): OwnerSignatureProfile {
@@ -5801,117 +6036,113 @@ export const supabaseOwnerDataApi = {
       },
     });
 
-    // Archive all active agreements for this tenant (best-effort — missing table silently ignored)
-    const { data: activeAgreements, error: agreementFetchErr } = await supabase
-      .from('agreements')
-      .select('id')
-      .eq('tenant_id', input.tenantId)
-      .eq('owner_id', ownerId)
-      .not('status', 'in', '(archived,cancelled,expired)')
-      .returns<Array<{ id: string }>>();
-
-    if (agreementFetchErr && !isMissingRelationError(agreementFetchErr, 'agreements')) {
-      console.warn('[processVacate] agreement fetch for archive failed:', agreementFetchErr.message);
-    }
-
-    if (!agreementFetchErr && (activeAgreements ?? []).length > 0) {
-      const { error: archiveErr } = await supabase
-        .from('agreements')
-        .update({ status: 'archived' })
-        .eq('tenant_id', input.tenantId)
-        .eq('owner_id', ownerId)
-        .not('status', 'in', '(archived,cancelled,expired)');
-
-      if (archiveErr && !isMissingRelationError(archiveErr, 'agreements')) {
-        console.warn('[processVacate] agreement archive failed:', archiveErr.message);
-      }
-
-      if (!archiveErr) {
-        void Promise.all((activeAgreements ?? []).map((row) =>
-          supabase.from('agreement_events').insert({
-            agreement_id: row.id,
-            actor_id: ownerId,
-            actor_role: 'system',
-            event_type: 'archived',
-            event_detail: `Archived on tenant vacate — ${isImmediateVacate ? 'immediate' : 'notice submitted'}`,
-          })
-        )).catch(() => {});
-      }
-    }
-
-    // If immediate vacate, sync room occupancy
-    if (isImmediateVacate && tenantRow.property_id) {
-      try {
-        await syncRoomOccupancyForProperty(ownerId, tenantRow.property_id);
-      } catch {
-        // Non-fatal: room sync failure should not block vacate
-      }
-    }
-
-    // Notify owner
-    void createOwnerNotification(ownerId, {
-      type: 'tenant',
-      title: isImmediateVacate ? `${tenantRow.name} has vacated` : `Vacate notice: ${tenantRow.name}`,
-      message: isImmediateVacate
-        ? `Room ${tenantRow.room} is now available · Refund ₹${depositRefund.toLocaleString('en-IN')}`
-        : `Scheduled move-out: ${input.vacateDate}`,
-      propertyId: tenantRow.property_id,
-    }).catch(() => {});
-
-    // Farewell notification visible to tenant in their portal
-    void createOwnerNotification(ownerId, {
-      type: 'tenant',
-      title: `Thank you, ${tenantRow.name}`,
-      message: isImmediateVacate
-        ? `Your stay in Room ${tenantRow.room} has been completed. Your deposit refund of ₹${depositRefund.toLocaleString('en-IN')} will be processed within 15 days. Thank you for being a valued resident.`
-        : `Your vacate notice has been received. Your planned move-out is ${input.vacateDate}. Final settlement will be processed after your departure.`,
-      propertyId: tenantRow.property_id,
-    }).catch(() => {});
-
-    // Auto-generate and store the final settlement receipt as a tenant document,
-    // mirroring the auto-receipt-on-payment pattern (storeReceiptAsDocument dedupes by label).
     if (isImmediateVacate) {
-      try {
-        const [{ data: propertyRow }, { data: ownerProfile }] = await Promise.all([
-          supabase.from('properties').select('name').eq('id', tenantRow.property_id).maybeSingle<{ name: string | null }>(),
-          supabase.from('profiles').select('full_name, pg_name').eq('id', ownerId).maybeSingle<{ full_name: string | null; pg_name: string | null }>(),
-        ]);
+      // Bed/room release, agreement archiving, notifications, settlement document,
+      // and closure WhatsApp — shared with the self-service and scheduled-finalize paths.
+      await finalizeVacateConsequences({
+        ownerId,
+        tenantRow: { ...tenantRow, vacate_reason: input.reason },
+        vacateDate: input.vacateDate,
+        depositRefund,
+        totalDeduction,
+        deductionItems: input.deductionItems,
+        isImmediateVacate: true,
+      });
+    } else {
+      // Scheduled notice — the room stays occupied until the planned move-out date.
+      void createOwnerNotification(ownerId, {
+        type: 'tenant',
+        title: `Vacate notice: ${tenantRow.name}`,
+        message: `Scheduled move-out: ${input.vacateDate}`,
+        propertyId: tenantRow.property_id,
+      }).catch(() => {});
 
-        const settlementHtml = generateSettlementReceiptHtml({
-          tenantName: tenantRow.name,
-          room: tenantRow.room,
-          floor: String(tenantRow.floor ?? ''),
-          joinDate: tenantRow.join_date,
-          vacateDate: input.vacateDate,
-          reason: input.reason,
-          securityDeposit: Number(tenantRow.security_deposit ?? 0),
-          deductionBreakdown: (input.deductionItems ?? []).map((d) => ({
-            id: d.id,
-            category: d.category as SettlementDeductionItem['category'],
-            description: d.description,
-            amount: d.amount,
-          })),
-          totalDeductions: totalDeduction,
-          netRefund: depositRefund,
-          pendingRentTotal: 0,
-          settledAt: new Date().toISOString(),
-          propertyName: propertyRow?.name ?? '',
-          ownerName: ownerProfile?.full_name ?? ownerProfile?.pg_name ?? '',
-        });
-
-        await supabaseLifecycleApi.storeReceiptAsDocument({
-          tenantId: input.tenantId,
-          paymentId: `settlement-${input.tenantId}`,
-          htmlContent: settlementHtml,
-          label: `Settlement — ${input.vacateDate}`,
-        });
-      } catch {
-        // Non-fatal: settlement document generation should not block vacate processing
-      }
+      void createOwnerNotification(ownerId, {
+        type: 'tenant',
+        title: `Thank you, ${tenantRow.name}`,
+        message: `Your vacate notice has been received. Your planned move-out is ${input.vacateDate}. Final settlement will be processed after your departure.`,
+        propertyId: tenantRow.property_id,
+      }).catch(() => {});
     }
 
     emitOwnerDataUpdated();
     return mapTenant(updatedRow!);
+  },
+
+  // Sweeps tenants whose notice period has elapsed (status='notice_submitted' and
+  // vacate_date <= today) and finalizes their vacate — same consequences as an
+  // immediate vacate. Call this opportunistically (e.g. on dashboard/app load) since
+  // there is no server-side cron in this deployment; it's idempotent and cheap when
+  // there's nothing due. Returns how many tenants were finalized.
+  async finalizeDueVacates(): Promise<number> {
+    const ownerId = await getOwnerId();
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    const { data: dueTenants, error } = await supabase
+      .from('tenants')
+      .select('*')
+      .eq('owner_id', ownerId)
+      .eq('status', 'notice_submitted')
+      .lte('vacate_date', todayStr)
+      .returns<TenantRow[]>();
+
+    if (error) throw error;
+    if (!dueTenants || dueTenants.length === 0) return 0;
+
+    for (const row of dueTenants) {
+      try {
+        const { data: vacateReq } = await supabase
+          .from('vacate_requests')
+          .select('deposit_refund, deposit_deduction, deduction_reason')
+          .eq('tenant_id', row.id)
+          .eq('owner_id', ownerId)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle<{ deposit_refund: number | null; deposit_deduction: number | null; deduction_reason: string | null }>();
+
+        const totalDeduction = Number(vacateReq?.deposit_deduction ?? 0);
+        const depositRefund = vacateReq?.deposit_refund != null
+          ? Number(vacateReq.deposit_refund)
+          : Math.max(0, Number(row.security_deposit ?? 0) - totalDeduction);
+        const vacateDate = row.vacate_date ?? todayStr;
+
+        const { error: updateError } = await supabase
+          .from('tenants')
+          .update({ status: 'inactive', updated_at: new Date().toISOString() })
+          .eq('id', row.id)
+          .eq('owner_id', ownerId);
+        if (updateError) throw updateError;
+
+        await supabase
+          .from('vacate_requests')
+          .update({ status: 'completed', deposit_refund: depositRefund, deposit_deduction: totalDeduction })
+          .eq('tenant_id', row.id)
+          .eq('owner_id', ownerId)
+          .neq('status', 'completed');
+
+        await supabase.from('activity_logs').insert({
+          owner_id: ownerId,
+          property_id: row.property_id,
+          event: 'TENANT_VACATED',
+          detail: `${row.name} vacated Room ${row.room} (notice period completed) — deposit refund ₹${depositRefund.toLocaleString('en-IN')}`,
+          metadata: { tenantId: row.id, room: row.room, depositRefund, totalDeduction, vacateDate },
+        });
+
+        await finalizeVacateConsequences({
+          ownerId,
+          tenantRow: row,
+          vacateDate,
+          depositRefund,
+          totalDeduction,
+          isImmediateVacate: false,
+        });
+      } catch (err) {
+        console.warn('[finalizeDueVacates] failed for tenant', row.id, err);
+      }
+    }
+
+    emitOwnerDataUpdated();
+    return dueTenants.length;
   },
 
   async archiveTenant(tenantId: string): Promise<TenantRecord> {
@@ -6521,27 +6752,23 @@ export const supabaseTenantDataApi = {
       notice_date: new Date().toISOString().split('T')[0],
       planned_vacate_date: input.vacateDate,
       reason: input.reason,
-      status: 'pending',
+      deposit_refund: isImmediateVacate ? tenant.securityDeposit : null,
+      deposit_deduction: isImmediateVacate ? 0 : null,
+      status: isImmediateVacate ? 'completed' : 'pending',
     });
     if (error) throw error;
 
-    await supabase
+    const { data: updatedTenantRow, error: updateErr } = await supabase
       .from('tenants')
       .update({
         status: newStatus,
         vacate_date: input.vacateDate,
         vacate_reason: input.reason,
       })
-      .eq('id', tenant.id);
-
-    // Sync room occupancy when tenant vacates immediately so DB room.status matches reality
-    if (isImmediateVacate && tenant.propertyId) {
-      try {
-        await syncRoomOccupancyForProperty(tenant.ownerId, tenant.propertyId);
-      } catch {
-        // Non-fatal: room sync failure should not block vacate flow
-      }
-    }
+      .eq('id', tenant.id)
+      .select('*')
+      .single<TenantRow>();
+    if (updateErr) throw updateErr;
 
     // Log to activity (fire-and-forget; non-fatal)
     void logActivity(tenant.ownerId, tenant.propertyId, 'TENANT_VACATE_NOTICE',
@@ -6555,6 +6782,19 @@ export const supabaseTenantDataApi = {
       message: `${tenant.name} (Room ${tenant.room}) submitted a vacate notice for ${input.vacateDate}`,
       propertyId: tenant.propertyId,
     }).catch(() => {});
+
+    if (isImmediateVacate) {
+      // Same closure consequences as an owner-initiated immediate vacate: bed/room
+      // release, agreement archiving, notifications, settlement document, and WhatsApp.
+      await finalizeVacateConsequences({
+        ownerId: tenant.ownerId,
+        tenantRow: updatedTenantRow,
+        vacateDate: input.vacateDate,
+        depositRefund: tenant.securityDeposit,
+        totalDeduction: 0,
+        isImmediateVacate: true,
+      });
+    }
 
     domainEvents.tenantVacated({
       tenantId: tenant.id,
@@ -8285,13 +8525,17 @@ export const supabaseLifecycleApi = {
       if (input.signatureImage) patch.owner_signature_image = input.signatureImage;
       patch.status = 'pending_tenant_signature';
 
-      // Embed owner signature in HTML (replace slot placeholder)
+      // Embed owner signature in HTML — replaces the `data-sig-slot="owner"` div
+      // wherever it currently sits (placeholder or a previously auto-applied vault signature).
       if (current.html_content) {
         const sigHtml = input.signatureImage
           ? `<img src="${input.signatureImage}" style="height:54px;max-width:220px;margin-top:6px;display:block;" alt="Owner signature" />`
           : `<span style="font-family:cursive,serif;font-size:24px;color:#1a1a1a;">${esc(input.signatureName.trim())}</span>`;
         const dateLine = `<p style="font-size:11px;color:#555;margin-top:4px;">Signed: ${new Date(now).toLocaleDateString('en-IN')}</p>`;
-        patch.html_content = current.html_content.replace('<!-- OWNER_SIGNATURE_SLOT -->', sigHtml + dateLine);
+        patch.html_content = current.html_content.replace(
+          /<div data-sig-slot="owner">[\s\S]*?<\/div>/,
+          `<div data-sig-slot="owner">${sigHtml}${dateLine}</div>`,
+        );
       }
 
       void createOwnerNotification(context.ownerId, {
@@ -8487,7 +8731,16 @@ export const supabaseLifecycleApi = {
       .single();
 
     if (error) throw error;
-    return mapSignatureProfile(data as OwnerSignatureProfileRow);
+    const profile = mapSignatureProfile(data as OwnerSignatureProfileRow);
+
+    // Retroactively refresh the owner signature on every agreement that hasn't been
+    // executed yet (tenant hasn't countersigned, so it's safe to update in place).
+    // Agreements already locked by a tenant signature are never touched here.
+    void propagateOwnerSignatureToAgreements(context.ownerId, context.userId, profile).catch((err) => {
+      console.warn('[owner_signature] propagation to agreements failed:', err instanceof Error ? err.message : err);
+    });
+
+    return profile;
   },
 
   // ── Agreement Templates ──────────────────────────────────────────────────────

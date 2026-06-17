@@ -740,8 +740,6 @@ export function Settings() {
   const [activeSignatureProfile, setActiveSignatureProfile] = useState<OwnerSignatureProfile | null>(null);
   const [sigVaultTab, setSigVaultTab] = useState<'draw' | 'upload' | 'typed'>('typed');
   const [sigTypedText, setSigTypedText] = useState('');
-  const [sigDrawCapture, setSigDrawCapture] = useState<string | null>(null);
-  const [sigUploadPreview, setSigUploadPreview] = useState<string | null>(null);
   const [sigSaving, setSigSaving] = useState(false);
   const sigUploadRef = useRef<HTMLInputElement>(null);
 
@@ -753,27 +751,36 @@ export function Settings() {
     } catch { /* graceful */ }
   };
 
-  const handleSaveSignature = async () => {
-    const imageData = sigVaultTab === 'draw' ? sigDrawCapture : sigVaultTab === 'upload' ? sigUploadPreview : null;
-    const textData = sigVaultTab === 'typed' ? sigTypedText.trim() : null;
-    if (sigVaultTab !== 'typed' && !imageData) { toast.error('Please provide a signature first.'); return; }
-    if (sigVaultTab === 'typed' && !textData) { toast.error('Please type your name.'); return; }
-    setSigSaving(true);
-    try {
-      const profile = await supabaseLifecycleApi.upsertSignatureProfile({
-        signatureType: sigVaultTab,
-        signatureImage: imageData ?? null,
-        signatureText: textData ?? null,
-      });
-      setActiveSignatureProfile(profile);
-      setSigDrawCapture(null);
-      toast.success('Signature saved. It will be auto-applied to new agreements.');
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to save signature.');
-    } finally {
-      setSigSaving(false);
+  useEffect(() => {
+    if (sigVaultTab === 'typed' && sigTypedText.trim() !== '') {
+      setActiveSignatureProfile(prev => ({
+        ...(prev || {}),
+        id: prev?.id || 'temp',
+        ownerId: prev?.ownerId || '',
+        createdAt: prev?.createdAt || new Date().toISOString(),
+        signatureType: 'typed',
+        signatureText: sigTypedText.trim(),
+        signatureImage: null,
+        updatedAt: new Date().toISOString(),
+      } as OwnerSignatureProfile));
+
+      const timer = setTimeout(async () => {
+        setSigSaving(true);
+        try {
+          await supabaseLifecycleApi.upsertSignatureProfile({
+            signatureType: 'typed',
+            signatureImage: null,
+            signatureText: sigTypedText.trim(),
+          });
+        } catch (err) {
+          // ignore
+        } finally {
+          setSigSaving(false);
+        }
+      }, 500);
+      return () => clearTimeout(timer);
     }
-  };
+  }, [sigTypedText, sigVaultTab]);
 
   const handleSigUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -781,9 +788,63 @@ export function Settings() {
     if (file.size > 2 * 1024 * 1024) { toast.error('Image must be under 2 MB.'); return; }
     if (!file.type.startsWith('image/')) { toast.error('File must be an image.'); return; }
     const reader = new FileReader();
-    reader.onload = (ev) => setSigUploadPreview(ev.target?.result as string);
+    reader.onload = async (ev) => {
+      const dataUrl = ev.target?.result as string;
+      if (sigUploadRef.current) sigUploadRef.current.value = '';
+      
+      setSigSaving(true);
+      setActiveSignatureProfile(prev => ({
+        ...(prev || {}),
+        id: prev?.id || 'temp',
+        ownerId: prev?.ownerId || '',
+        createdAt: prev?.createdAt || new Date().toISOString(),
+        signatureType: 'upload',
+        signatureText: null,
+        signatureImage: dataUrl,
+        updatedAt: new Date().toISOString(),
+      } as OwnerSignatureProfile));
+
+      try {
+        await supabaseLifecycleApi.upsertSignatureProfile({
+          signatureType: 'upload',
+          signatureImage: dataUrl,
+          signatureText: null,
+        });
+        toast.success('Signature updated.');
+      } catch (err) {
+        toast.error('Failed to save signature.');
+      } finally {
+        setSigSaving(false);
+      }
+    };
     reader.readAsDataURL(file);
-    if (sigUploadRef.current) sigUploadRef.current.value = '';
+  };
+
+  const handleDrawCapture = async (dataUrl: string) => {
+    setSigSaving(true);
+    setActiveSignatureProfile(prev => ({
+      ...(prev || {}),
+      id: prev?.id || 'temp',
+      ownerId: prev?.ownerId || '',
+      createdAt: prev?.createdAt || new Date().toISOString(),
+      signatureType: 'draw',
+      signatureText: null,
+      signatureImage: dataUrl,
+      updatedAt: new Date().toISOString(),
+    } as OwnerSignatureProfile));
+
+    try {
+      await supabaseLifecycleApi.upsertSignatureProfile({
+        signatureType: 'draw',
+        signatureImage: dataUrl,
+        signatureText: null,
+      });
+      toast.success('Signature updated.');
+    } catch (err) {
+      toast.error('Failed to save signature.');
+    } finally {
+      setSigSaving(false);
+    }
   };
 
   // ── Agreement Template ─────────────────────────────────────────────────────────
@@ -1687,8 +1748,7 @@ export function Settings() {
                   {(['typed', 'draw', 'upload'] as const).map((method) => (
                     <button
                       key={method}
-                      type="button"
-                      onClick={() => { setSigVaultTab(method); setSigDrawCapture(null); setSigUploadPreview(null); }}
+                      onClick={() => { setSigVaultTab(method); }}
                       className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors capitalize ${
                         sigVaultTab === method ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'
                       }`}
@@ -1705,7 +1765,7 @@ export function Settings() {
                 {sigVaultTab === 'typed' && (
                   <div className="space-y-3">
                     <div className="space-y-1.5">
-                      <Label>Your Name (as signature)</Label>
+                      <Label>Your Name (as signature) {sigSaving && <span className="text-xs text-indigo-500 ml-2 animate-pulse">Saving...</span>}</Label>
                       <Input
                         value={sigTypedText}
                         onChange={(e) => setSigTypedText(e.target.value)}
@@ -1713,56 +1773,27 @@ export function Settings() {
                         className="h-10"
                       />
                     </div>
-                    {sigTypedText.trim() && (
-                      <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
-                        <p className="text-xs text-gray-500 mb-1">Preview</p>
-                        <p className="text-2xl font-serif italic text-gray-800">{sigTypedText}</p>
-                      </div>
-                    )}
-                    <Button
-                      onClick={() => void handleSaveSignature()}
-                      loading={sigSaving}
-                      disabled={!sigTypedText.trim()}
-                      className="bg-indigo-600 hover:bg-indigo-700 text-white"
-                    >
-                      {!sigSaving && <Save className="w-4 h-4 mr-2" />}
-                      Save as Active Signature
-                    </Button>
                   </div>
                 )}
 
                 {/* Draw */}
                 {sigVaultTab === 'draw' && (
                   <div className="space-y-3">
-                    {sigDrawCapture ? (
-                      <div className="space-y-3">
-                        <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
-                          <p className="text-xs text-gray-500 mb-2">Captured signature</p>
-                          <img src={sigDrawCapture} alt="Drawn signature" className="h-16 max-w-full" />
-                        </div>
-                        <div className="flex gap-2">
-                          <Button variant="outline" onClick={() => setSigDrawCapture(null)}>
-                            <RefreshCw className="w-4 h-4 mr-1.5" /> Redraw
-                          </Button>
-                          <Button
-                            onClick={() => void handleSaveSignature()}
-                            loading={sigSaving}
-                            className="bg-indigo-600 hover:bg-indigo-700 text-white"
-                          >
-                            {!sigSaving && <Save className="w-4 h-4 mr-2" />}
-                            Save as Active Signature
-                          </Button>
-                        </div>
-                      </div>
-                    ) : (
-                      <SignatureDrawPad onCapture={setSigDrawCapture} />
-                    )}
+                    <div className="flex items-center justify-between mb-1">
+                      <Label>Draw Signature</Label>
+                      {sigSaving && <span className="text-xs text-indigo-500 animate-pulse">Saving...</span>}
+                    </div>
+                    <SignatureDrawPad onCapture={handleDrawCapture} />
                   </div>
                 )}
 
                 {/* Upload */}
                 {sigVaultTab === 'upload' && (
                   <div className="space-y-3">
+                    <div className="flex items-center justify-between mb-1">
+                      <Label>Upload Image</Label>
+                      {sigSaving && <span className="text-xs text-indigo-500 animate-pulse">Saving...</span>}
+                    </div>
                     <input
                       ref={sigUploadRef}
                       type="file"
@@ -1770,37 +1801,15 @@ export function Settings() {
                       className="hidden"
                       onChange={handleSigUpload}
                     />
-                    {sigUploadPreview ? (
-                      <div className="space-y-3">
-                        <div className="p-3 bg-gray-50 border border-gray-200 rounded-lg">
-                          <p className="text-xs text-gray-500 mb-2">Preview</p>
-                          <img src={sigUploadPreview} alt="Uploaded signature" className="h-16 max-w-full" />
-                        </div>
-                        <div className="flex gap-2">
-                          <Button variant="outline" onClick={() => { setSigUploadPreview(null); sigUploadRef.current?.click(); }}>
-                            <Upload className="w-4 h-4 mr-1.5" /> Change
-                          </Button>
-                          <Button
-                            onClick={() => void handleSaveSignature()}
-                            loading={sigSaving}
-                            className="bg-indigo-600 hover:bg-indigo-700 text-white"
-                          >
-                            {!sigSaving && <Save className="w-4 h-4 mr-2" />}
-                            Save as Active Signature
-                          </Button>
-                        </div>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => sigUploadRef.current?.click()}
-                        className="w-full border-2 border-dashed border-gray-300 rounded-xl p-8 text-center hover:border-indigo-400 hover:bg-indigo-50 transition-colors"
-                      >
-                        <Upload className="w-8 h-8 text-gray-400 mx-auto mb-2" />
-                        <p className="text-sm font-medium text-gray-600">Upload signature image</p>
-                        <p className="text-xs text-gray-400 mt-1">PNG, JPG or SVG · Max 2 MB · Transparent background preferred</p>
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => sigUploadRef.current?.click()}
+                      className="w-full border-2 border-dashed border-gray-300 rounded-xl p-8 text-center hover:border-indigo-400 hover:bg-indigo-50 transition-colors"
+                    >
+                      <Upload className="w-8 h-8 text-gray-400 mx-auto mb-2" />
+                      <p className="text-sm font-medium text-gray-600">Upload signature image</p>
+                      <p className="text-xs text-gray-400 mt-1">PNG, JPG or SVG · Max 2 MB · Transparent background preferred</p>
+                    </button>
                   </div>
                 )}
               </CardContent>

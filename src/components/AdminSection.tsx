@@ -788,7 +788,7 @@ export function AdminSection() {
       <div className="space-y-6">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-baseline gap-3">
-            <h1 className="text-xl font-semibold tracking-tight text-gray-900">Platform Overview</h1>
+            <h1 className="ds-page-title">Platform Overview</h1>
             <span className="text-sm text-gray-500">{today}</span>
           </div>
           <LiveStatusBadge lastUpdatedAt={lastUpdatedAt} isSyncing={isSyncing} label="Live" />
@@ -863,7 +863,7 @@ export function AdminSection() {
     return (
       <div className="space-y-6">
         <div className="flex items-center justify-between gap-3">
-          <h1 className="text-xl font-semibold tracking-tight text-gray-900">Owner Accounts</h1>
+          <h1 className="ds-page-title">Owner Accounts</h1>
           <button onClick={() => { setCreateOwnerOpen(true); setCreatedOwnerResult(null); setCreateOwnerEmail(''); setCreateOwnerName(''); setCreateOwnerPhone(''); setCreateOwnerPgName(''); setCreateOwnerCity(''); }} className="px-4 py-2 bg-violet-600 text-white rounded-lg text-sm font-medium hover:bg-violet-700 transition-colors flex items-center gap-2">
             <Plus className="w-4 h-4" /> Add Owner
           </button>
@@ -918,7 +918,7 @@ export function AdminSection() {
           <div className="overflow-x-auto">
             <table className="w-full min-w-[1100px] text-left border-collapse">
               <thead>
-                <tr className="bg-gray-50/80 border-b border-gray-100">
+                <tr className="bg-gray-50 border-b border-gray-100 sticky top-0 z-10">
                   {['Avatar', 'Name', 'Email', 'Status', 'Plan', 'Properties', 'Tenants', 'Revenue', 'Last Active', 'Actions'].map((h) => (
                     <th key={h} className="px-5 py-4 text-[12px] font-bold text-gray-500 uppercase tracking-widest">{h}</th>
                   ))}
@@ -1002,9 +1002,12 @@ export function AdminSection() {
                 })}
                 {pagedOwners.length === 0 && (
                   <tr>
-                    <td colSpan={10} className="px-4 py-12 text-center">
-                      <p className="text-sm font-medium text-gray-900">No owners found</p>
-                      <p className="text-sm text-gray-500 mt-1">Try adjusting your filters or search terms.</p>
+                    <td colSpan={10} style={{ padding: 0 }}>
+                      <div className="ds-empty-state">
+                        <div className="ds-empty-icon"><Users style={{ width: 22, height: 22 }} /></div>
+                        <p className="ds-empty-title">No owners found</p>
+                        <p className="ds-empty-description">Try adjusting your filters or search terms.</p>
+                      </div>
                     </td>
                   </tr>
                 )}
@@ -1283,7 +1286,7 @@ export function AdminSection() {
     return (
       <div className="space-y-6">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight text-gray-900">Subscriptions & Billing</h1>
+          <h1 className="ds-page-title">Subscriptions & Billing</h1>
           <p className="text-gray-600 mt-1">Manage owner subscription plans and billing lifecycle.</p>
         </div>
 
@@ -1344,7 +1347,7 @@ export function AdminSection() {
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b border-gray-200">
+              <thead className="bg-gray-50 border-b border-gray-200 sticky top-0 z-10">
                 <tr>
                   <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Owner</th>
                   <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Plan</th>
@@ -1431,7 +1434,7 @@ export function AdminSection() {
       <div className="space-y-6">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h1 className="text-xl font-semibold tracking-tight text-gray-900">Transactions</h1>
+            <h1 className="ds-page-title">Transactions</h1>
             <p className="text-gray-600 mt-1">Platform-wide payment activity across all owner accounts.</p>
           </div>
           <button onClick={handleExport} className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors flex items-center gap-2 shadow-sm">
@@ -1480,7 +1483,7 @@ export function AdminSection() {
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b border-gray-200">
+              <thead className="bg-gray-50 border-b border-gray-200 sticky top-0 z-10">
                 <tr>
                   <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Tenant</th>
                   <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Owner</th>
@@ -1509,9 +1512,12 @@ export function AdminSection() {
                 ))}
                 {paged.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="px-5 py-12 text-center">
-                      <p className="text-sm font-medium text-gray-900">No transactions found</p>
-                      <p className="text-sm text-gray-500 mt-1">Try adjusting your filters.</p>
+                    <td colSpan={7} style={{ padding: 0 }}>
+                      <div className="ds-empty-state">
+                        <div className="ds-empty-icon"><CreditCard style={{ width: 22, height: 22 }} /></div>
+                        <p className="ds-empty-title">No transactions found</p>
+                        <p className="ds-empty-description">Try adjusting your filters.</p>
+                      </div>
                     </td>
                   </tr>
                 )}
@@ -1555,7 +1561,7 @@ export function AdminSection() {
       <div className="space-y-6">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h1 className="text-xl font-semibold tracking-tight text-gray-900">Audit Log</h1>
+            <h1 className="ds-page-title">Audit Log</h1>
             <p className="text-gray-600 mt-1">Platform-wide record of owner and admin actions.</p>
           </div>
           <button onClick={handleExport} className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors flex items-center gap-2 shadow-sm">
@@ -1584,7 +1590,7 @@ export function AdminSection() {
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b border-gray-200">
+              <thead className="bg-gray-50 border-b border-gray-200 sticky top-0 z-10">
                 <tr>
                   <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide w-48">Timestamp</th>
                   <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide w-64">Event</th>
@@ -1607,9 +1613,12 @@ export function AdminSection() {
                 ))}
                 {paged.length === 0 && (
                   <tr>
-                    <td colSpan={4} className="px-5 py-12 text-center">
-                      <p className="text-sm font-medium text-gray-900">No audit logs found</p>
-                      <p className="text-sm text-gray-500 mt-1">Try adjusting your filters.</p>
+                    <td colSpan={4} style={{ padding: 0 }}>
+                      <div className="ds-empty-state">
+                        <div className="ds-empty-icon"><FileClock style={{ width: 22, height: 22 }} /></div>
+                        <p className="ds-empty-title">No audit logs found</p>
+                        <p className="ds-empty-description">Try adjusting your filters.</p>
+                      </div>
                     </td>
                   </tr>
                 )}
@@ -1639,7 +1648,7 @@ export function AdminSection() {
     return (
       <div className="space-y-6">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight text-gray-900">Platform Analytics</h1>
+          <h1 className="ds-page-title">Platform Analytics</h1>
           <p className="text-gray-600 mt-1">Revenue trends, owner growth, occupancy, and platform health.</p>
         </div>
 
@@ -1898,9 +1907,12 @@ export function AdminSection() {
             );
           })}
           {pagedSupport.length === 0 && (
-            <div className="bg-white rounded-xl border border-gray-200 p-12 text-center shadow-sm">
-              <p className="text-sm font-medium text-gray-900">No tickets found</p>
-              <p className="text-sm text-gray-500 mt-1">Try adjusting your filters or search query.</p>
+            <div className="bg-white rounded-xl border border-gray-200 shadow-sm">
+              <div className="ds-empty-state">
+                <div className="ds-empty-icon"><HeadphonesIcon style={{ width: 22, height: 22 }} /></div>
+                <p className="ds-empty-title">No tickets found</p>
+                <p className="ds-empty-description">Try adjusting your filters or search query.</p>
+              </div>
             </div>
           )}
         </div>

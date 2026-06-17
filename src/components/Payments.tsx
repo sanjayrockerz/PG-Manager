@@ -628,7 +628,7 @@ export function Payments({ onNavigate }: PaymentsProps) {
         {/* Desktop table */}
         <div className="hidden md:block overflow-x-auto">
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
+            <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
               <tr style={{ background: '#FAFAFA', borderBottom: '1px solid #F1F1F3' }}>
                 <th style={{ width: 36, padding: '8px 6px 8px 12px' }}>
                   <input
@@ -651,8 +651,12 @@ export function Payments({ onNavigate }: PaymentsProps) {
             <tbody>
               {filteredPayments.length === 0 ? (
                 <tr>
-                  <td colSpan={10} style={{ padding: '40px 14px', textAlign: 'center', fontSize: 13, color: '#A1A1AA' }}>
-                    No payments found
+                  <td colSpan={10} style={{ padding: 0 }}>
+                    <div className="ds-empty-state">
+                      <div className="ds-empty-icon"><Receipt style={{ width: 22, height: 22 }} /></div>
+                      <p className="ds-empty-title">No payments found</p>
+                      <p className="ds-empty-description">Adjust your filters, or generate this month's invoices to see payments here.</p>
+                    </div>
                   </td>
                 </tr>
               ) : filteredPayments.map((payment, i) => (
@@ -744,15 +748,16 @@ export function Payments({ onNavigate }: PaymentsProps) {
                       >
                         <MessageCircle style={{ width: 12, height: 12, color: '#25D366' }} />
                       </button>
-                      <button
-                        title={isProjected(payment) ? 'Invoice not generated yet' : payment.status === 'paid' ? 'View receipt' : 'View invoice'}
-                        disabled={isProjected(payment)}
-                        onClick={() => { if (!isProjected(payment)) handleOpenReceipt(payment); }}
-                        className="ds-btn ds-btn-secondary"
-                        style={{ fontSize: 11, padding: '4px 6px', minWidth: 0, opacity: isProjected(payment) ? 0.35 : 1, cursor: isProjected(payment) ? 'not-allowed' : 'pointer' }}
-                      >
-                        <Receipt style={{ width: 12, height: 12, color: payment.status === 'paid' ? '#16a34a' : '#6366F1' }} />
-                      </button>
+                      {payment.status === 'paid' && (
+                        <button
+                          title="View receipt"
+                          onClick={() => handleOpenReceipt(payment)}
+                          className="ds-btn ds-btn-secondary"
+                          style={{ fontSize: 11, padding: '4px 6px', minWidth: 0 }}
+                        >
+                          <Receipt style={{ width: 12, height: 12, color: '#16a34a' }} />
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -764,7 +769,11 @@ export function Payments({ onNavigate }: PaymentsProps) {
         {/* Mobile cards */}
         <div className="md:hidden flex flex-col" style={{ padding: 12, gap: 8 }}>
           {filteredPayments.length === 0 ? (
-            <p style={{ textAlign: 'center', fontSize: 13, color: '#A1A1AA', padding: '32px 0' }}>No payments found</p>
+            <div className="ds-empty-state">
+              <div className="ds-empty-icon"><Receipt style={{ width: 22, height: 22 }} /></div>
+              <p className="ds-empty-title">No payments found</p>
+              <p className="ds-empty-description">Adjust your filters, or generate this month's invoices.</p>
+            </div>
           ) : filteredPayments.map((payment) => (
             <div
               key={payment.id}
@@ -835,15 +844,16 @@ export function Payments({ onNavigate }: PaymentsProps) {
                 >
                   <MessageCircle style={{ width: 12, height: 12, color: '#25D366' }} /> Remind
                 </button>
-                <button
-                  disabled={isProjected(payment)}
-                  onClick={() => { if (!isProjected(payment)) handleOpenReceipt(payment); }}
-                  className="ds-btn ds-btn-secondary"
-                  style={{ flex: 1, fontSize: 12, padding: '6px 0', justifyContent: 'center', gap: 4, opacity: isProjected(payment) ? 0.4 : 1, cursor: isProjected(payment) ? 'not-allowed' : 'pointer' }}
-                >
-                  <Receipt style={{ width: 12, height: 12, color: payment.status === 'paid' ? '#16a34a' : '#6366F1' }} />
-                  {isProjected(payment) ? 'Projected' : payment.status === 'paid' ? 'Receipt' : 'Invoice'}
-                </button>
+                {payment.status === 'paid' && (
+                  <button
+                    onClick={() => handleOpenReceipt(payment)}
+                    className="ds-btn ds-btn-secondary"
+                    style={{ flex: 1, fontSize: 12, padding: '6px 0', justifyContent: 'center', gap: 4 }}
+                  >
+                    <Receipt style={{ width: 12, height: 12, color: '#16a34a' }} />
+                    Receipt
+                  </button>
+                )}
               </div>
             </div>
           ))}

@@ -10,7 +10,7 @@ import {
   Clock, AlertCircle, Loader2, ShieldCheck, LogOut,
   AlertTriangle, Archive, ChevronRight, ChevronLeft,
   ReceiptText, Plus, Trash2, Printer, History,
-  Upload, Eye, Download, Activity, CreditCard, X,
+  Upload, Eye, Download, Activity, X,
   ImageIcon, Receipt, UserCheck, ChevronDown,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -1830,7 +1830,7 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
 
       {/* Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="mb-6 bg-white border border-gray-200 flex-wrap h-auto gap-1">
+        <TabsList className="mb-6 bg-white border border-gray-200 h-auto gap-1 overflow-x-auto flex-nowrap" style={{ display: 'flex', scrollbarWidth: 'none' }}>
           <TabsTrigger value="activity" className="data-[state=active]:bg-[#4F46E5] data-[state=active]:text-white">
             <Activity className="w-4 h-4 mr-1.5" /> Activity
           </TabsTrigger>
@@ -1875,55 +1875,97 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
             </CardHeader>
             <CardContent>
               {deferredLoading ? (
-                <div className="py-12 flex justify-center"><Loader2 className="w-6 h-6 text-indigo-400 animate-spin" /></div>
-              ) : payments.length === 0 ? (
-                <p className="text-center py-8 text-gray-400 text-sm">No payment records found</p>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b border-gray-200 bg-gray-50">
-                        {['Due Date', 'Monthly Rent', 'Extra', 'Total', 'Status', 'Paid On', ''].map((h) => (
-                          <th key={h} className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {payments.map((p) => (
-                        <tr key={p.id} className={`border-b border-gray-100 hover:bg-gray-50 ${!isCurrentlyInRoom && p.status !== 'paid' ? 'opacity-60' : ''}`}>
-                          <td className="py-3 px-4 text-sm text-gray-900">{new Date(p.dueDate).toLocaleDateString('en-IN')}</td>
-                          <td className="py-3 px-4 text-sm text-gray-900">₹{p.monthlyRent.toLocaleString()}</td>
-                          <td className="py-3 px-4 text-sm text-purple-700">₹{p.extraCharges.toLocaleString()}</td>
-                          <td className="py-3 px-4 text-sm font-semibold text-gray-900">₹{p.totalAmount.toLocaleString()}</td>
-                          <td className="py-3 px-4">
-                            <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold ${paymentStatusColor[p.status] ?? 'bg-gray-100 text-gray-700'}`}>
-                              {p.status === 'paid' && <CheckCircle className="w-3 h-3" />}
-                              {p.status === 'pending' && <Clock className="w-3 h-3" />}
-                              {p.status === 'overdue' && <AlertCircle className="w-3 h-3" />}
-                              {p.status.charAt(0).toUpperCase() + p.status.slice(1)}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4 text-sm text-gray-500">
-                            {p.paidDate ? new Date(p.paidDate).toLocaleDateString('en-IN') : '—'}
-                          </td>
-                          <td className="py-3 px-4">
-                            {p.status === 'paid' ? (
-                              <Button size="sm" variant="outline" className="h-7 text-xs gap-1 text-green-700 border-green-200"
-                                onClick={() => handleOpenDocument(p)}>
-                                <Receipt className="w-3 h-3" /> Receipt
-                              </Button>
-                            ) : (
-                              <Button size="sm" variant="outline" className="h-7 text-xs gap-1"
-                                onClick={() => handleOpenDocument(p)}>
-                                <CreditCard className="w-3 h-3" /> Invoice
-                              </Button>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {[0, 1, 2].map((i) => <div key={i} className="ds-skeleton" style={{ height: 44, borderRadius: 10 }} />)}
                 </div>
+              ) : payments.length === 0 ? (
+                <div className="ds-empty-state">
+                  <div className="ds-empty-icon"><Receipt style={{ width: 22, height: 22 }} /></div>
+                  <p className="ds-empty-title">No payment records found</p>
+                  <p className="ds-empty-description">Payment records will appear here once invoices are generated.</p>
+                </div>
+              ) : (
+                <>
+                  {/* Desktop table */}
+                  <div className="hidden md:block overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b border-gray-200 bg-gray-50">
+                          {['Due Date', 'Monthly Rent', 'Extra', 'Total', 'Status', 'Paid On', ''].map((h) => (
+                            <th key={h} className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {payments.map((p) => (
+                          <tr key={p.id} className={`border-b border-gray-100 hover:bg-gray-50 ${!isCurrentlyInRoom && p.status !== 'paid' ? 'opacity-60' : ''}`}>
+                            <td className="py-3 px-4 text-sm text-gray-900">{new Date(p.dueDate).toLocaleDateString('en-IN')}</td>
+                            <td className="py-3 px-4 text-sm text-gray-900">₹{p.monthlyRent.toLocaleString()}</td>
+                            <td className="py-3 px-4 text-sm text-purple-700">₹{p.extraCharges.toLocaleString()}</td>
+                            <td className="py-3 px-4 text-sm font-semibold text-gray-900">₹{p.totalAmount.toLocaleString()}</td>
+                            <td className="py-3 px-4">
+                              <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold ${paymentStatusColor[p.status] ?? 'bg-gray-100 text-gray-700'}`}>
+                                {p.status === 'paid' && <CheckCircle className="w-3 h-3" />}
+                                {p.status === 'pending' && <Clock className="w-3 h-3" />}
+                                {p.status === 'overdue' && <AlertCircle className="w-3 h-3" />}
+                                {p.status.charAt(0).toUpperCase() + p.status.slice(1)}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 text-sm text-gray-500">
+                              {p.paidDate ? new Date(p.paidDate).toLocaleDateString('en-IN') : '—'}
+                            </td>
+                            <td className="py-3 px-4">
+                              {p.status === 'paid' ? (
+                                <Button size="sm" variant="outline" className="h-7 text-xs gap-1 text-green-700 border-green-200"
+                                  onClick={() => handleOpenDocument(p)}>
+                                  <Receipt className="w-3 h-3" /> Receipt
+                                </Button>
+                              ) : (
+                                <span className="text-xs text-gray-400">—</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {/* Mobile cards */}
+                  <div className="md:hidden ds-card-list">
+                    {payments.map((p) => (
+                      <div key={p.id} className="ds-mobile-record-card" style={{ opacity: !isCurrentlyInRoom && p.status !== 'paid' ? 0.6 : 1 }}>
+                        <div className="ds-mobile-record-header">
+                          <div>
+                            <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--ds-text-1)' }}>
+                              ₹{p.totalAmount.toLocaleString()}
+                            </p>
+                            <p style={{ fontSize: 11, color: 'var(--ds-text-3)', marginTop: 2 }}>
+                              Due {new Date(p.dueDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                            </p>
+                          </div>
+                          <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold ${paymentStatusColor[p.status] ?? 'bg-gray-100 text-gray-700'}`}>
+                            {p.status === 'paid' && <CheckCircle className="w-3 h-3" />}
+                            {p.status === 'pending' && <Clock className="w-3 h-3" />}
+                            {p.status === 'overdue' && <AlertCircle className="w-3 h-3" />}
+                            {p.status.charAt(0).toUpperCase() + p.status.slice(1)}
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', gap: 16, fontSize: 12, color: 'var(--ds-text-3)' }}>
+                          <span>Rent ₹{p.monthlyRent.toLocaleString()}</span>
+                          {p.extraCharges > 0 && <span>Extra ₹{p.extraCharges.toLocaleString()}</span>}
+                          {p.paidDate && <span>Paid {new Date(p.paidDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span>}
+                        </div>
+                        {p.status === 'paid' && (
+                          <div>
+                            <Button size="sm" variant="outline" className="h-7 text-xs gap-1 text-green-700 border-green-200 w-full"
+                              onClick={() => handleOpenDocument(p)}>
+                              <Receipt className="w-3 h-3" /> View Receipt
+                            </Button>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </>
               )}
             </CardContent>
           </Card>
@@ -1935,40 +1977,73 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
             <CardHeader><CardTitle>Maintenance Requests</CardTitle></CardHeader>
             <CardContent>
               {deferredLoading ? (
-                <div className="py-12 flex justify-center"><Loader2 className="w-6 h-6 text-indigo-400 animate-spin" /></div>
-              ) : tickets.length === 0 ? (
-                <p className="text-center py-8 text-gray-400 text-sm">No maintenance tickets found</p>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b border-gray-200 bg-gray-50">
-                        {['Ticket ID', 'Issue', 'Priority', 'Status', 'Date'].map((h) => (
-                          <th key={h} className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {tickets.map((t) => (
-                        <tr key={t.id} className="border-b border-gray-100 hover:bg-gray-50">
-                          <td className="py-3 px-4 text-sm font-medium text-gray-900">{t.ticketId}</td>
-                          <td className="py-3 px-4 text-sm text-gray-900">{t.issue}</td>
-                          <td className="py-3 px-4">
-                            <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${priorityColor[t.priority] ?? 'bg-gray-100 text-gray-700'}`}>
-                              {t.priority.toUpperCase()}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4">
-                            <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${ticketStatusColor[t.status] ?? 'bg-gray-100 text-gray-700'}`}>
-                              {ticketStatusLabel[t.status] ?? t.status}
-                            </span>
-                          </td>
-                          <td className="py-3 px-4 text-sm text-gray-500">{new Date(t.date).toLocaleDateString('en-IN')}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {[0, 1, 2].map((i) => <div key={i} className="ds-skeleton" style={{ height: 44, borderRadius: 10 }} />)}
                 </div>
+              ) : tickets.length === 0 ? (
+                <div className="ds-empty-state">
+                  <div className="ds-empty-icon"><Wrench style={{ width: 22, height: 22 }} /></div>
+                  <p className="ds-empty-title">No maintenance tickets found</p>
+                  <p className="ds-empty-description">Maintenance requests raised by this tenant will appear here.</p>
+                </div>
+              ) : (
+                <>
+                  {/* Desktop table */}
+                  <div className="hidden md:block overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b border-gray-200 bg-gray-50">
+                          {['Ticket ID', 'Issue', 'Priority', 'Status', 'Date'].map((h) => (
+                            <th key={h} className="text-left py-3 px-4 text-xs font-semibold text-gray-600 uppercase">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {tickets.map((t) => (
+                          <tr key={t.id} className="border-b border-gray-100 hover:bg-gray-50">
+                            <td className="py-3 px-4 text-sm font-medium text-gray-900">{t.ticketId}</td>
+                            <td className="py-3 px-4 text-sm text-gray-900">{t.issue}</td>
+                            <td className="py-3 px-4">
+                              <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${priorityColor[t.priority] ?? 'bg-gray-100 text-gray-700'}`}>
+                                {t.priority.toUpperCase()}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4">
+                              <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${ticketStatusColor[t.status] ?? 'bg-gray-100 text-gray-700'}`}>
+                                {ticketStatusLabel[t.status] ?? t.status}
+                              </span>
+                            </td>
+                            <td className="py-3 px-4 text-sm text-gray-500">{new Date(t.date).toLocaleDateString('en-IN')}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {/* Mobile cards */}
+                  <div className="md:hidden ds-card-list">
+                    {tickets.map((t) => (
+                      <div key={t.id} className="ds-mobile-record-card">
+                        <div className="ds-mobile-record-header">
+                          <div style={{ minWidth: 0 }}>
+                            <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--ds-text-3)', marginBottom: 2 }}>{t.ticketId}</p>
+                            <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--ds-text-1)' }}>{t.issue}</p>
+                          </div>
+                          <span className={`flex-shrink-0 px-2 py-0.5 rounded-full text-xs font-semibold ${ticketStatusColor[t.status] ?? 'bg-gray-100 text-gray-700'}`}>
+                            {ticketStatusLabel[t.status] ?? t.status}
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${priorityColor[t.priority] ?? 'bg-gray-100 text-gray-700'}`}>
+                            {t.priority.toUpperCase()}
+                          </span>
+                          <span style={{ fontSize: 12, color: 'var(--ds-text-3)' }}>
+                            {new Date(t.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
               )}
             </CardContent>
           </Card>
