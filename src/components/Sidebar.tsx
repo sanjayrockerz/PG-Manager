@@ -4,8 +4,10 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useWorkspace } from '../contexts/WorkspaceContext';
+import { useProperty } from '../contexts/PropertyContext';
 import { isPlatformAdminRole } from '../utils/roles';
 import { hasPermission, hasWorkspacePermission } from '../utils/permissions';
+import { getPlanByCode } from '../constants/plans';
 
 interface SidebarProps {
   activeTab: string;
@@ -78,7 +80,9 @@ export function Sidebar({
   userRole = 'owner',
 }: SidebarProps) {
   const { logout, user } = useAuth();
-  const { navWorkspaceRole } = useWorkspace();
+  const { navWorkspaceRole, ownedProperties, selectedWorkspace } = useWorkspace();
+  const { properties } = useProperty();
+  const subscription = ownedProperties[0]?.subscription ?? selectedWorkspace?.subscription ?? null;
 
   const isPlatformAdmin = isPlatformAdminRole(userRole as any);
   const isTenant        = userRole === 'tenant';
@@ -90,6 +94,10 @@ export function Sidebar({
     hasWorkspacePermission(navWorkspaceRole, 'settings:workspace')
   );
   const showUpgradePro = !isPlatformAdmin && !isTenant;
+  const currentPlan = getPlanByCode(subscription?.planCode);
+  const propertyUsageLabel = currentPlan.propertyLimit === Infinity
+    ? `${properties.length} properties`
+    : `${properties.length} / ${currentPlan.propertyLimit} properties`;
 
   const filteredOwnerSections = ownerSections.map((section) => ({
     ...section,
@@ -285,24 +293,28 @@ export function Sidebar({
 
         {/* Bottom — user + sign out */}
         <div style={{ padding: '10px 8px', borderTop: '1px solid #F1F1F3', display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {/* Upgrade to Pro — expanded + owner only */}
+          {/* Plan / usage card — workspace utility panel, not a marketing banner */}
           {showUpgradePro && !sidebarCollapsed && navWorkspaceRole === 'workspace_owner' && (
-            <button
-              onClick={() => handleNav('pricing')}
-              className="w-full text-left rounded-lg transition-opacity hover:opacity-90"
-              style={{ padding: '10px 12px', background: 'linear-gradient(135deg, #6366F1 0%, #4338CA 100%)', marginBottom: 4 }}
+            <div
+              className="w-full rounded-lg"
+              style={{ padding: '10px 12px', background: '#FAFAFA', border: '1px solid #E4E4E7', marginBottom: 4 }}
             >
-              <div className="flex items-center gap-2 mb-1">
-                <Zap style={{ width: 13, height: 13, color: '#C7D2FE', strokeWidth: 2 }} />
-                <span style={{ fontSize: 12, fontWeight: 600, color: '#ffffff' }}>Upgrade to Pro</span>
+              <div className="flex items-center justify-between mb-1.5">
+                <div className="flex items-center gap-1.5">
+                  <Zap style={{ width: 12, height: 12, color: '#6366F1', strokeWidth: 2 }} />
+                  <span style={{ fontSize: 11, fontWeight: 600, color: '#A1A1AA', letterSpacing: '0.04em', textTransform: 'uppercase' }}>Current Plan</span>
+                </div>
+                <span style={{ fontSize: 11, fontWeight: 700, color: '#4F46E5' }}>{currentPlan.label}</span>
               </div>
-              <p style={{ fontSize: 11, color: '#A5B4FC', lineHeight: 1.4 }}>
-                Unlock advanced reports, automation and more.
-              </p>
-              <div className="mt-2.5 text-center rounded-md" style={{ padding: '5px 0', background: 'rgba(255,255,255,0.15)', fontSize: 11, fontWeight: 600, color: '#ffffff' }}>
-                Upgrade Now
-              </div>
-            </button>
+              <p style={{ fontSize: 11.5, color: '#52525B', marginBottom: 6 }}>{propertyUsageLabel}</p>
+              <button
+                onClick={() => handleNav('pricing')}
+                className="w-full text-center rounded-md transition-colors hover:bg-zinc-100"
+                style={{ padding: '6px 0', border: '1px solid #E4E4E7', background: '#fff', fontSize: 11.5, fontWeight: 600, color: '#0A0A0B' }}
+              >
+                Manage Plan
+              </button>
+            </div>
           )}
 
           {/* Sign out / user row */}

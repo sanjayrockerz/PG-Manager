@@ -629,18 +629,28 @@ function AgreementTab({ tenant, property }: { tenant: TenantRecord; property?: {
     return () => { cancelled = true; channel?.unsubscribe(); };
   }, [tenant.id, isDemoMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Fetch owner signature vault so Print/Download embed the real signature
-  useEffect(() => {
+  // Fetch owner signature vault so Print/Download embed the real signature. Re-fetches
+  // live on change so updating the signature in Settings reflects here immediately,
+  // without needing to leave and re-open this tenant.
+  const loadVaultSig = () => {
     if (isDemoMode) return;
     supabaseLifecycleApi.getActiveSignatureProfile().then((profile) => {
-      if (!profile) return;
+      if (!profile) { setVaultSig(undefined); return; }
       if (profile.signatureType === 'typed' && profile.signatureText) {
         setVaultSig({ type: 'typed', value: profile.signatureText, name: ownerName || 'Property Owner' });
       } else if (profile.signatureImage) {
         setVaultSig({ type: 'image', value: profile.signatureImage, name: ownerName || 'Property Owner' });
       }
     }).catch(() => { /* vault not configured — agreement generates without signature */ });
-  }, [isDemoMode]); // eslint-disable-line react-hooks/exhaustive-deps
+  };
+
+  useEffect(() => { loadVaultSig(); }, [isDemoMode, ownerName]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useRealtimeRefresh({
+    key: 'tenant-detail-owner-signature',
+    tables: ['owner_signature_profiles'],
+    onChange: loadVaultSig,
+  });
 
   const handleOwnerSign = async () => {
     if (!signingAgreement || !signatureName.trim()) {

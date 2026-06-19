@@ -795,7 +795,7 @@ export function AdminSection() {
         </div>
 
         {/* 8 KPI Cards (2 rows of 4) */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
           <KpiCard label="Monthly Recurring Revenue" value={summary.stats.monthlyRevenue} prefix="₹" accent="purple" icon={TrendingUp}
             trend={mrrGrowth} trendLabel="vs last month" />
           <KpiCard label="Paying Customers" value={summary.stats.ownersActive} accent="blue" icon={Users}
@@ -870,7 +870,7 @@ export function AdminSection() {
         </div>
 
         {/* 4 KPI Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
           <KpiCard label="Total Owners" value={totalOwners} accent="purple" icon={Users} format={(n) => Math.round(n).toString()} />
           <KpiCard label="Active Subscriptions" value={activeSubs} accent="emerald" icon={CheckCircle} format={(n) => Math.round(n).toString()} />
           <KpiCard label="Suspended Accounts" value={suspended} accent="rose" icon={AlertCircle} format={(n) => Math.round(n).toString()} />
@@ -1072,7 +1072,7 @@ export function AdminSection() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
                   <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
                     <p className="text-xs text-gray-500 uppercase">Properties</p>
                     <p className="text-2xl font-semibold text-gray-900 mt-1">{selectedOwner.propertyCount}</p>
@@ -1291,7 +1291,7 @@ export function AdminSection() {
         </div>
 
         {/* 4 MRR KPI Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
           <div className="bg-white rounded-xl border border-gray-200 p-5">
             <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-1">Total MRR</p>
             <p className="text-2xl font-bold text-gray-900 tabular-nums">{formatRs(summary.stats.monthlyRevenue)}</p>
@@ -1443,7 +1443,7 @@ export function AdminSection() {
         </div>
 
         {/* 4 KPI Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
           <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
             <p className="text-xs text-gray-500 uppercase tracking-wide font-medium mb-1">Total Processed</p>
             <p className="text-2xl font-bold text-gray-900 tabular-nums">{formatRs(stats.totalRevenue)}</p>

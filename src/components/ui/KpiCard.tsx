@@ -81,24 +81,32 @@ export function KpiCard({
         {suffix && <span className="ds-kpi-affix" style={{ marginLeft: 1 }}>{suffix}</span>}
       </div>
 
-      <div className="ds-kpi-foot">
-        {trend !== undefined && (
-          <span className="ds-kpi-badge">
-            {up
-              ? <ArrowUpRight style={{ width: 11, height: 11 }} />
-              : <ArrowDownRight style={{ width: 11, height: 11 }} />}
-            {Math.abs(trend).toFixed(1)}%
-          </span>
-        )}
-        {tag && <span className="ds-kpi-badge">{tag}</span>}
-        {(trendLabel || meta) && (
-          <span className="ds-kpi-foot-text">{trendLabel ?? meta}</span>
-        )}
-      </div>
-
-      {meta && trendLabel && (
-        <p className="ds-kpi-foot-text" style={{ marginTop: -4, position: 'relative', zIndex: 1 }}>{meta}</p>
-      )}
+      {/* meta is only shown as a second line when it's genuinely distinct from
+          trendLabel — never render the same caption twice (e.g. both "Today"). */}
+      {(() => {
+        const showMetaLine = !!meta && !!trendLabel && meta !== trendLabel;
+        return (
+          <>
+            <div className="ds-kpi-foot">
+              {trend !== undefined && (
+                <span className="ds-kpi-badge">
+                  {up
+                    ? <ArrowUpRight style={{ width: 11, height: 11 }} />
+                    : <ArrowDownRight style={{ width: 11, height: 11 }} />}
+                  {Math.abs(trend).toFixed(1)}%
+                </span>
+              )}
+              {tag && <span className="ds-kpi-badge">{tag}</span>}
+              {(trendLabel || meta) && (
+                <span className="ds-kpi-foot-text">{trendLabel ?? meta}</span>
+              )}
+            </div>
+            {showMetaLine && (
+              <p className="ds-kpi-foot-text" style={{ marginTop: -4, position: 'relative', zIndex: 1 }}>{meta}</p>
+            )}
+          </>
+        );
+      })()}
     </div>
   );
 }

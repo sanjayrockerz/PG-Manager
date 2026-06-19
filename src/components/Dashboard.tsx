@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react';
 
 const QuickStartGuide = lazy(() => import('./QuickStartGuide').then((m) => ({ default: m.QuickStartGuide })));
 import {
@@ -436,78 +436,8 @@ export function Dashboard({ onNavigate }: DashboardProps) {
         </div>
       )}
 
-      {/* ── Today's Priorities ──────────────── */}
-      {(overdueCt > 0 || data.pendingIssues > 0) && (
-        <div className="ds-card" style={{ padding: '14px 18px' }}>
-          <div className="flex items-center justify-between" style={{ marginBottom: 10 }}>
-            <h2 style={{ fontSize: 13, fontWeight: 700, color: '#0A0A0B', letterSpacing: '-0.01em' }}>Today's Priorities</h2>
-            <span style={{ fontSize: 11, color: '#A1A1AA' }}>
-              {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}
-            </span>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {overdueCt > 0 && (
-              <button
-                onClick={() => onNavigate?.('payments')}
-                className="ds-action-card"
-                style={{ '--action-1': 'var(--ds-danger)', '--action-wash': 'var(--ds-danger-subtle)' } as CSSProperties}
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="ds-action-icon">
-                    <AlertCircle style={{ width: 18, height: 18 }} />
-                  </div>
-                  <div className="min-w-0">
-                    <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--ds-text-1)' }}>{overdueCt} overdue payment{overdueCt > 1 ? 's' : ''} need collection</p>
-                    <p style={{ fontSize: 12, color: 'var(--ds-text-3)', marginTop: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {data.recentPayments.filter(p => p.status === 'overdue').slice(0, 2).map(p => p.tenant).join(', ')}
-                      {overdueCt > 2 ? ` +${overdueCt - 2} more` : ''}
-                    </p>
-                  </div>
-                </div>
-                <ChevronRight className="ds-action-chevron" style={{ width: 16, height: 16 }} />
-              </button>
-            )}
-            {data.pendingIssues > 0 && (
-              <button
-                onClick={() => onNavigate?.('maintenance')}
-                className="ds-action-card"
-                style={{ '--action-1': 'var(--ds-warning)', '--action-wash': 'var(--ds-warning-subtle)' } as CSSProperties}
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="ds-action-icon">
-                    <Wrench style={{ width: 18, height: 18 }} />
-                  </div>
-                  <div className="min-w-0">
-                    <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--ds-text-1)' }}>{data.pendingIssues} open maintenance ticket{data.pendingIssues > 1 ? 's' : ''}</p>
-                    <p style={{ fontSize: 12, color: 'var(--ds-text-3)', marginTop: 1 }}>Click to view and assign tickets</p>
-                  </div>
-                </div>
-                <ChevronRight className="ds-action-chevron" style={{ width: 16, height: 16 }} />
-              </button>
-            )}
-            {data.pendingAmount > 0 && overdueCt === 0 && (
-              <button
-                onClick={() => onNavigate?.('payments')}
-                className="ds-action-card"
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="ds-action-icon">
-                    <Clock style={{ width: 18, height: 18 }} />
-                  </div>
-                  <div className="min-w-0">
-                    <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--ds-text-1)' }}>₹{data.pendingAmount.toLocaleString('en-IN')} pending collection</p>
-                    <p style={{ fontSize: 12, color: 'var(--ds-text-3)', marginTop: 1 }}>Review upcoming payments</p>
-                  </div>
-                </div>
-                <ChevronRight className="ds-action-chevron" style={{ width: 16, height: 16 }} />
-              </button>
-            )}
-          </div>
-        </div>
-      )}
-
       {/* ── KPI Cards ───────────────────────── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
         <StatCard
           label="Total Revenue"
           prefix="₹"
@@ -515,8 +445,8 @@ export function Dashboard({ onNavigate }: DashboardProps) {
           icon={CreditCard}
           accent="violet"
           trend={prevRev > 0 ? revDelta : undefined}
-          trendLabel={prevRev > 0 ? `${rangeLabel} · vs prior period` : rangeLabel}
-          meta={`${rangeLabel}`}
+          trendLabel={prevRev > 0 ? 'vs last month' : undefined}
+          meta={`Collected ${rangeLabel}`}
           onClick={() => onNavigate?.('payments')}
         />
         <StatCard
@@ -525,7 +455,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
           value={data.pendingAmount}
           icon={Clock}
           accent="rose"
-          meta={pendingCt > 0 ? `${pendingCt} invoices open` : 'All cleared'}
+          meta={`${pendingCt > 0 ? `${pendingCt} invoices open` : 'All cleared'} · ${rangeLabel}`}
           tag={overdueCt > 0 ? `${overdueCt} Overdue` : undefined}
           onClick={() => onNavigate?.('payments')}
         />
@@ -558,7 +488,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
           <div className="flex items-center justify-between" style={{ marginBottom: 14 }}>
             <div>
               <h2 style={{ fontSize: 14, fontWeight: 600, color: '#0A0A0B', letterSpacing: '-0.01em' }}>Revenue Overview</h2>
-              <p style={{ fontSize: 12, color: '#A1A1AA', marginTop: 1 }}>Collections vs Expected · {rangeLabel}</p>
+              <p style={{ fontSize: 12, color: '#A1A1AA', marginTop: 1 }}>Collections vs Expected · Last 6 months</p>
             </div>
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-1.5">
@@ -578,24 +508,24 @@ export function Dashboard({ onNavigate }: DashboardProps) {
               <div className="ds-chart-summary-item">
                 <div className="ds-chart-summary-label">Collected</div>
                 <div className="ds-chart-summary-value" style={{ color: '#6366F1' }}>
-                  ₹{fmtK(chartSeries.reduce((s, d) => s + (d.revenue ?? 0), 0))}
+                  {fmtK(chartSeries.reduce((s, d) => s + (d.revenue ?? 0), 0))}
                 </div>
               </div>
               <div className="ds-chart-summary-item">
                 <div className="ds-chart-summary-label">Expected</div>
                 <div className="ds-chart-summary-value">
-                  ₹{fmtK(chartSeries.reduce((s, d) => s + (d.target ?? 0), 0))}
+                  {fmtK(chartSeries.reduce((s, d) => s + (d.target ?? 0), 0))}
                 </div>
               </div>
               <div className="ds-chart-summary-item">
                 <div className="ds-chart-summary-label">Gap</div>
                 <div className="ds-chart-summary-value" style={{ color: 'var(--ds-danger)' }}>
-                  ₹{fmtK(Math.max(0, chartSeries.reduce((s, d) => s + (d.target ?? 0) - (d.revenue ?? 0), 0)))}
+                  {fmtK(Math.max(0, chartSeries.reduce((s, d) => s + (d.target ?? 0) - (d.revenue ?? 0), 0)))}
                 </div>
               </div>
               {revDelta !== 0 && (
                 <div className="ds-chart-summary-item">
-                  <div className="ds-chart-summary-label">vs Prev Period</div>
+                  <div className="ds-chart-summary-label">vs Last Month</div>
                   <div className="ds-chart-summary-value" style={{ color: revDelta >= 0 ? 'var(--ds-success)' : 'var(--ds-danger)' }}>
                     {revDelta >= 0 ? '+' : ''}{revDelta.toFixed(1)}%
                   </div>
@@ -689,8 +619,8 @@ export function Dashboard({ onNavigate }: DashboardProps) {
               <div className="ds-empty-icon" style={{ width: 44, height: 44 }}>
                 <Activity style={{ width: 20, height: 20 }} />
               </div>
-              <p className="ds-empty-title" style={{ fontSize: 13 }}>No recent activity</p>
-              <p className="ds-empty-description" style={{ fontSize: 12 }}>Events will appear here as your team works.</p>
+              <p className="ds-empty-title" style={{ fontSize: 13 }}>No recent activity yet</p>
+              <p className="ds-empty-description" style={{ fontSize: 12 }}>Payments, maintenance updates, announcements, and onboarding events will appear here.</p>
             </div>
           )}
         </div>
@@ -842,6 +772,69 @@ export function Dashboard({ onNavigate }: DashboardProps) {
           </div>
         </div>
       </div>
+
+      {/* ── Issues — compact, scannable list (40-50% shorter than the old boxed-card layout) ── */}
+      {(overdueCt > 0 || data.pendingIssues > 0) && (
+        <div className="ds-card" style={{ padding: '10px 14px' }}>
+          <div className="flex items-center justify-between" style={{ marginBottom: 4 }}>
+            <h2 style={{ fontSize: 12, fontWeight: 700, color: '#0A0A0B', letterSpacing: '-0.01em' }}>Issues Needing Attention</h2>
+            <span style={{ fontSize: 10.5, color: '#A1A1AA' }}>
+              {new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })}
+            </span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            {overdueCt > 0 && (
+              <button
+                onClick={() => onNavigate?.('payments')}
+                className="flex items-center justify-between w-full text-left"
+                style={{ padding: '6px 0', borderBottom: data.pendingIssues > 0 ? '1px solid #F4F4F6' : 'none', gap: 10 }}
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <AlertCircle style={{ width: 14, height: 14, color: 'var(--ds-danger)', flexShrink: 0 }} />
+                  <p style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--ds-text-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {overdueCt} overdue payment{overdueCt > 1 ? 's' : ''} —{' '}
+                    <span style={{ color: 'var(--ds-text-3)', fontWeight: 400 }}>
+                      {data.recentPayments.filter(p => p.status === 'overdue').slice(0, 2).map(p => p.tenant).join(', ')}
+                      {overdueCt > 2 ? ` +${overdueCt - 2} more` : ''}
+                    </span>
+                  </p>
+                </div>
+                <ChevronRight style={{ width: 14, height: 14, color: 'var(--ds-text-3)', flexShrink: 0 }} />
+              </button>
+            )}
+            {data.pendingIssues > 0 && (
+              <button
+                onClick={() => onNavigate?.('maintenance')}
+                className="flex items-center justify-between w-full text-left"
+                style={{ padding: '6px 0', borderBottom: (data.pendingAmount > 0 && overdueCt === 0) ? '1px solid #F4F4F6' : 'none', gap: 10 }}
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <Wrench style={{ width: 14, height: 14, color: 'var(--ds-warning)', flexShrink: 0 }} />
+                  <p style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--ds-text-1)' }}>
+                    {data.pendingIssues} open maintenance ticket{data.pendingIssues > 1 ? 's' : ''}
+                  </p>
+                </div>
+                <ChevronRight style={{ width: 14, height: 14, color: 'var(--ds-text-3)', flexShrink: 0 }} />
+              </button>
+            )}
+            {data.pendingAmount > 0 && overdueCt === 0 && (
+              <button
+                onClick={() => onNavigate?.('payments')}
+                className="flex items-center justify-between w-full text-left"
+                style={{ padding: '6px 0', gap: 10 }}
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <Clock style={{ width: 14, height: 14, color: 'var(--ds-accent)', flexShrink: 0 }} />
+                  <p style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--ds-text-1)' }}>
+                    ₹{data.pendingAmount.toLocaleString('en-IN')} pending collection
+                  </p>
+                </div>
+                <ChevronRight style={{ width: 14, height: 14, color: 'var(--ds-text-3)', flexShrink: 0 }} />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
     </div>
   );

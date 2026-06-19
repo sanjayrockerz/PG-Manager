@@ -203,13 +203,14 @@ const buildDemoRevenueChartData = (
   const start = rangeStart ?? new Date(now.getFullYear(), now.getMonth() - 5, 1);
 
   // Build monthly buckets covering the full range
-  const buckets: Array<{ key: string; name: string; revenue: number }> = [];
+  const buckets: Array<{ key: string; name: string; revenue: number; target: number }> = [];
   const cursor = new Date(start.getFullYear(), start.getMonth(), 1);
   while (cursor <= end) {
     buckets.push({
       key: `${cursor.getFullYear()}-${cursor.getMonth()}`,
       name: cursor.toLocaleDateString('en-US', { month: 'short' }),
       revenue: 0,
+      target: 0,
     });
     cursor.setMonth(cursor.getMonth() + 1);
     if (buckets.length > 12) break; // safety cap
@@ -217,24 +218,27 @@ const buildDemoRevenueChartData = (
 
   // Ensure at least 1 bucket
   if (buckets.length === 0) {
-    buckets.push({ key: `${now.getFullYear()}-${now.getMonth()}`, name: now.toLocaleDateString('en-US', { month: 'short' }), revenue: 0 });
+    buckets.push({ key: `${now.getFullYear()}-${now.getMonth()}`, name: now.toLocaleDateString('en-US', { month: 'short' }), revenue: 0, target: 0 });
   }
 
+  // "target" (Expected) is the real amount billed/due that month — not a flat average
+  // of collected revenue, which would make Gap mathematically circular (always ~0
+  // plus rounding noise).
   payments.forEach((payment) => {
-    if (payment.status !== 'paid') return;
-    const reference = new Date(payment.paidDate || payment.dueDate);
-    const bucket = buckets.find((entry) => entry.key === `${reference.getFullYear()}-${reference.getMonth()}`);
-    if (bucket) bucket.revenue += Number(payment.totalAmount) || 0;
-  });
+    const due = new Date(payment.dueDate);
+    const dueBucket = buckets.find((entry) => entry.key === `${due.getFullYear()}-${due.getMonth()}`);
+    if (dueBucket) dueBucket.target += Number(payment.totalAmount) || 0;
 
-  const averageRevenue = buckets.length > 0
-    ? buckets.reduce((sum, entry) => sum + entry.revenue, 0) / buckets.length
-    : 0;
+    if (payment.status !== 'paid') return;
+    const paid = new Date(payment.paidDate || payment.dueDate);
+    const paidBucket = buckets.find((entry) => entry.key === `${paid.getFullYear()}-${paid.getMonth()}`);
+    if (paidBucket) paidBucket.revenue += Number(payment.totalAmount) || 0;
+  });
 
   return buckets.map((entry) => ({
     name: entry.name,
     revenue: entry.revenue,
-    target: Math.round(averageRevenue),
+    target: entry.target,
   }));
 };
 
@@ -290,7 +294,9 @@ const buildDemoDashboardSnapshotFromStore = (
       const d = new Date(a.createdAt);
       return d >= rangeStart && d <= rangeEnd;
     }),
-    revenueChartData: buildDemoRevenueChartData(payments, rangeStart, rangeEnd),
+    // Fixed trailing-6-month trend, independent of the selected date filter — see
+    // the matching live-data comment in supabaseData.ts getDashboardSnapshot.
+    revenueChartData: buildDemoRevenueChartData(payments),
   };
 };
 

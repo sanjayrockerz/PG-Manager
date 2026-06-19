@@ -35,37 +35,9 @@ import type { SMSProviderAdapter } from '../services/smsProvider';
 import { SMS_PROVIDER_ADAPTERS } from '../services/smsProvider';
 import { PAYMENT_GATEWAY_ADAPTERS } from '../services/paymentGateway';
 import { WHATSAPP_PROVIDER_OPTIONS, WHATSAPP_PROVIDER_ADAPTERS, type WhatsAppProviderName } from '../services/whatsappProvider';
+import { PLANS, type PlanCode } from '../constants/plans';
 
-// ─── Plan definitions ──────────────────────────────────────────────────────────
-const PLANS = [
-  {
-    code: 'starter',
-    label: 'Starter',
-    price: 0,
-    propertyLimit: 1,
-    tenantLimit: 15,
-    features: ['1 property', 'Up to 15 tenants', 'Maintenance tickets', 'Basic announcements'],
-  },
-  {
-    code: 'pro',
-    label: 'Pro',
-    price: 999,
-    propertyLimit: Infinity,
-    tenantLimit: Infinity,
-    features: ['Unlimited properties', 'Unlimited tenants', 'WhatsApp messaging', 'Team collaboration (5 seats)', 'Advanced analytics'],
-    highlighted: true,
-  },
-  {
-    code: 'business',
-    label: 'Business',
-    price: 2499,
-    propertyLimit: Infinity,
-    tenantLimit: Infinity,
-    features: ['Everything in Pro', 'Priority support', 'Custom branding', '20 team seats', 'API access'],
-  },
-] as const;
-
-type PlanCode = typeof PLANS[number]['code'];
+// Plan catalog is shared with Sidebar's plan/usage card — see src/constants/plans.ts.
 
 // ─── Coupon types ────────────────────────────────────────────────────────────
 interface CouponResult {
@@ -955,7 +927,7 @@ export function Settings() {
       )}
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="mb-6 bg-white border border-gray-200 h-auto gap-1 p-1 overflow-x-auto flex-nowrap">
+        <TabsList className="mb-6 w-full max-w-full bg-white border border-gray-200 h-auto gap-1 p-1 overflow-x-auto flex-nowrap justify-start">
           {[
             { value: 'profile',      icon: User,          label: 'Profile',     group: 'workspace' },
             { value: 'payment',      icon: CreditCard,    label: 'Payment',     group: 'billing' },

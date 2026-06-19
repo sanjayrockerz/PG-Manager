@@ -5,6 +5,7 @@ import {
   Crown, Users, CreditCard, Wrench, AlertCircle, Clock,
 } from 'lucide-react';
 import { Button } from './ui/button';
+import { KpiCard } from './ui/KpiCard';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { InternationalPhoneField } from './ui/InternationalPhoneField';
@@ -163,13 +164,6 @@ export function Properties({ onNavigate }: PropertiesV2Props) {
   const totalActiveTenants = Object.values(propertySummary).reduce((s, ps) => s + ps.activeTenants, 0);
   const totalOverdue = Object.values(propertySummary).reduce((s, ps) => s + ps.overdueTenants, 0);
   const totalMaintenance = Object.values(propertySummary).reduce((s, ps) => s + ps.openMaintenance, 0);
-
-  const stats = [
-    { label: 'Properties', value: properties.length, icon: Building2, color: '#6366F1' },
-    { label: 'Active Tenants', value: totalActiveTenants, icon: Users, color: '#059669' },
-    { label: 'Total Rooms', value: totalRooms, icon: Home, color: '#3B82F6' },
-    { label: 'Open Tickets', value: totalMaintenance, icon: Wrench, color: totalMaintenance > 0 ? '#D97706' : '#A1A1AA' },
-  ];
 
   const handleAddProperty = async () => {
     if (!addForm.name || !addForm.address || !addForm.city) {
@@ -356,22 +350,40 @@ export function Properties({ onNavigate }: PropertiesV2Props) {
       </div>
 
       {/* ── Portfolio KPIs ──────────────────── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
-        {stats.map((stat) => {
-          const Icon = stat.icon;
-          const iconBg = stat.color === '#6366F1' ? '#EEF2FF' : stat.color === '#059669' ? '#ECFDF5' : stat.color === '#3B82F6' ? '#EFF6FF' : '#FFFBEB';
-          return (
-            <div key={stat.label} className="ds-card flex items-center justify-between" style={{ padding: '12px 14px', gap: 10 }}>
-              <div className="flex-1 min-w-0">
-                <p style={{ fontSize: 11, fontWeight: 600, color: '#71717A', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 4 }}>{stat.label}</p>
-                <p style={{ fontSize: 20, fontWeight: 700, color: '#0A0A0B', letterSpacing: '-0.03em', lineHeight: 1 }}>{stat.value}</p>
-              </div>
-              <div className="flex-shrink-0 flex items-center justify-center rounded-lg" style={{ width: 32, height: 32, background: iconBg }}>
-                <Icon style={{ width: 14, height: 14, color: stat.color, strokeWidth: 1.75 }} />
-              </div>
-            </div>
-          );
-        })}
+      <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+        <KpiCard
+          label="Properties"
+          value={properties.length}
+          format={(n) => Math.round(n).toString()}
+          icon={Building2}
+          accent="violet"
+          meta={`${totalRooms} rooms · ${totalBeds} beds`}
+        />
+        <KpiCard
+          label="Active Tenants"
+          value={totalActiveTenants}
+          format={(n) => Math.round(n).toString()}
+          icon={Users}
+          accent="blue"
+          meta="Across all properties"
+          tag={totalOverdue > 0 ? `${totalOverdue} Overdue` : undefined}
+        />
+        <KpiCard
+          label="Total Rooms"
+          value={totalRooms}
+          format={(n) => Math.round(n).toString()}
+          icon={Home}
+          accent="cyan"
+          meta={`${totalBeds} beds total`}
+        />
+        <KpiCard
+          label="Open Tickets"
+          value={totalMaintenance}
+          format={(n) => Math.round(n).toString()}
+          icon={Wrench}
+          accent={totalMaintenance > 0 ? 'amber' : 'emerald'}
+          meta={totalMaintenance > 0 ? 'Needs attention' : 'All clear'}
+        />
       </div>
 
       {/* ── Properties list ─────────────────── */}

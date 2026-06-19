@@ -2127,6 +2127,24 @@ function mapAgreement(row: AgreementRow): AgreementRecord {
   };
 }
 
+// Replace the owner's signature block inside a stored agreement's HTML. Agreements
+// created after the `data-sig-slot="owner"` wrapper was introduced are matched
+// directly; older agreements never got that wrapper, so we fall back to matching the
+// structural "Owner / Authorized Signatory" sig-block by its surrounding markup. The
+// fallback's replacement re-wraps the slot in `data-sig-slot="owner"`, migrating the
+// agreement to the fast-path format for any future signature update.
+function replaceOwnerSignatureInHtml(html: string, newOwnerSlotHtml: string): string {
+  const markerPattern = /<div data-sig-slot="owner">[\s\S]*?<\/div>/;
+  if (markerPattern.test(html)) {
+    return html.replace(markerPattern, newOwnerSlotHtml);
+  }
+  const legacyPattern = /(<p>Owner\s*\/\s*Authorized Signatory<\/p>\s*<strong>[\s\S]*?<\/strong>)[\s\S]*?(<\/div>)/;
+  if (legacyPattern.test(html)) {
+    return html.replace(legacyPattern, (_match, before, after) => `${before}${newOwnerSlotHtml}${after}`);
+  }
+  return html;
+}
+
 // Refresh the embedded owner signature on every agreement that hasn't been executed
 // (countersigned by the tenant) yet, whenever the owner updates their signature vault.
 // Locked/executed agreements are legal records of what was actually signed and are
@@ -2170,9 +2188,7 @@ async function propagateOwnerSignatureToAgreements(
       ...(row.status === 'draft' ? { status: 'pending_tenant_signature' } : {}),
     };
     if (row.html_content) {
-      patch.html_content = /<div data-sig-slot="owner">[\s\S]*?<\/div>/.test(row.html_content)
-        ? row.html_content.replace(/<div data-sig-slot="owner">[\s\S]*?<\/div>/, newOwnerSlot)
-        : row.html_content;
+      patch.html_content = replaceOwnerSignatureInHtml(row.html_content, newOwnerSlot);
     }
     const { error: updError } = await supabase.from('agreements').update(patch).eq('id', row.id);
     if (updError) {
@@ -5905,37 +5921,44 @@ export const supabaseOwnerDataApi = {
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
         .slice(0, 6);
 
-      // Build chart buckets covering the range (capped at 12 months)
-      const monthBuckets: Array<{ key: string; name: string; revenue: number }> = [];
-      const bucketCursor = new Date(rangeStart.getFullYear(), rangeStart.getMonth(), 1);
-      while (bucketCursor <= rangeEnd && monthBuckets.length < 12) {
-        monthBuckets.push({
-          key: `${bucketCursor.getFullYear()}-${bucketCursor.getMonth()}`,
-          name: toMonthName(bucketCursor),
+      // Revenue Overview is a fixed trailing-6-month trend, independent of the
+      // top-of-page date filter — that filter still drives monthlyRevenue/pendingAmount
+      // above, but the trend chart always gives owners a stable multi-month baseline
+      // instead of collapsing to a single bar when "Today"/"This Month" is selected.
+      // "target" (Expected) must be the real amount actually billed/due that month —
+      // sum of every payment's totalAmount keyed by its due date, regardless of status.
+      // It must NOT be derived from collected revenue itself (e.g. a flat average of
+      // "revenue"), or Gap becomes mathematically circular — always ~0 plus rounding
+      // noise, which looks like fake data because it is.
+      const chartBuckets: Array<{ key: string; name: string; revenue: number; target: number }> = [];
+      const cursor = new Date(now.getFullYear(), now.getMonth() - 5, 1);
+      while (chartBuckets.length < 6) {
+        chartBuckets.push({
+          key: `m-${cursor.getFullYear()}-${cursor.getMonth()}`,
+          name: toMonthName(cursor),
           revenue: 0,
+          target: 0,
         });
-        bucketCursor.setMonth(bucketCursor.getMonth() + 1);
-      }
-      if (monthBuckets.length === 0) {
-        monthBuckets.push({ key: `${rangeEnd.getFullYear()}-${rangeEnd.getMonth()}`, name: toMonthName(rangeEnd), revenue: 0 });
+        cursor.setMonth(cursor.getMonth() + 1);
       }
 
       payments.forEach((payment) => {
+        const dueDate = new Date(payment.dueDate);
+        const dueKey = `m-${dueDate.getFullYear()}-${dueDate.getMonth()}`;
+        const dueBucket = chartBuckets.find((entry) => entry.key === dueKey);
+        if (dueBucket) dueBucket.target += payment.totalAmount;
+
         if (payment.status !== 'paid') return;
-        const referenceDate = payment.paidDate ? new Date(payment.paidDate) : new Date(payment.dueDate);
-        const key = `${referenceDate.getFullYear()}-${referenceDate.getMonth()}`;
-        const bucket = monthBuckets.find((entry) => entry.key === key);
-        if (bucket) bucket.revenue += payment.totalAmount;
+        const paidDate = payment.paidDate ? new Date(payment.paidDate) : dueDate;
+        const paidKey = `m-${paidDate.getFullYear()}-${paidDate.getMonth()}`;
+        const paidBucket = chartBuckets.find((entry) => entry.key === paidKey);
+        if (paidBucket) paidBucket.revenue += payment.totalAmount;
       });
 
-      const averageRevenue = monthBuckets.length > 0
-        ? monthBuckets.reduce((sum, bucket) => sum + bucket.revenue, 0) / monthBuckets.length
-        : 0;
-
-      const revenueChartData = monthBuckets.map((bucket) => ({
+      const revenueChartData = chartBuckets.map((bucket) => ({
         name: bucket.name,
         revenue: bucket.revenue,
-        target: Math.round(averageRevenue),
+        target: bucket.target,
       }));
 
       return {
@@ -8532,8 +8555,8 @@ export const supabaseLifecycleApi = {
           ? `<img src="${input.signatureImage}" style="height:54px;max-width:220px;margin-top:6px;display:block;" alt="Owner signature" />`
           : `<span style="font-family:cursive,serif;font-size:24px;color:#1a1a1a;">${esc(input.signatureName.trim())}</span>`;
         const dateLine = `<p style="font-size:11px;color:#555;margin-top:4px;">Signed: ${new Date(now).toLocaleDateString('en-IN')}</p>`;
-        patch.html_content = current.html_content.replace(
-          /<div data-sig-slot="owner">[\s\S]*?<\/div>/,
+        patch.html_content = replaceOwnerSignatureInHtml(
+          current.html_content,
           `<div data-sig-slot="owner">${sigHtml}${dateLine}</div>`,
         );
       }
