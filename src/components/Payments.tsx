@@ -7,13 +7,13 @@ import { toast } from 'sonner';
 import {
   CheckCircle2, Clock, AlertCircle, Plus, MessageCircle,
   Download, IndianRupee, Calendar, Save, Receipt,
-  Loader2, TrendingUp, ChevronDown, Filter, ChevronLeft, ChevronRight, Lock,
+  Loader2, TrendingUp, ChevronDown, ChevronLeft, ChevronRight, Lock,
   Target, Percent,
 } from 'lucide-react';
 import { KpiCard } from './ui/KpiCard';
 import { useProperty } from '../contexts/PropertyContext';
 import { supabase } from '../lib/supabase';
-import { isDemoModeEnabled, getPayments, getTenants, updatePaymentStatusRecord, addPaymentChargeRecord, getTenantById, patchPaymentCache, invalidatePaymentCache } from '../services/dataService';
+import { isDemoModeEnabled, getPayments, getTenants, updatePaymentStatusRecord, addPaymentChargeRecord, getTenantById, patchPaymentCache, invalidatePaymentCache, ensureNextMonthPaymentsGenerated } from '../services/dataService';
 import { supabaseOwnerDataApi } from '../services/supabaseData';
 import type { PaymentRecord, PaymentStatus, TenantRecord } from '../services/supabaseData';
 import { PaymentDocumentDialog } from './ui/PaymentDocumentDialog';
@@ -143,8 +143,13 @@ export function Payments({ onNavigate }: PaymentsProps) {
   const reload = useCallback(async () => {
     setLoading(true);
     try {
+      // Bill every currently-occupied tenant for next month in advance (like a
+      // normal PG ledger) before loading — best-effort, never blocks the page.
+      await ensureNextMonthPaymentsGenerated(selectedProperty).catch((err) => {
+        console.warn('Next-month payment generation failed (non-blocking):', err);
+      });
       // Tenants are loaded alongside payments so we can project upcoming-month
-      // invoices for active tenants that have not been generated yet.
+      // invoices for any tenant the generation step above could not cover yet.
       const [paymentData, tenantData] = await Promise.all([
         getPayments(selectedProperty),
         getTenants(selectedProperty).catch(() => [] as TenantRecord[]),
@@ -462,9 +467,9 @@ export function Payments({ onNavigate }: PaymentsProps) {
             border: `1px solid ${STATUS_STYLE[payment.status].border}`,
           }}
         >
-          <option value="pending">Pending</option>
-          <option value="overdue">Overdue</option>
-          <option value="paid">Paid</option>
+          <option value="pending" style={{ background: STATUS_STYLE.pending.bg, color: STATUS_STYLE.pending.color }}>Pending</option>
+          <option value="overdue" style={{ background: STATUS_STYLE.overdue.bg, color: STATUS_STYLE.overdue.color }}>Overdue</option>
+          <option value="paid" style={{ background: STATUS_STYLE.paid.bg, color: STATUS_STYLE.paid.color }}>Paid</option>
         </select>
         <ChevronDown style={{ width: 10, height: 10, position: 'absolute', right: 6, pointerEvents: 'none', color: STATUS_STYLE[payment.status].color }} />
       </div>
@@ -573,8 +578,7 @@ export function Payments({ onNavigate }: PaymentsProps) {
           className="flex items-center justify-between flex-wrap gap-3 sticky top-0 z-10 bg-white"
           style={{ padding: '8px 12px', borderBottom: '1px solid #F4F4F6' }}
         >
-          <div className="ds-tab-bar" style={{ flexShrink: 0 }}>
-            <Filter style={{ width: 12, height: 12, color: 'var(--ds-text-tertiary)', marginRight: 2, flexShrink: 0 }} />
+          <div className="ds-tab-bar" style={{ flexShrink: 0, overflowX: 'auto', flexWrap: 'nowrap' }}>
             {(['all', 'paid', 'pending', 'overdue'] as const).map((s) => (
               <button
                 key={s}
@@ -592,20 +596,6 @@ export function Payments({ onNavigate }: PaymentsProps) {
             ))}
           </div>
           <div className="flex items-center gap-3">
-            {overdueQueue.length > 0 && (
-              <div className="flex items-center gap-1.5">
-                {[
-                  { label: '>30d', count: overdueQueue.filter((p) => ageBucket(p.dueDate).days > 30).length, cls: 'ds-badge ds-badge-danger' },
-                  { label: '>15d', count: overdueQueue.filter((p) => ageBucket(p.dueDate).days > 15 && ageBucket(p.dueDate).days <= 30).length, cls: 'ds-badge ds-badge-warning' },
-                  { label: '>7d',  count: overdueQueue.filter((p) => ageBucket(p.dueDate).days > 7  && ageBucket(p.dueDate).days <= 15).length, cls: 'ds-badge ds-badge-warning' },
-                ].map(({ label, count, cls }) => count > 0 ? (
-                  <span key={label} className={cls} style={{ cursor: 'pointer' }}
-                    onClick={() => setFilterStatus('overdue')}>
-                    {count} {label}
-                  </span>
-                ) : null)}
-              </div>
-            )}
             <p style={{ fontSize: 11, color: '#A1A1AA' }}>{filteredPayments.length} records</p>
           </div>
         </div>

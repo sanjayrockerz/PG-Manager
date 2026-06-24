@@ -29,15 +29,14 @@ const anonKey = process.env['VITE_SUPABASE_ANON_KEY'] ?? '';
 
 const client = createClient(url, anonKey);
 
-const testUsers = [
-  { email: 'admin@rentcare.com', password: 'RentCare#Admin2026!' },
-  { email: 'admin.demo@pgmanager.app', password: 'RentCare#Admin2026!' },
-  { email: 'admin.demo@pgmanager.app', password: 'RentCare#Demo2026!' },
-  { email: 'owner.demo@pgmanager.app', password: 'RentCare#Demo2026!' },
-  { email: 'owner.demo@pgmanager.app', password: 'RentCare#Owner2026!' },
-  { email: 'admin.demo@rentcare.demo', password: 'RentCare#Admin2026!' },
-  { email: 'admin.demo@rentcare.demo', password: 'RentCare#Demo2026!' }
-];
+// Set TEST_ACCOUNTS_JSON in your environment to a JSON array of
+// {"email":"...","password":"..."} objects — never hardcode real credentials here.
+const testUsersRaw = process.env['TEST_ACCOUNTS_JSON'];
+if (!testUsersRaw) {
+  console.error('Set TEST_ACCOUNTS_JSON (a JSON array of {email,password}) before running this script.');
+  process.exit(1);
+}
+const testUsers: { email: string; password: string }[] = JSON.parse(testUsersRaw);
 
 async function run() {
   for (const user of testUsers) {

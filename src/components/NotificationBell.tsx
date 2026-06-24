@@ -151,7 +151,7 @@ export function NotificationBell() {
           className="absolute right-0 rounded-xl overflow-hidden"
           style={{
             top: 38,
-            width: 320,
+            width: 'min(320px, calc(100vw - 24px))',
             zIndex: 9999,
             background: '#FFFFFF',
             border: '1px solid #E4E4E7',

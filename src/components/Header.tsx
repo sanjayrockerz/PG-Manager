@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Building2, ChevronDown, PanelLeft, Menu, Search } from 'lucide-react';
+import { Building2, ChevronDown, PanelLeft, Menu, Search, Eye } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { isPlatformAdminRole } from '../utils/roles';
 import { isDemoModeEnabled } from '../services/dataService';
@@ -46,9 +46,14 @@ export function Header({ setSidebarOpen, sidebarCollapsed, onToggleSidebar, curr
   return (
     <>
       {impersonatedOwnerId && (
-        <div className="bg-blue-600 text-white text-xs font-medium py-1.5 px-4 flex items-center justify-center gap-4 z-40 relative">
-          <span>You are viewing this portal as an impersonated owner.</span>
-          <button onClick={handleStopImpersonating} className="bg-white/20 hover:bg-white/30 px-3 py-1 rounded transition-colors">
+        <div className="bg-gradient-to-r from-indigo-600 via-violet-600 to-indigo-700 text-white text-xs font-semibold py-2 px-6 flex items-center justify-between gap-4 z-40 relative shadow-sm animate-in slide-in-from-top duration-300">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping flex-shrink-0" />
+            <Eye className="w-3.5 h-3.5 text-indigo-200" />
+            <span className="tracking-wide">Impersonation Session: Viewing portal as <strong>{user?.name || 'Owner'}</strong> ({user?.email})</span>
+            <span className="text-[9px] bg-white/20 text-white px-2 py-0.5 rounded font-bold uppercase tracking-wider">Read-Only Mode</span>
+          </div>
+          <button onClick={handleStopImpersonating} className="bg-white text-indigo-700 hover:bg-indigo-50 px-3.5 py-1 rounded-lg transition-all font-semibold shadow-sm text-xs cursor-pointer">
             Return to Admin
           </button>
         </div>

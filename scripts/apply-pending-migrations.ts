@@ -25,17 +25,26 @@ if (!pass) {
 const escapedPass = encodeURIComponent(pass);
 const dbUrl = `postgresql://postgres.krkzklxfczukvllhucsg:${escapedPass}@aws-1-ap-northeast-2.pooler.supabase.com:5432/postgres?sslmode=require`;
 
-const sqlPath = resolve(__dir, '..', 'supabase', 'migrations', '20260620_owner_email_templates.sql');
+const migrations = [
+  '20260619_plans_coupons_and_offers.sql',
+  '20260620_owner_email_templates.sql',
+];
 
-// Run via supabase.exe db query -f
-const cmd = `"${resolve(__dir, '..', '.tools', 'supabase', 'supabase.exe')}" db query -f "${sqlPath}" --db-url "${dbUrl}"`;
+const cliPath = resolve(__dir, '..', '.tools', 'supabase', 'supabase.exe');
 
-try {
-  console.log('Running migration...');
-  const out = execSync(cmd, { encoding: 'utf8' });
-  console.log('STDOUT:', out);
-} catch (err: any) {
-  console.error('Error applying migration:', err.message);
-  if (err.stdout) console.log('STDOUT:', err.stdout);
-  if (err.stderr) console.log('STDERR:', err.stderr);
+for (const migration of migrations) {
+  const sqlPath = resolve(__dir, '..', 'supabase', 'migrations', migration);
+  const cmd = `"${cliPath}" db query -f "${sqlPath}" --db-url "${dbUrl}"`;
+  console.log(`\nApplying ${migration}...`);
+  try {
+    const out = execSync(cmd, { encoding: 'utf8' });
+    console.log('STDOUT:', out);
+  } catch (err: any) {
+    console.error(`Error applying ${migration}:`, err.message);
+    if (err.stdout) console.log('STDOUT:', err.stdout);
+    if (err.stderr) console.log('STDERR:', err.stderr);
+    process.exit(1);
+  }
 }
+
+console.log('\nAll pending migrations applied successfully!');

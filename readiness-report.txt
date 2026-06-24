@@ -1,7 +1,7 @@
 ╔══════════════════════════════════════════╗
 ║   PRODUCTION READINESS REPORT            ║
 ╚══════════════════════════════════════════╝
-Generated : 2026-06-08T10:37:05.372Z
+Generated : 2026-06-19T11:25:25.015Z
 Auth      : HEALTHY
 
 PASS     Owner Portal
@@ -28,4 +28,16 @@ PASS     Admin Portal
   ✓ Admin Support
   ✓ Platform Activity
 
-All infrastructure checks passed. Platform is production-ready.
+MISSING TABLES:
+  - owner_email_templates
+  - owner_email_template_versions
+
+MISSING COLUMNS:
+  - owner_settings.branding  [20260620_owner_email_templates]
+
+ACTION REQUIRED — apply these files in Supabase Dashboard > SQL Editor:
+  1. supabase/migrations/20260530_production_bootstrap.sql
+  2. supabase/migrations/20260530_admin_portal_v2.sql
+  3. Attach handle_new_auth_user trigger on auth.users
+
+Both migration files are idempotent — safe to run multiple times.

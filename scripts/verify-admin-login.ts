@@ -33,10 +33,15 @@ loadEnvFile(resolve(__dir, '..', '.env.local'));
 const url = process.env['VITE_SUPABASE_URL'] ?? '';
 const anonKey = process.env['VITE_SUPABASE_ANON_KEY'] ?? '';
 const email = process.env['ADMIN_EMAIL'] ?? 'admin@rentcare.com';
-const password = process.env['ADMIN_PASSWORD'] ?? 'RentCare#Admin2026!';
+const password = process.env['ADMIN_PASSWORD'];
 
 if (!url || !anonKey) {
   console.error('Missing VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY in .env.local');
+  process.exit(1);
+}
+
+if (!password) {
+  console.error("Missing ADMIN_PASSWORD. Run with ADMIN_PASSWORD='...' npm run verify:admin-login — never hardcode it in source.");
   process.exit(1);
 }
 

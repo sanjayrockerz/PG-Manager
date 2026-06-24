@@ -95,24 +95,28 @@ export function Rooms() {
       ) : (
         <>
           {/* ── Stat strip ──────────────────── */}
-          <div className="ds-card flex items-center" style={{ padding: 0, overflow: 'hidden' }}>
+          <div className="ds-card grid grid-cols-2 sm:flex sm:items-center" style={{ padding: 0, overflow: 'hidden' }}>
             {[
               { label: 'Total Rooms', value: stats.total,       icon: Bed,        iconBg: '#EEF2FF', iconColor: '#6366F1' },
               { label: 'Occupied',    value: stats.occupied,    icon: DoorClosed,  iconBg: '#ECFDF5', iconColor: '#059669' },
               { label: 'Vacant',      value: stats.vacant,      icon: DoorOpen,    iconBg: '#F4F4F6', iconColor: '#52525B' },
               { label: 'Maintenance', value: stats.maintenance, icon: Grid3x3,    iconBg: '#FFFBEB', iconColor: '#D97706' },
             ].map(({ label, value, icon: Icon, iconBg, iconColor }, i, arr) => (
-              <div key={label} className="flex items-center" style={{ flex: 1 }}>
-                <div style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 10, flex: 1 }}>
+              <div
+                key={label}
+                className={`flex items-center ${i % 2 === 0 ? 'border-r border-[#F1F1F3] sm:border-r-0' : ''} ${i < 2 ? 'border-b border-[#F1F1F3] sm:border-b-0' : ''}`}
+                style={{ flex: 1, minWidth: 0 }}
+              >
+                <div style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 }}>
                   <div style={{ width: 32, height: 32, borderRadius: 8, background: iconBg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                     <Icon style={{ width: 14, height: 14, color: iconColor }} />
                   </div>
-                  <div>
-                    <p style={{ fontSize: 10, color: '#A1A1AA', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>{label}</p>
+                  <div style={{ minWidth: 0 }}>
+                    <p style={{ fontSize: 10, color: '#A1A1AA', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</p>
                     <p style={{ fontSize: 18, fontWeight: 700, color: '#0A0A0B', fontVariantNumeric: 'tabular-nums' }}>{value}</p>
                   </div>
                 </div>
-                {i < arr.length - 1 && <div style={{ width: 1, height: 36, background: '#F1F1F3', flexShrink: 0 }} />}
+                {i < arr.length - 1 && <div className="hidden sm:block" style={{ width: 1, height: 36, background: '#F1F1F3', flexShrink: 0 }} />}
               </div>
             ))}
           </div>

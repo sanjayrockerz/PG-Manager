@@ -226,6 +226,27 @@
   line-height: 1.2;
 }
 
+/* Shared back-button for drill-down headers (Building View, Audit Log, etc.) —
+   one structure everywhere so back navigation doesn't look different per section. */
+.ds-back-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  border: 1px solid #E4E4E7;
+  background: #fff;
+  color: #71717A;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.ds-back-btn:hover {
+  background: #FAFAFA;
+  color: #18181B;
+}
+
 .ds-section-label {
   font-size: 20px;
   font-weight: 600;

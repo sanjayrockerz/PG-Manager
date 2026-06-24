@@ -16,6 +16,8 @@ import {
   Bell,
   ChevronRight,
   Building2,
+  Layers,
+  Tag,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -23,6 +25,8 @@ export type AdminNavId =
   | 'dashboard'
   | 'owners'
   | 'subscriptions'
+  | 'plans'
+  | 'offers-coupons'
   | 'transactions'
   | 'analytics'
   | 'support'
@@ -65,6 +69,8 @@ function buildGroups(notificationCount: number): AdminNavGroup[] {
       label: 'REVENUE',
       items: [
         { id: 'subscriptions', label: 'Subscriptions', icon: Package },
+        { id: 'plans', label: 'Plans Catalog', icon: Layers },
+        { id: 'offers-coupons', label: 'Offers & Coupons', icon: Tag },
         { id: 'transactions', label: 'Transactions', icon: CreditCard },
       ],
     },

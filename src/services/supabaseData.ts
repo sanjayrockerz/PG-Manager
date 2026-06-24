@@ -352,7 +352,7 @@ interface OwnerSubscriptionRow {
   id: string;
   owner_id: string;
   plan_code: string;
-  status: 'trialing' | 'active' | 'past_due' | 'cancelled';
+  status: 'trialing' | 'active' | 'paused' | 'past_due' | 'cancelled';
   billing_cycle: 'monthly' | 'yearly';
   amount: number | string;
   currency: string;
@@ -395,6 +395,7 @@ interface OwnerSettingsRow {
   owner_id: string;
   pg_rules: JsonValue;
   whatsapp_settings: JsonValue;
+  branding?: JsonValue;
 }
 
 export interface AppUser {
@@ -802,7 +803,7 @@ export interface OwnerSubscriptionRecord {
   id: string;
   ownerId: string;
   planCode: string;
-  status: 'trialing' | 'active' | 'past_due' | 'cancelled';
+  status: 'trialing' | 'active' | 'paused' | 'past_due' | 'cancelled';
   billingCycle: 'monthly' | 'yearly';
   amount: number;
   currency: string;
@@ -930,7 +931,55 @@ export interface OwnerSettingsRecord {
       config: Record<string, string>;
     };
   };
+  branding?: {
+    logoUrl?: string;
+    primaryColor?: string;
+    footerText?: string;
+  };
 }
+
+export interface EmailTemplateRecord {
+  templateKey: string;
+  subject: string;
+  body: string;
+  version: number;
+  createdAt?: string;
+}
+
+export const DEFAULT_EMAIL_TEMPLATES: Record<string, { subject: string; body: string }> = {
+  tenant_invitation: {
+    subject: 'Welcome to your PG! Complete your onboarding',
+    body: 'Hi {{tenant_name}},\n\nWelcome to {{property_name}}! We are excited to have you. Please click the link below to verify your account and complete your profile onboarding:\n\n{{magic_link}}\n\nRegards,\n{{owner_name}}'
+  },
+  agreement_signature: {
+    subject: 'Action Required: Sign your Rental Agreement',
+    body: 'Hi {{tenant_name}},\n\nYour rental agreement for Room {{room_number}} at {{property_name}} is ready for signing. Please click the link below to review and sign the document online:\n\n{{agreement_link}}\n\nRegards,\n{{owner_name}}'
+  },
+  payment_reminder: {
+    subject: 'Rent Due Reminder - {{property_name}}',
+    body: 'Hi {{tenant_name}},\n\nThis is a friendly reminder that your rent of ₹{{due_amount}} for Room {{room_number}} is due on {{due_date}}.\n\nYou can make the payment online here:\n{{payment_link}}\n\nRegards,\n{{owner_name}}'
+  },
+  overdue_reminder: {
+    subject: 'URGENT: Rent Overdue - {{property_name}}',
+    body: 'Hi {{tenant_name}},\n\nYour rent of ₹{{due_amount}} for Room {{room_number}} was due on {{due_date}} and is now overdue.\n\nPlease clear the outstanding amount immediately using this link:\n{{payment_link}}\n\nRegards,\n{{owner_name}}'
+  },
+  payment_receipt: {
+    subject: 'Rent Receipt - {{property_name}}',
+    body: 'Hi {{tenant_name}},\n\nThank you for your payment of ₹{{due_amount}} for Room {{room_number}}. Your receipt is available below:\n\n{{payment_link}}\n\nRegards,\n{{owner_name}}'
+  },
+  maintenance_update: {
+    subject: 'Maintenance Ticket Update - {{property_name}}',
+    body: 'Hi {{tenant_name}},\n\nThis is an update regarding your maintenance request for Room {{room_number}}. The ticket status has been updated. Please log in to your tenant portal to view details.\n\nRegards,\n{{owner_name}}'
+  },
+  vacate_notice: {
+    subject: 'Vacate Notice Confirmation - {{property_name}}',
+    body: 'Hi {{tenant_name}},\n\nThis confirms receipt of your notice to vacate Room {{room_number}} on {{due_date}}.\n\nIf you have any questions or require settlement details, please reach out.\n\nRegards,\n{{owner_name}}'
+  },
+  team_invitation: {
+    subject: 'Invitation to join {{owner_name}}\'s Team',
+    body: 'Hi there,\n\nYou have been invited to join the management team of {{owner_name}} for {{property_name}}.\n\nPlease click the link below to accept the invitation and set up your account:\n\n{{magic_link}}\n\nRegards,\n{{owner_name}}'
+  }
+};
 
 export type InviteStatus = 'pending' | 'accepted' | 'revoked' | 'expired';
 
@@ -1085,6 +1134,14 @@ function isMissingRelationError(error: unknown, relation: string): boolean {
 
 function isValidEmailAddress(value: string): boolean {
   return EMAIL_PATTERN.test(value.trim());
+}
+
+// Substitutes {{var}} placeholders in an owner-configured WhatsApp template
+// (see TEMPLATE_VARS in Settings.tsx). Unknown placeholders are left as-is.
+function renderWhatsAppTemplate(template: string, vars: Record<string, string>): string {
+  return template.replace(/\{\{(\w+)\}\}/g, (match, key: string) =>
+    Object.prototype.hasOwnProperty.call(vars, key) ? vars[key] : match,
+  );
 }
 
 function isValidStoredPhoneNumber(value: string): boolean {
@@ -2512,6 +2569,11 @@ export const defaultSettings: OwnerSettingsRecord = {
     paymentGateway: { gateway: 'manual', enabled: false, config: {} },
     whatsappProvider: { provider: 'none', enabled: false, config: {} },
   },
+  branding: {
+    logoUrl: '',
+    primaryColor: '#4F46E5',
+    footerText: '',
+  },
 };
 
 function parseOwnerSettings(row: OwnerSettingsRow | null): OwnerSettingsRecord {
@@ -2526,6 +2588,7 @@ function parseOwnerSettings(row: OwnerSettingsRow | null): OwnerSettingsRecord {
   const wsSecurity = (ws.security as Record<string, unknown> | undefined) ?? {};
   const wsPayment = (ws.paymentSettings as Record<string, unknown> | undefined) ?? {};
   const wsAdditional = (ws.additionalSettings as Record<string, unknown> | undefined) ?? {};
+  const branding = (row.branding ?? {}) as Record<string, unknown>;
 
   return {
     pgRules,
@@ -2599,6 +2662,11 @@ function parseOwnerSettings(row: OwnerSettingsRow | null): OwnerSettingsRecord {
         },
       };
     })(),
+    branding: {
+      logoUrl: String(branding.logoUrl ?? ''),
+      primaryColor: String(branding.primaryColor ?? '#4F46E5'),
+      footerText: String(branding.footerText ?? ''),
+    },
   };
 }
 
@@ -4223,6 +4291,66 @@ export const supabaseOwnerDataApi = {
     return filteredRows.map(mapPayment);
   },
 
+  // Proactively bills every currently-occupied tenant for next calendar month —
+  // mirrors how a normal PG ledger works (rent for the upcoming cycle is raised
+  // in advance, not only after the current month is settled). Idempotent: skips
+  // any tenant who already has a payment row for that due date. Scoped to the
+  // given property (or all properties the caller can see).
+  async ensureNextMonthPaymentsGenerated(propertyId: string | 'all' = 'all'): Promise<number> {
+    const tenants = await this.listTenants(propertyId);
+    const billableTenants = tenants.filter((t) => isTenantCurrentlyInRoom(t.status));
+    if (billableTenants.length === 0) {
+      return 0;
+    }
+
+    const now = new Date();
+    const targetYear = now.getFullYear();
+    const targetMonthIndex = now.getMonth() + 1; // next month
+
+    const candidates = billableTenants.map((tenant) => {
+      const dueDay = Math.min(Math.max(tenant.rentDueDate || 1, 1), 28);
+      const dueDate = new Date(targetYear, targetMonthIndex, dueDay);
+      return { tenant, dueDateStr: dueDate.toISOString().split('T')[0] };
+    });
+
+    const { data: existing, error: existingError } = await supabase
+      .from('payments')
+      .select('tenant_id,due_date')
+      .in('tenant_id', candidates.map((c) => c.tenant.id))
+      .returns<Array<{ tenant_id: string; due_date: string }>>();
+
+    if (existingError) {
+      throw existingError;
+    }
+
+    const existingKeys = new Set((existing ?? []).map((p) => `${p.tenant_id}::${p.due_date}`));
+    const toInsert = candidates
+      .filter((c) => !existingKeys.has(`${c.tenant.id}::${c.dueDateStr}`))
+      .map((c) => ({
+        owner_id: c.tenant.ownerId,
+        tenant_id: c.tenant.id,
+        property_id: c.tenant.propertyId,
+        tenant_name: c.tenant.name,
+        room: c.tenant.room,
+        monthly_rent: c.tenant.rent,
+        extra_charges: 0,
+        total_amount: c.tenant.rent,
+        due_date: c.dueDateStr,
+        status: 'pending' as PaymentStatus,
+      }));
+
+    if (toInsert.length === 0) {
+      return 0;
+    }
+
+    const { error: insertError } = await supabase.from('payments').insert(toInsert);
+    if (insertError) {
+      throw insertError;
+    }
+
+    return toInsert.length;
+  },
+
   async listPaymentsForTenant(tenantId: string): Promise<PaymentRecord[]> {
     const context = await getCurrentUserContext();
 
@@ -5642,14 +5770,34 @@ export const supabaseOwnerDataApi = {
   async getOwnerSettings(): Promise<OwnerSettingsRecord> {
     const ownerId = await getOwnerId();
 
-    const { data, error } = await supabase
-      .from('owner_settings')
-      .select('owner_id,pg_rules,whatsapp_settings')
-      .eq('owner_id', ownerId)
-      .maybeSingle<OwnerSettingsRow>();
+    let data: any = null;
+    let fallbackBranding = false;
 
-    if (error) {
-      throw error;
+    const res = await supabase
+      .from('owner_settings')
+      .select('owner_id,pg_rules,whatsapp_settings,branding')
+      .eq('owner_id', ownerId)
+      .maybeSingle<any>();
+
+    if (res.error) {
+      const msg = String(res.error.message ?? '');
+      if (res.error.code === 'PGRST204' || msg.includes('branding') || msg.includes('column')) {
+        fallbackBranding = true;
+        const fallbackRes = await supabase
+          .from('owner_settings')
+          .select('owner_id,pg_rules,whatsapp_settings')
+          .eq('owner_id', ownerId)
+          .maybeSingle<any>();
+        
+        if (fallbackRes.error) {
+          throw fallbackRes.error;
+        }
+        data = fallbackRes.data;
+      } else {
+        throw res.error;
+      }
+    } else {
+      data = res.data;
     }
 
     if (!data) {
@@ -5661,10 +5809,28 @@ export const supabaseOwnerDataApi = {
         throw createError;
       }
 
-      return defaultSettings;
+      const record = { ...defaultSettings };
+      if (typeof window !== 'undefined') {
+        const localBranded = localStorage.getItem(`owner_branding_${ownerId}`);
+        if (localBranded) {
+          try {
+            record.branding = JSON.parse(localBranded);
+          } catch {}
+        }
+      }
+      return record;
     }
 
-    return parseOwnerSettings(data);
+    const record = parseOwnerSettings(data);
+    if (fallbackBranding && typeof window !== 'undefined') {
+      const localBranded = localStorage.getItem(`owner_branding_${ownerId}`);
+      if (localBranded) {
+        try {
+          record.branding = JSON.parse(localBranded);
+        } catch {}
+      }
+    }
+    return record;
   },
 
   async updateOwnerSettings(settings: OwnerSettingsRecord): Promise<OwnerSettingsRecord> {
@@ -5679,16 +5845,39 @@ export const supabaseOwnerDataApi = {
       integrations: settings.integrations,
     };
 
+    const payload: any = {
+      owner_id: ownerId,
+      pg_rules: settings.pgRules,
+      whatsapp_settings: serializedSettings,
+    };
+
+    if (settings.branding) {
+      payload.branding = settings.branding;
+    }
+
     const { error } = await supabase
       .from('owner_settings')
-      .upsert({
-        owner_id: ownerId,
-        pg_rules: settings.pgRules,
-        whatsapp_settings: serializedSettings,
-      }, { onConflict: 'owner_id' });
+      .upsert(payload, { onConflict: 'owner_id' });
 
     if (error) {
-      throw error;
+      const msg = String(error.message ?? '');
+      if (error.code === 'PGRST204' || msg.includes('branding') || msg.includes('column')) {
+        const { error: fallbackError } = await supabase
+          .from('owner_settings')
+          .upsert({
+            owner_id: ownerId,
+            pg_rules: settings.pgRules,
+            whatsapp_settings: serializedSettings,
+          }, { onConflict: 'owner_id' });
+        
+        if (fallbackError) throw fallbackError;
+
+        if (settings.branding && typeof window !== 'undefined') {
+          localStorage.setItem(`owner_branding_${ownerId}`, JSON.stringify(settings.branding));
+        }
+      } else {
+        throw error;
+      }
     }
 
     emitOwnerDataUpdated();
@@ -6356,16 +6545,20 @@ export const supabaseTenantProvisioningApi = {
     return { userId, isNew: true };
   },
 
-  async sendTenantMagicLink(email: string, redirectTo?: string): Promise<void> {
+  // Sends the magic-link sign-in email and returns the actual one-click sign-in
+  // URL when available, so callers (e.g. the WhatsApp invite) can hand the
+  // tenant a working auth link instead of just the bare site URL.
+  async sendTenantMagicLink(email: string, redirectTo?: string): Promise<string | undefined> {
     const serviceRoleKey = String((import.meta as any).env?.VITE_SUPABASE_SERVICE_ROLE_KEY ?? '');
     if (!serviceRoleKey) {
-      // Fall back to anon magic link (works if account already exists and email provider enabled)
+      // Fall back to anon magic link (works if account already exists and email provider enabled).
+      // The anon API does not return the generated link, so the caller falls back to the site URL.
       const emailRedirectTo = redirectTo ?? (typeof window !== 'undefined' ? window.location.origin : undefined);
       await supabase.auth.signInWithOtp({
         email: email.toLowerCase(),
         options: { shouldCreateUser: false, ...(emailRedirectTo ? { emailRedirectTo } : {}) },
       });
-      return;
+      return undefined;
     }
 
     const { createClient: createAdminClient } = await import('@supabase/supabase-js');
@@ -6375,7 +6568,7 @@ export const supabaseTenantProvisioningApi = {
 
     const emailRedirectTo = redirectTo ?? (typeof window !== 'undefined' ? window.location.origin : undefined);
 
-    const { error } = await adminClient.auth.admin.generateLink({
+    const { data, error } = await adminClient.auth.admin.generateLink({
       type: 'magiclink',
       email: email.toLowerCase(),
       options: { ...(emailRedirectTo ? { redirectTo: emailRedirectTo } : {}) },
@@ -6385,13 +6578,16 @@ export const supabaseTenantProvisioningApi = {
 
     // Supabase admin generateLink sends the email automatically when using the hosted platform.
     // If self-hosted, you must configure the SMTP settings.
+    return data?.properties?.action_link ?? undefined;
   },
 
   // ── One-shot tenant invitation ────────────────────────────────────────────────
-  // Provisions the auth identity (if missing), sends the magic-link invitation
-  // email, stamps tenants.invitation_sent_at, writes an audit log, and creates a
-  // welcome notification. Used on Add Tenant and on Resend Invitation. Returns the
-  // ISO timestamp recorded so callers can patch their local state immediately.
+  // Sends a magic-link invitation email (when a real email is on file) and a
+  // WhatsApp welcome message (when a phone number is on file) independently —
+  // neither channel blocks the other. Stamps tenants.invitation_sent_at, writes
+  // an audit log, and creates a welcome notification. Used on Add Tenant and on
+  // Resend Invitation. Returns the ISO timestamp recorded so callers can patch
+  // their local state immediately.
   async inviteTenant(args: {
     tenantId: string;
     email: string;
@@ -6400,10 +6596,12 @@ export const supabaseTenantProvisioningApi = {
     propertyId: string;
     phone?: string | null;
     propertyName?: string | null;
-  }): Promise<{ invitationSentAt: string; whatsappSent: boolean }> {
+  }): Promise<{ invitationSentAt: string; whatsappSent: boolean; emailSent: boolean }> {
     const email = args.email.trim().toLowerCase();
-    if (!email || email.includes('noemail.') || email.includes(NO_EMAIL_MARKER)) {
-      throw new Error('This tenant has no email address on file. Add an email before sending an invitation.');
+    const hasRealEmail = Boolean(email) && !email.includes('noemail.') && !email.includes(NO_EMAIL_MARKER);
+    const phone = (args.phone ?? '').trim();
+    if (!hasRealEmail && !phone) {
+      throw new Error('This tenant has no email or phone number on file. Add at least one before sending an invitation.');
     }
 
     // Resolve the post-login redirect from VITE_SITE_URL, falling back to the
@@ -6412,23 +6610,35 @@ export const supabaseTenantProvisioningApi = {
     const origin = typeof window !== 'undefined' && window.location?.origin ? window.location.origin : '';
     const isLocal = origin.includes('localhost') || origin.includes('127.0.0.1');
     const redirectTo = (isLocal ? origin : (configuredSiteUrl || origin)) || undefined;
+    const portalLink = redirectTo ?? (configuredSiteUrl || origin || '');
 
-    // 1 + 2: create the auth identity if it does not already exist.
-    await this.provisionTenantAccount(email, args.name).catch((err) => {
-      console.warn('Tenant account provisioning failed (continuing to magic link):', err);
-    });
-
-    // 5 + 6: generate + send the magic-link invitation email.
-    await this.sendTenantMagicLink(email, redirectTo);
+    // Email channel — provision the auth identity (if missing) and send the
+    // magic-link invitation. Best-effort: a failure here must not stop the
+    // WhatsApp channel from being attempted below. When the admin API returns
+    // the actual one-click sign-in URL, reuse it for the WhatsApp message too
+    // (instead of just the bare site URL) so both channels carry a working link.
+    let emailSent = false;
+    let magicLinkUrl: string | undefined;
+    if (hasRealEmail) {
+      await this.provisionTenantAccount(email, args.name).catch((err) => {
+        console.warn('Tenant account provisioning failed (continuing to magic link):', err);
+      });
+      try {
+        magicLinkUrl = await this.sendTenantMagicLink(email, redirectTo);
+        emailSent = true;
+      } catch (emailErr) {
+        console.warn('Tenant invitation email failed (non-blocking):', emailErr);
+      }
+    }
 
     const invitationSentAt = new Date().toISOString();
 
-    // 7 (WhatsApp): send the WhatsApp invitation only when a provider is
-    // configured for this owner. Fully provider-agnostic — the architecture
-    // supports a future provider without touching this business logic. Skipping
-    // is a soft no-op so the email invitation still succeeds on its own.
+    // WhatsApp channel — sent whenever a phone number is on file, independent of
+    // whether the email channel above succeeded. Uses the owner-configured
+    // "Welcome Message" template (Settings > WhatsApp) when enabled, falling
+    // back to a sensible default. Skipping (disabled template / no provider
+    // configured) is a soft no-op so the email invitation still stands on its own.
     let whatsappSent = false;
-    const phone = (args.phone ?? '').trim();
     if (phone) {
       try {
         const { data: settingsRow } = await supabase
@@ -6441,13 +6651,19 @@ export const supabaseTenantProvisioningApi = {
         );
         const waConfig = settings.integrations.whatsappProvider;
         const { sendWhatsApp, isWhatsAppConfigured } = await import('./whatsappProvider');
-        if (isWhatsAppConfigured(waConfig as never)) {
+        const welcomeTemplate = settings.whatsappSettings.welcomeMessage;
+        if (welcomeTemplate.enabled && isWhatsAppConfigured(waConfig as never)) {
           const propertyName = (args.propertyName ?? 'your new home').trim() || 'your new home';
-          const magicLink = redirectTo ?? (configuredSiteUrl || origin || '');
           const footer = settings.whatsappSettings.customFooter?.trim();
+          const greeting = renderWhatsAppTemplate(welcomeTemplate.template, {
+            tenantName: args.name,
+            pgName: propertyName,
+          });
+          // Prefer the real one-click sign-in link (same one the email carries)
+          // over the bare site URL, so the WhatsApp message is immediately usable.
+          const link = magicLinkUrl ?? portalLink;
           const body =
-            `Welcome to ${propertyName}! Your Tenant Portal has been created. ` +
-            `Access your account securely here: ${magicLink}` +
+            `${greeting}\n\nAccess your Tenant Portal here: ${link}` +
             (footer ? `\n\n${footer}` : '');
           const result = await sendWhatsApp(phone, body, waConfig as never);
           whatsappSent = result.success && !result.skipped;
@@ -6467,15 +6683,21 @@ export const supabaseTenantProvisioningApi = {
       console.warn('Could not record invitation_sent_at:', stampError.message);
     }
 
-    const channels = whatsappSent ? 'email + WhatsApp' : 'email';
+    const channels = emailSent && whatsappSent
+      ? 'email + WhatsApp'
+      : emailSent
+        ? 'email'
+        : whatsappSent
+          ? 'WhatsApp'
+          : 'no channel (check email/WhatsApp configuration)';
 
     // 8: audit log.
     void logActivity(
       args.ownerId,
       args.propertyId,
       'TENANT_INVITED',
-      `Invitation sent to ${args.name} (${email}) via ${channels}`,
-      { tenantId: args.tenantId, email, invitationSentAt, whatsappSent, phone: phone || null },
+      `Invitation sent to ${args.name}${hasRealEmail ? ` (${email})` : ''} via ${channels}`,
+      { tenantId: args.tenantId, email: hasRealEmail ? email : null, invitationSentAt, whatsappSent, emailSent, phone: phone || null },
     ).catch(() => {});
 
     // 9: welcome notification for the owner's activity feed.
@@ -6486,7 +6708,7 @@ export const supabaseTenantProvisioningApi = {
       propertyId: args.propertyId,
     }).catch(() => {});
 
-    return { invitationSentAt, whatsappSent };
+    return { invitationSentAt, whatsappSent, emailSent };
   },
 };
 
@@ -8206,6 +8428,174 @@ export const supabaseAdminDataApi = {
       { templateId: input.id, adminId: context.userId },
     );
   },
+
+  async listPlans(): Promise<any[]> {
+    const context = await getCurrentUserContext();
+    if (!context.isPlatformAdmin) throw new Error('Platform admin access is required.');
+
+    const { data, error } = await supabase
+      .from('plans')
+      .select('*')
+      .order('price', { ascending: true });
+
+    if (error) {
+      if (isMissingRelationError(error, 'plans')) {
+        const { PLANS } = await import('../constants/plans');
+        return PLANS.map((p) => ({
+          id: p.code,
+          code: p.code,
+          label: p.label,
+          price: p.price,
+          billing_cycle: 'monthly',
+          property_limit: p.propertyLimit === Infinity ? null : p.propertyLimit,
+          tenant_limit: p.tenantLimit === Infinity ? null : p.tenantLimit,
+          features: p.features,
+          feature_flags: {
+            whatsapp: p.code !== 'starter',
+            aiAssistant: p.code === 'business',
+            tenantPortal: true,
+            multiUser: p.code !== 'starter',
+            receipts: true,
+            buildingView: true,
+          },
+          is_active: true,
+          is_archived: false,
+          created_at: new Date().toISOString(),
+        }));
+      }
+      throw error;
+    }
+    return data ?? [];
+  },
+
+  async createPlan(input: {
+    code: string;
+    label: string;
+    price: number;
+    billingCycle: string;
+    propertyLimit?: number | null;
+    tenantLimit?: number | null;
+    features: string[];
+    featureFlags: Record<string, boolean>;
+  }): Promise<any> {
+    const context = await getCurrentUserContext();
+    if (!context.isPlatformAdmin) throw new Error('Platform admin access is required.');
+
+    const { data, error } = await supabase
+      .from('plans')
+      .insert({
+        code: input.code.toLowerCase().trim(),
+        label: input.label.trim(),
+        price: input.price,
+        billing_cycle: input.billingCycle,
+        property_limit: input.propertyLimit === undefined ? null : input.propertyLimit,
+        tenant_limit: input.tenantLimit === undefined ? null : input.tenantLimit,
+        features: input.features,
+        feature_flags: input.featureFlags,
+        is_active: true,
+        is_archived: false,
+      })
+      .select('*')
+      .single();
+
+    if (error) throw error;
+    await logActivity(context.userId, null, 'ADMIN_PLAN_CREATED', `Plan ${input.code} created`, { code: input.code });
+    return data;
+  },
+
+  async updatePlan(planId: string, input: {
+    label?: string;
+    price?: number;
+    billingCycle?: string;
+    propertyLimit?: number | null;
+    tenantLimit?: number | null;
+    features?: string[];
+    featureFlags?: Record<string, boolean>;
+    isActive?: boolean;
+    isArchived?: boolean;
+  }): Promise<any> {
+    const context = await getCurrentUserContext();
+    if (!context.isPlatformAdmin) throw new Error('Platform admin access is required.');
+
+    const payload: Record<string, any> = { updated_at: new Date().toISOString() };
+    if (input.label !== undefined) payload.label = input.label;
+    if (input.price !== undefined) payload.price = input.price;
+    if (input.billingCycle !== undefined) payload.billing_cycle = input.billingCycle;
+    if (input.propertyLimit !== undefined) payload.property_limit = input.propertyLimit;
+    if (input.tenantLimit !== undefined) payload.tenant_limit = input.tenantLimit;
+    if (input.features !== undefined) payload.features = input.features;
+    if (input.featureFlags !== undefined) payload.feature_flags = input.featureFlags;
+    if (input.isActive !== undefined) payload.is_active = input.isActive;
+    if (input.isArchived !== undefined) payload.is_archived = input.isArchived;
+
+    const { data, error } = await supabase
+      .from('plans')
+      .update(payload)
+      .eq('id', planId)
+      .select('*')
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
+
+  async deleteCoupon(couponId: string): Promise<void> {
+    const context = await getCurrentUserContext();
+    if (!context.isPlatformAdmin) throw new Error('Platform admin access is required.');
+
+    const { error } = await supabase
+      .from('admin_coupons')
+      .delete()
+      .eq('id', couponId);
+
+    if (error) throw error;
+    await logActivity(context.userId, null, 'ADMIN_COUPON_DELETED', `Coupon ${couponId} deleted`, { couponId });
+  },
+
+  async getSubscriptionHistory(ownerId: string): Promise<any[]> {
+    const context = await getCurrentUserContext();
+    if (!context.isPlatformAdmin) throw new Error('Platform admin access is required.');
+
+    const { data, error } = await supabase
+      .from('owner_subscription_history')
+      .select('*')
+      .eq('owner_id', ownerId)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      if (isMissingRelationError(error, 'owner_subscription_history')) return [];
+      throw error;
+    }
+    return data ?? [];
+  },
+
+  async getOwnerTeamMembers(ownerId: string): Promise<any[]> {
+    const context = await getCurrentUserContext();
+    if (!context.isPlatformAdmin) throw new Error('Platform admin access is required.');
+
+    let { data: teamProfiles, error: profileError } = await supabase
+      .from('profiles')
+      .select('id,email,full_name,phone,role,owner_scope_id')
+      .eq('owner_scope_id', ownerId)
+      .neq('id', ownerId)
+      .order('full_name', { ascending: true });
+
+    if (profileError && isMissingColumnError(profileError, ['owner_scope_id'])) {
+      const legacyResult = await supabase
+        .from('profiles')
+        .select('id,email,full_name,phone,role')
+        .neq('id', ownerId)
+        .order('full_name', { ascending: true });
+
+      profileError = legacyResult.error;
+      teamProfiles = (legacyResult.data ?? [])
+        .filter((profile) => profile.role === 'owner_manager' || profile.role === 'staff')
+        .map((profile) => ({ ...profile, owner_scope_id: ownerId }));
+    }
+
+    if (profileError) throw profileError;
+    return teamProfiles ?? [];
+  },
 };
 
 export interface AdminCouponRecord {
@@ -8884,5 +9274,237 @@ export const supabaseLifecycleApi = {
       // Log clearly so it can be investigated without blocking the payment flow.
       console.warn('[receipt] tenant_documents insert failed:', insertError.message);
     }
+  },
+
+  async uploadBrandingLogo(file: File): Promise<string> {
+    const ownerId = await getOwnerId();
+    const ext = file.name.split('.').pop() ?? 'png';
+    const path = `branding/${ownerId}/logo_${Date.now()}.${ext}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('profile-photos')
+      .upload(path, file, { upsert: true });
+
+    if (uploadError) throw uploadError;
+
+    const { data } = supabase.storage.from('profile-photos').getPublicUrl(path);
+    return data.publicUrl;
+  },
+
+  async getEmailTemplates(): Promise<EmailTemplateRecord[]> {
+    const ownerId = await getOwnerId().catch(() => 'demo-owner');
+    
+    const { data, error } = await supabase
+      .from('owner_email_templates')
+      .select('*')
+      .eq('owner_id', ownerId);
+    
+    if (error) {
+      if (isMissingRelationError(error, 'owner_email_templates')) {
+        if (typeof window !== 'undefined') {
+          const localData = localStorage.getItem(`owner_email_templates_${ownerId}`);
+          if (localData) {
+            try {
+              return JSON.parse(localData);
+            } catch {}
+          }
+        }
+        return [];
+      }
+      throw error;
+    }
+    
+    return (data || []).map((row: any) => ({
+      templateKey: row.template_key,
+      subject: row.subject,
+      body: row.body,
+      version: row.version,
+      createdAt: row.created_at,
+    }));
+  },
+
+  async saveEmailTemplate(templateKey: string, subject: string, body: string): Promise<EmailTemplateRecord> {
+    const ownerId = await getOwnerId();
+    const now = new Date().toISOString();
+
+    let currentVersion = 0;
+    let fallback = false;
+
+    const { data: existing, error: fetchError } = await supabase
+      .from('owner_email_templates')
+      .select('version')
+      .eq('owner_id', ownerId)
+      .eq('template_key', templateKey)
+      .maybeSingle<any>();
+
+    if (fetchError) {
+      if (isMissingRelationError(fetchError, 'owner_email_templates')) {
+        fallback = true;
+      } else {
+        throw fetchError;
+      }
+    } else if (existing) {
+      currentVersion = existing.version;
+    }
+
+    const nextVersion = currentVersion + 1;
+
+    if (fallback) {
+      const record: EmailTemplateRecord = {
+        templateKey,
+        subject,
+        body,
+        version: nextVersion,
+        createdAt: now,
+      };
+
+      if (typeof window !== 'undefined') {
+        const localTemplatesStr = localStorage.getItem(`owner_email_templates_${ownerId}`);
+        let templates: EmailTemplateRecord[] = [];
+        if (localTemplatesStr) {
+          try {
+            templates = JSON.parse(localTemplatesStr);
+          } catch {}
+        }
+        const idx = templates.findIndex(t => t.templateKey === templateKey);
+        if (idx !== -1) {
+          templates[idx] = record;
+        } else {
+          templates.push(record);
+        }
+        localStorage.setItem(`owner_email_templates_${ownerId}`, JSON.stringify(templates));
+
+        const localVersionsStr = localStorage.getItem(`owner_email_template_versions_${ownerId}`);
+        let versions: EmailTemplateRecord[] = [];
+        if (localVersionsStr) {
+          try {
+            versions = JSON.parse(localVersionsStr);
+          } catch {}
+        }
+        versions.unshift(record);
+        localStorage.setItem(`owner_email_template_versions_${ownerId}`, JSON.stringify(versions));
+      }
+
+      return record;
+    }
+
+    const { data, error: upsertError } = await supabase
+      .from('owner_email_templates')
+      .upsert({
+        owner_id: ownerId,
+        template_key: templateKey,
+        subject,
+        body,
+        version: nextVersion,
+        updated_at: now,
+      }, { onConflict: 'owner_id,template_key' })
+      .select('*')
+      .single();
+
+    if (upsertError) throw upsertError;
+
+    const { error: versionInsertError } = await supabase
+      .from('owner_email_template_versions')
+      .insert({
+        owner_id: ownerId,
+        template_key: templateKey,
+        subject,
+        body,
+        version: nextVersion,
+        created_at: now,
+      });
+    if (versionInsertError) {
+      console.warn('[email_templates] failed to insert version history:', versionInsertError.message);
+    }
+
+    emitOwnerDataUpdated();
+
+    return {
+      templateKey: data.template_key,
+      subject: data.subject,
+      body: data.body,
+      version: data.version,
+    };
+  },
+
+  async getEmailTemplateVersions(templateKey: string): Promise<EmailTemplateRecord[]> {
+    const ownerId = await getOwnerId().catch(() => 'demo-owner');
+
+    const { data, error } = await supabase
+      .from('owner_email_template_versions')
+      .select('*')
+      .eq('owner_id', ownerId)
+      .eq('template_key', templateKey)
+      .order('version', { ascending: false });
+
+    if (error) {
+      if (isMissingRelationError(error, 'owner_email_template_versions')) {
+        if (typeof window !== 'undefined') {
+          const localVersionsStr = localStorage.getItem(`owner_email_template_versions_${ownerId}`);
+          if (localVersionsStr) {
+            try {
+              const versions: EmailTemplateRecord[] = JSON.parse(localVersionsStr);
+              return versions.filter(v => v.templateKey === templateKey);
+            } catch {}
+          }
+        }
+        return [];
+      }
+      throw error;
+    }
+
+    return (data || []).map((row: any) => ({
+      templateKey: row.template_key,
+      subject: row.subject,
+      body: row.body,
+      version: row.version,
+      createdAt: row.created_at,
+    }));
+  },
+
+  async resetEmailTemplate(templateKey: string): Promise<void> {
+    const ownerId = await getOwnerId();
+
+    const { error } = await supabase
+      .from('owner_email_templates')
+      .delete()
+      .eq('owner_id', ownerId)
+      .eq('template_key', templateKey);
+
+    if (error) {
+      if (isMissingRelationError(error, 'owner_email_templates')) {
+        if (typeof window !== 'undefined') {
+          const localTemplatesStr = localStorage.getItem(`owner_email_templates_${ownerId}`);
+          if (localTemplatesStr) {
+            try {
+              let templates: EmailTemplateRecord[] = JSON.parse(localTemplatesStr);
+              templates = templates.filter(t => t.templateKey !== templateKey);
+              localStorage.setItem(`owner_email_templates_${ownerId}`, JSON.stringify(templates));
+            } catch {}
+          }
+          const localVersionsStr = localStorage.getItem(`owner_email_template_versions_${ownerId}`);
+          if (localVersionsStr) {
+            try {
+              let versions: EmailTemplateRecord[] = JSON.parse(localVersionsStr);
+              versions = versions.filter(v => v.templateKey !== templateKey);
+              localStorage.setItem(`owner_email_template_versions_${ownerId}`, JSON.stringify(versions));
+            } catch {}
+          }
+        }
+        return;
+      }
+      throw error;
+    }
+
+    const { error: versionDeleteError } = await supabase
+      .from('owner_email_template_versions')
+      .delete()
+      .eq('owner_id', ownerId)
+      .eq('template_key', templateKey);
+    if (versionDeleteError) {
+      console.warn('[email_templates] failed to clear version history:', versionDeleteError.message);
+    }
+
+    emitOwnerDataUpdated();
   },
 };

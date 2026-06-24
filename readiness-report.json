@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-08T10:37:05.372Z",
+  "generatedAt": "2026-06-19T11:25:25.015Z",
   "overallStatus": "PASS",
   "portals": [
     {
@@ -116,11 +116,20 @@
   ],
   "infrastructure": {
     "authHealthy": true,
-    "missingTables": [],
-    "missingColumns": [],
+    "missingTables": [
+      "owner_email_templates",
+      "owner_email_template_versions"
+    ],
+    "missingColumns": [
+      {
+        "table": "owner_settings",
+        "column": "branding",
+        "introducedBy": "20260620_owner_email_templates"
+      }
+    ],
     "missingBuckets": [],
-    "tablesTotal": 22,
-    "tablesMissing": 0,
+    "tablesTotal": 24,
+    "tablesMissing": 2,
     "bucketsTotal": 3,
     "bucketsMissing": 0
   }

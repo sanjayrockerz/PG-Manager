@@ -180,20 +180,20 @@ export function OTPSignup({ onSwitchToLogin }: OTPSignupProps) {
                       countryCode: e.target.value,
                       phoneNumber: sanitizePhoneLocal(formData.phoneNumber, e.target.value),
                     })}
-                    className="w-44 px-3 py-2.5 text-sm border-r border-[#E5E7EB] rounded-l-2xl bg-gray-50 focus:outline-none"
+                    className="w-20 sm:w-44 flex-shrink-0 px-2 sm:px-3 py-2.5 text-sm border-r border-[#E5E7EB] rounded-l-2xl bg-gray-50 focus:outline-none"
                   >
                     {SUPPORTED_PHONE_COUNTRIES.map((code) => (
                       <option key={code.code} value={code.code}>{getPhoneDropdownLabel(code)}</option>
                     ))}
                   </select>
-                  <span className="px-2 py-2 text-sm font-medium text-gray-700 border-r border-[#E5E7EB] bg-gray-50">
+                  <span className="hidden sm:inline-block px-2 py-2 text-sm font-medium text-gray-700 border-r border-[#E5E7EB] bg-gray-50 flex-shrink-0">
                     {phoneCountry.flag} {phoneCountry.code}
                   </span>
                   <input
                     type="tel"
                     value={formData.phoneNumber}
                     onChange={(e) => setFormData({ ...formData, phoneNumber: sanitizePhoneLocal(e.target.value, formData.countryCode) })}
-                    className="flex-1 px-3 py-2.5 text-sm bg-transparent focus:outline-none"
+                    className="flex-1 min-w-0 px-3 py-2.5 text-sm bg-transparent focus:outline-none"
                     placeholder={phoneCountry.placeholder}
                     maxLength={phoneCountry.localDigits}
                   />

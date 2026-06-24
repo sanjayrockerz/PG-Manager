@@ -261,16 +261,14 @@ export function AuditLog({ onBack }: AuditLogProps) {
   return (
     <div className="p-6 bg-gray-50 min-h-screen pb-20 md:pb-6">
       {/* Header */}
-      <div className="flex items-center gap-3 mb-6">
+      <div className="flex items-center gap-3 mb-6 flex-wrap">
         {onBack && (
-          <Button variant="ghost" onClick={onBack} className="text-gray-600 hover:text-gray-900 -ml-2">
-            <ArrowLeft className="w-4 h-4 mr-1.5" /> Back
-          </Button>
+          <button onClick={onBack} aria-label="Go back" className="ds-back-btn">
+            <ArrowLeft className="w-4 h-4" />
+          </button>
         )}
-        <div className="flex-1">
-          <h1 className="text-xl font-bold text-gray-900 flex items-center gap-2">
-            <Activity className="w-5 h-5 text-indigo-600" /> Audit Log
-          </h1>
+        <div className="flex-1 min-w-[160px]">
+          <h1 className="ds-page-title">Audit Log</h1>
           <p className="text-sm text-gray-500 mt-0.5">Full operational history — every action, timestamped</p>
         </div>
         <div className="flex items-center gap-2">
@@ -308,7 +306,7 @@ export function AuditLog({ onBack }: AuditLogProps) {
             onChange={(e) => setSearch(e.target.value)}
           />
           {search && (
-            <button onClick={() => setSearch('')} className="text-gray-400 hover:text-gray-600">
+            <button onClick={() => setSearch('')} className="text-gray-400 hover:text-gray-600 p-1 -m-1" aria-label="Clear search">
               <X className="w-3.5 h-3.5" />
             </button>
           )}

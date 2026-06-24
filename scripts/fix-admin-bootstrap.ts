@@ -15,13 +15,20 @@
 import { supabase } from './_supabase';
 
 const TARGET_EMAIL = process.env['ADMIN_EMAIL'] ?? 'admin@rentcare.com';
-const TARGET_PASSWORD = process.env['ADMIN_PASSWORD'] ?? 'RentCare#Admin2026!';
+const TARGET_PASSWORD = process.env['ADMIN_PASSWORD'];
 
 async function main(): Promise<void> {
   if (!process.env['SUPABASE_SERVICE_ROLE_KEY']) {
     console.error(
       '\nMissing SUPABASE_SERVICE_ROLE_KEY in .env.local.\n' +
       'Get it from: Supabase Dashboard → Project Settings → API → service_role key\n',
+    );
+    process.exit(1);
+  }
+
+  if (!TARGET_PASSWORD) {
+    console.error(
+      "\nMissing ADMIN_PASSWORD.\nRun with ADMIN_PASSWORD='<a strong password>' npx tsx scripts/fix-admin-bootstrap.ts — never hardcode it in source.\n"
     );
     process.exit(1);
   }

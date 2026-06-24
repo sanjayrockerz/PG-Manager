@@ -4,7 +4,7 @@ import {
   Check, CheckCircle2, ChevronRight, ClipboardCheck, CreditCard, Copy,
   Download, FileText, Home, IndianRupee, LayoutDashboard, LogOut,
   MapPin, MessageSquare, PanelLeft, Phone, Plus, QrCode,
-  Send, Upload, User, Wrench, X, HelpCircle, Menu, Shield,
+  Send, Upload, User, Wrench, X, HelpCircle, Menu, Shield, ChevronDown,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
@@ -27,6 +27,14 @@ import {
   createTenantMaintenanceTicket,
 } from '../services/dataService';
 import { PaymentDocumentDialog } from './ui/PaymentDocumentDialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from './ui/dropdown-menu';
 import { getAppMode } from '../config/appMode';
 import { supabase } from '../lib/supabase';
 
@@ -1620,7 +1628,7 @@ export function TenantPortal() {
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-white border border-gray-100 rounded-xl p-4">
           <div className="w-9 h-9 rounded-lg bg-green-50 flex items-center justify-center mb-3">
             <CreditCard className="w-4 h-4 text-green-600" />
@@ -1796,7 +1804,7 @@ export function TenantPortal() {
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-white border border-gray-100 rounded-xl p-4">
           <div className="w-9 h-9 rounded-lg bg-purple-50 flex items-center justify-center mb-3">
             <Wrench className="w-4 h-4 text-purple-600" />
@@ -1833,52 +1841,84 @@ export function TenantPortal() {
             </button>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-100 bg-gray-50/50">
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Ticket ID</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Issue</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Description</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Priority</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Status</th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Date</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {maintenance.map((t, idx) => (
-                  <tr
-                    key={t.id}
-                    onClick={() => { setDetailTicketId(t.id); setView('maintenance-detail'); }}
-                    className="hover:bg-gray-50/50 transition-colors cursor-pointer"
-                  >
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <span className="text-indigo-600 font-semibold text-xs">TKT{String(idx + 1).padStart(4, '0')}</span>
-                    </td>
-                    <td className="px-4 py-3 font-medium text-gray-900">{t.issue}</td>
-                    <td className="px-4 py-3 text-gray-500 max-w-xs">
-                      <p className="line-clamp-1">{t.description}</p>
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                        t.priority === 'high' ? 'bg-red-100 text-red-700'
-                        : t.priority === 'medium' ? 'bg-amber-100 text-amber-700'
-                        : 'bg-gray-100 text-gray-600'
-                      }`}>
-                        {t.priority.charAt(0).toUpperCase() + t.priority.slice(1)}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${statusBadge(t.status)}`}>
-                        {t.status === 'in-progress' ? 'In Progress' : t.status.charAt(0).toUpperCase() + t.status.slice(1)}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{fmtDate(t.date)}</td>
+          <>
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-gray-100 bg-gray-50/50">
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Ticket ID</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Issue</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Description</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Priority</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Status</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">Date</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {maintenance.map((t, idx) => (
+                    <tr
+                      key={t.id}
+                      onClick={() => { setDetailTicketId(t.id); setView('maintenance-detail'); }}
+                      className="hover:bg-gray-50/50 transition-colors cursor-pointer"
+                    >
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <span className="text-indigo-600 font-semibold text-xs">TKT{String(idx + 1).padStart(4, '0')}</span>
+                      </td>
+                      <td className="px-4 py-3 font-medium text-gray-900">{t.issue}</td>
+                      <td className="px-4 py-3 text-gray-500 max-w-xs">
+                        <p className="line-clamp-1">{t.description}</p>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                          t.priority === 'high' ? 'bg-red-100 text-red-700'
+                          : t.priority === 'medium' ? 'bg-amber-100 text-amber-700'
+                          : 'bg-gray-100 text-gray-600'
+                        }`}>
+                          {t.priority.charAt(0).toUpperCase() + t.priority.slice(1)}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${statusBadge(t.status)}`}>
+                          {t.status === 'in-progress' ? 'In Progress' : t.status.charAt(0).toUpperCase() + t.status.slice(1)}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{fmtDate(t.date)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="md:hidden flex flex-col gap-3 p-4 bg-gray-50/50">
+              {maintenance.map((t, idx) => (
+                <button
+                  key={t.id}
+                  onClick={() => { setDetailTicketId(t.id); setView('maintenance-detail'); }}
+                  className="w-full text-left bg-white rounded-xl border border-gray-200 p-4 shadow-sm hover:shadow-md transition-shadow"
+                >
+                  <div className="flex items-start justify-between mb-2 gap-2">
+                    <div className="min-w-0">
+                      <span className="text-indigo-600 font-semibold text-xs">TKT{String(idx + 1).padStart(4, '0')}</span>
+                      <p className="text-sm font-semibold text-gray-900 truncate mt-0.5">{t.issue}</p>
+                    </div>
+                    <span className={`text-xs font-semibold px-2.5 py-1 rounded-full flex-shrink-0 ${statusBadge(t.status)}`}>
+                      {t.status === 'in-progress' ? 'In Progress' : t.status.charAt(0).toUpperCase() + t.status.slice(1)}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-500 line-clamp-1 mb-3">{t.description}</p>
+                  <div className="flex items-center justify-between pt-2 border-t border-gray-100">
+                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                      t.priority === 'high' ? 'bg-red-100 text-red-700'
+                      : t.priority === 'medium' ? 'bg-amber-100 text-amber-700'
+                      : 'bg-gray-100 text-gray-600'
+                    }`}>
+                      {t.priority.charAt(0).toUpperCase() + t.priority.slice(1)}
+                    </span>
+                    <span className="text-xs text-gray-500">{fmtDate(t.date)}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </>
         )}
       </div>
     </div>
@@ -2761,16 +2801,16 @@ export function TenantPortal() {
         <div className="flex-1 flex flex-col overflow-hidden">
           {/* Mobile header */}
           <header className="lg:hidden bg-white border-b border-gray-200 px-4 py-3 pt-safe min-h-[52px] flex items-center justify-between flex-shrink-0">
-            <button onClick={() => setSidebarOpen(true)} className="p-1.5 hover:bg-gray-100 rounded-lg">
+            <button onClick={() => setSidebarOpen(true)} className="p-1.5 hover:bg-gray-100 rounded-lg flex-shrink-0">
               <Menu className="w-5 h-5 text-gray-600" />
             </button>
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold text-gray-900">
+            <div className="flex items-center gap-1.5 min-w-0 flex-1 justify-center px-1">
+              <span className="text-sm font-semibold text-gray-900 truncate">
                 {ownerPaymentInfo.pgName || property?.name || 'RentCare'}
               </span>
-              {tenant.room && <span className="text-xs text-gray-500">· Room {tenant.room}</span>}
+              {tenant.room && <span className="text-xs text-gray-500 flex-shrink-0">· Room {tenant.room}</span>}
             </div>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 flex-shrink-0">
               <div className="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold"
                 style={{ background: 'linear-gradient(135deg, #6D28D9, #4F46E5)' }}>
                 {tenant.name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)}
@@ -2827,16 +2867,48 @@ export function TenantPortal() {
                   </span>
                 )}
               </button>
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold"
-                  style={{ background: 'linear-gradient(135deg, #5B21B6, #4F46E5)' }}>
-                  {tenant.name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)}
-                </div>
-                <div className="text-right">
-                  <p className="text-sm font-semibold text-gray-900 leading-tight">{tenant.name}</p>
-                  <p className="text-xs text-indigo-500 font-medium leading-tight">tenant</p>
-                </div>
-              </div>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    className="flex items-center gap-2.5 pl-2 pr-1.5 py-1 rounded-xl hover:bg-gray-100 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                    aria-label="Account menu"
+                  >
+                    <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0"
+                      style={{ background: 'linear-gradient(135deg, #5B21B6, #4F46E5)' }}>
+                      {tenant.name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)}
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-semibold text-gray-900 leading-tight">{tenant.name}</p>
+                      <p className="text-xs text-indigo-500 font-medium leading-tight">tenant</p>
+                    </div>
+                    <ChevronDown className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuLabel className="font-normal">
+                    <p className="text-sm font-semibold text-gray-900 truncate">{tenant.name}</p>
+                    <p className="text-xs text-gray-500 truncate">{tenant.email || tenant.phone}</p>
+                  </DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => setView('profile')}>
+                    <User className="w-4 h-4 mr-2" />
+                    My Profile
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setView('documents')}>
+                    <FileText className="w-4 h-4 mr-2" />
+                    Documents
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setView('help')}>
+                    <HelpCircle className="w-4 h-4 mr-2" />
+                    Help & Support
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem variant="destructive" onClick={() => { void logout(); }}>
+                    <LogOut className="w-4 h-4 mr-2" />
+                    Sign Out
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </header>
 

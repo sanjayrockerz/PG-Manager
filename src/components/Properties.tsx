@@ -308,7 +308,7 @@ export function Properties({ onNavigate }: PropertiesV2Props) {
                 <div className="h-7 w-20 premium-shimmer rounded-lg" />
               </div>
               <div className="h-px bg-zinc-100" />
-              <div className="grid grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 {[1, 2, 3, 4].map((x) => (
                   <div key={x} className="h-14 premium-shimmer rounded-lg" />
                 ))}
@@ -481,14 +481,8 @@ export function Properties({ onNavigate }: PropertiesV2Props) {
 
                   {/* Operational summary */}
                   <div
-                    style={{
-                      marginTop: 14,
-                      paddingTop: 14,
-                      borderTop: '1px solid #F4F4F6',
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(auto-fit, minmax(90px, 1fr))',
-                      gap: 8,
-                    }}
+                    className="grid grid-cols-2 sm:grid-cols-4"
+                    style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid #F4F4F6', gap: 8 }}
                   >
                     {[
                       { label: 'Occupancy', value: `${occupancyPct}%`, sub: `${occupiedRooms}/${totalRoomsInProp} rooms`, color: occupancyPct >= 80 ? '#059669' : occupancyPct >= 50 ? '#D97706' : '#A1A1AA' },
@@ -496,10 +490,10 @@ export function Properties({ onNavigate }: PropertiesV2Props) {
                       { label: 'Revenue', value: `₹${revenueTotal > 0 ? (revenueTotal / 1000).toFixed(0) + 'k' : '0'}`, sub: 'Active tenants', color: '#059669' },
                       { label: 'Maintenance', value: (ps?.openMaintenance ?? 0).toString(), sub: `${ps?.highMaintenance ?? 0} high-priority`, color: (ps?.openMaintenance ?? 0) > 0 ? '#D97706' : '#A1A1AA' },
                     ].map(({ label, value, sub, color }) => (
-                      <div key={label} style={{ padding: '8px 10px', background: '#F8FAFC', borderRadius: 8 }}>
-                        <p style={{ fontSize: 10, fontWeight: 600, color: '#A1A1AA', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>{label}</p>
-                        <p style={{ fontSize: 16, fontWeight: 700, color, fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>{value}</p>
-                        <p style={{ fontSize: 10, color: '#A1A1AA', marginTop: 2 }}>{sub}</p>
+                      <div key={label} style={{ padding: '8px 10px', background: '#F8FAFC', borderRadius: 8, minWidth: 0 }}>
+                        <p style={{ fontSize: 10, fontWeight: 600, color: '#A1A1AA', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</p>
+                        <p style={{ fontSize: 16, fontWeight: 700, color, fontVariantNumeric: 'tabular-nums', lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{value}</p>
+                        <p style={{ fontSize: 10, color: '#A1A1AA', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{sub}</p>
                       </div>
                     ))}
                   </div>

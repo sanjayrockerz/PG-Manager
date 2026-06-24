@@ -693,7 +693,15 @@ export function BuildingView({ onTenantClick, onNavigate, onBack }: BuildingView
   const [loadingTenants, setLoadingTenants] = useState(false);
   const [selectedRoom, setSelectedRoom] = useState<{ occ: RoomOccupancy; room: Room } | null>(null);
   const [selectedFloor, setSelectedFloor] = useState<number | 'all'>('all');
+  const [isMobile, setIsMobile] = useState(false);
   const fetchSeq = useRef(0);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   // Auto-select first property if "All Properties" is selected
   useEffect(() => {
@@ -825,6 +833,249 @@ export function BuildingView({ onTenantClick, onNavigate, onBack }: BuildingView
     { label: 'Overdue Risk', bg: '#FEF2F2', accent: '#DC2626' },
   ];
 
+  if (isMobile) {
+    return (
+      <div className="space-y-4 px-1 pb-16">
+        {/* Mobile Header */}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            {(onBack || onNavigate) && (
+              <button
+                onClick={() => (onBack ? onBack() : onNavigate?.('properties'))}
+                aria-label="Go back"
+                className="ds-back-btn"
+              >
+                <ArrowLeft className="w-4 h-4" />
+              </button>
+            )}
+            <div>
+              <h1 className="text-lg font-bold text-gray-900 leading-tight">Building View</h1>
+              <p className="text-[11px] text-gray-400">Live occupancy status</p>
+            </div>
+          </div>
+          {properties.length > 1 && (
+            <div className="relative">
+              <select
+                value={currentProperty.id}
+                onChange={(e) => setSelectedProperty(e.target.value)}
+                className="appearance-none pr-7 pl-2.5 py-1.5 rounded-lg text-xs font-semibold text-gray-700 bg-white border border-gray-200 cursor-pointer focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              >
+                {properties.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+              <ChevronRight className="w-3 h-3 text-gray-400 absolute right-2.5 top-1/2 -translate-y-1/2 rotate-90 pointer-events-none" />
+            </div>
+          )}
+        </div>
+
+        {/* Mobile Property Hero Card */}
+        <div
+          className="rounded-xl p-4 text-white relative overflow-hidden"
+          style={{ background: 'linear-gradient(135deg, #6D28D9 0%, #4F46E5 100%)' }}
+        >
+          <div className="flex justify-between items-start">
+            <div className="min-w-0">
+              <h2 className="text-base font-bold truncate leading-snug">{currentProperty.name}</h2>
+              <p className="text-[11px] text-white/80 truncate mt-0.5">{currentProperty.address}</p>
+            </div>
+            <div className="text-right flex-shrink-0">
+              <p className="text-xl font-bold">{snapshot.occupancyRate}%</p>
+              <p className="text-[9px] text-white/70">Occupancy</p>
+            </div>
+          </div>
+          <div className="mt-3">
+            <div className="w-full bg-white/25 rounded-full h-1">
+              <div className="h-1 rounded-full bg-white transition-all duration-350" style={{ width: `${snapshot.occupancyRate}%` }} />
+            </div>
+          </div>
+          {/* Quick Metrics in 2x2 grid */}
+          <div className="grid grid-cols-2 gap-2 mt-4">
+            <div className="rounded-lg p-2 bg-white/10 backdrop-blur-sm">
+              <p className="text-[9px] uppercase tracking-wider text-white/70">Total Rooms</p>
+              <p className="text-base font-bold mt-0.5">{snapshot.totalRooms}</p>
+            </div>
+            <div className="rounded-lg p-2 bg-white/10 backdrop-blur-sm">
+              <p className="text-[9px] uppercase tracking-wider text-white/70">Occupied</p>
+              <p className="text-base font-bold mt-0.5 text-green-200">{snapshot.occupiedRooms}</p>
+            </div>
+            <div className="rounded-lg p-2 bg-white/10 backdrop-blur-sm">
+              <p className="text-[9px] uppercase tracking-wider text-white/70">Vacant</p>
+              <p className="text-base font-bold mt-0.5 text-blue-200">{snapshot.vacantRooms}</p>
+            </div>
+            <div className="rounded-lg p-2 bg-white/10 backdrop-blur-sm">
+              <p className="text-[9px] uppercase tracking-wider text-white/70">Maintenance</p>
+              <p className="text-base font-bold mt-0.5 text-amber-200">{snapshot.maintenanceRooms}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Global Overdue Banner */}
+        {overdueRooms > 0 && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-3 flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="text-xs font-semibold text-red-800">
+                {overdueRooms} room{overdueRooms !== 1 ? 's' : ''} with overdue payments
+              </p>
+              <p className="text-[10px] text-red-750 mt-0.5">
+                Tap red rooms below to view overdue details.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Floor Selection (Horizontal Pills) */}
+        {floorData.length > 0 && (
+          <div className="flex items-center gap-2 overflow-x-auto pb-1.5 snap-x hide-scrollbar">
+            <button
+              onClick={() => setSelectedFloor('all')}
+              className={`flex-shrink-0 snap-start px-3.5 py-1.5 text-xs font-bold rounded-full border transition-all ${
+                selectedFloor === 'all'
+                  ? 'bg-indigo-650 text-white border-indigo-650'
+                  : 'bg-white text-gray-650 border-gray-200 hover:bg-gray-50'
+              }`}
+            >
+              All Floors
+            </button>
+            {floorData.map(({ floor }) => (
+              <button
+                key={floor}
+                onClick={() => setSelectedFloor(floor)}
+                className={`flex-shrink-0 snap-start px-3.5 py-1.5 text-xs font-bold rounded-full border transition-all ${
+                  selectedFloor === floor
+                    ? 'bg-indigo-650 text-white border-indigo-650'
+                    : 'bg-white text-gray-650 border-gray-200 hover:bg-gray-50'
+                }`}
+              >
+                Floor {floor}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Legend pills */}
+        <div className="flex flex-wrap gap-1.5">
+          {legendItems.map(({ label, bg, accent }) => (
+            <span
+              key={label}
+              className="inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-0.5 rounded-full"
+              style={{ backgroundColor: bg, color: accent, border: '1px solid rgba(15,23,42,0.03)' }}
+            >
+              <span className="w-1 h-1 rounded-full" style={{ backgroundColor: accent }} />
+              {label}
+            </span>
+          ))}
+        </div>
+
+        {/* Rooms Checklist / Vertical List Card style */}
+        <div className="space-y-3">
+          {floorData
+            .filter((f) => selectedFloor === 'all' || f.floor === selectedFloor)
+            .map(({ floor, items }) => (
+              <div key={floor} className="space-y-2">
+                <div className="flex items-center justify-between px-1 mt-3">
+                  <h3 className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Floor {floor}</h3>
+                  <span className="text-[10px] text-gray-400 font-semibold">
+                    {items.filter((i) => i.occ.isFullyOccupied || i.occ.isPartiallyOccupied).length}/{items.length} occupied
+                  </span>
+                </div>
+                
+                <div className="space-y-1.5">
+                  {items.map(({ occ, room }) => {
+                    const style = getRoomStyle(occ);
+                    const statusLabel = getRoomStatusLabel(occ);
+                    const hasTenants = occ.tenantsInRoom.length > 0;
+                    
+                    return (
+                      <button
+                        key={room.id}
+                        onClick={() => setSelectedRoom({ occ, room })}
+                        className="w-full text-left bg-white border rounded-xl p-3 flex items-center justify-between gap-3 active:bg-gray-50 transition-colors shadow-sm"
+                        style={{ borderLeftWidth: '4px', borderLeftColor: style.accent }}
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-bold text-gray-900">Room {occ.roomNumber}</span>
+                            <span
+                              className="text-[9px] font-extrabold px-1.5 py-0.5 rounded uppercase tracking-wider"
+                              style={{ backgroundColor: style.bg, color: style.accent }}
+                            >
+                              {statusLabel}
+                            </span>
+                          </div>
+                          
+                          {/* Tenant summary */}
+                          {hasTenants ? (
+                            <p className="text-[11px] text-gray-650 truncate mt-1">
+                              {occ.tenantsInRoom.map((t) => t.name).join(', ')}
+                            </p>
+                          ) : (
+                            <p className="text-[11px] text-gray-400 mt-1">
+                              {occ.isUnderMaintenance ? 'Awaiting service' : 'Available for assignment'}
+                            </p>
+                          )}
+                          
+                          {/* Bed mapping dots for bed-based rooms */}
+                          {occupancyMode === 'BED_BASED' && occ.totalCapacity > 1 && (
+                            <div className="flex items-center gap-1 mt-1.5">
+                              {Array.from({ length: occ.totalCapacity }).map((_, i) => {
+                                const tenant = occ.tenantsInRoom[i];
+                                const dotColor = tenant
+                                  ? tenant.status === 'payment_overdue'
+                                    ? occupancyDot('overdue')
+                                    : (tenant.status === 'notice_submitted' || tenant.status === 'vacating')
+                                      ? occupancyDot('vacating')
+                                      : occupancyDot('occupied')
+                                  : occupancyDot('vacant');
+                                return (
+                                  <span
+                                    key={i}
+                                    className="w-2 h-2 rounded-full"
+                                    style={{ backgroundColor: dotColor }}
+                                  />
+                                );
+                              })}
+                              <span className="text-[10px] text-gray-400 ml-1">
+                                {occ.occupiedCount}/{occ.totalCapacity} beds
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                        
+                        <div className="text-right flex-shrink-0 flex flex-col items-end justify-between self-stretch py-0.5">
+                          <span className="text-xs font-bold text-gray-900">₹{room.rent.toLocaleString('en-IN')}</span>
+                          <ChevronRight className="w-3.5 h-3.5 text-gray-405 mt-auto" />
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+            
+          {floorData.length === 0 && (
+            <div className="bg-white rounded-xl border border-gray-250 p-6 text-xs text-gray-500 text-center shadow-sm">
+              No rooms added for this property yet.
+            </div>
+          )}
+        </div>
+
+        {/* Room detail sheet */}
+        <RoomDetailSheet
+          occ={selectedRoom?.occ ?? null}
+          room={selectedRoom?.room ?? null}
+          mode={occupancyMode}
+          propertyName={currentProperty.name}
+          open={selectedRoom !== null}
+          onClose={() => setSelectedRoom(null)}
+          onTenantClick={onTenantClick}
+          onNavigate={onNavigate}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Page header + property switcher */}
@@ -834,8 +1085,7 @@ export function BuildingView({ onTenantClick, onNavigate, onBack }: BuildingView
             <button
               onClick={() => (onBack ? onBack() : onNavigate?.('properties'))}
               aria-label="Go back"
-              className="flex items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 hover:bg-gray-50 hover:text-gray-800 transition-colors flex-shrink-0"
-              style={{ width: 34, height: 34 }}
+              className="ds-back-btn"
             >
               <ArrowLeft className="w-4 h-4" />
             </button>

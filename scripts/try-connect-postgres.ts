@@ -1,7 +1,12 @@
 import pg from 'pg';
 const { Client } = pg;
 
-const password = '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';
+// Set SUPABASE_DB_PASSWORD in .env.local (never hardcode credentials here).
+const password = process.env.SUPABASE_DB_PASSWORD;
+if (!password) {
+  console.error('Set SUPABASE_DB_PASSWORD in your environment before running this script.');
+  process.exit(1);
+}
 const host = 'aws-1-ap-northeast-2.pooler.supabase.com';
 const ports = [5432, 6543];
 const users = ['postgres', 'postgres.krkzklxfczukvllhucsg'];

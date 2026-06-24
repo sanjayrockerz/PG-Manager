@@ -4,6 +4,7 @@ import { Button } from './ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './ui/dialog';
 import { Input } from './ui/input';
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from './ui/sheet';
 import {
   ArrowLeft, FileText, Calendar, Wrench, User,
   MapPin, Phone, Mail, IndianRupee, CheckCircle,
@@ -1536,6 +1537,16 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
   const [vacateOpen, setVacateOpen] = useState(false);
   const [extendOpen, setExtendOpen] = useState(false);
   const [archiving, setArchiving] = useState(false);
+
+  const [isMobile, setIsMobile] = useState(false);
+  const [actionsSheetOpen, setActionsSheetOpen] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
   // Receipt/invoice authority is always the registered property owner — fetched
   // by tenant.ownerId, never the logged-in user (who may be a manager/staff).
   const [receiptOwnerName, setReceiptOwnerName] = useState<string | undefined>(undefined);
@@ -1545,13 +1556,14 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
 
   const handleResendInvitation = async () => {
     if (!tenant) return;
-    if (!tenant.email || tenant.email.includes('noemail.')) {
-      toast.error('Add an email address for this tenant before sending an invitation.');
+    const hasEmail = Boolean(tenant.email && !tenant.email.includes('noemail.'));
+    if (!hasEmail && !tenant.phone) {
+      toast.error('Add an email address or phone number for this tenant before sending an invitation.');
       return;
     }
     setResendingInvite(true);
     try {
-      const { invitationSentAt, whatsappSent } = await resendTenantInvitation({
+      const { invitationSentAt, whatsappSent, emailSent } = await resendTenantInvitation({
         id: tenant.id,
         email: tenant.email,
         name: tenant.name,
@@ -1561,11 +1573,15 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
         propertyName: property?.name ?? null,
       });
       setTenant((prev) => (prev ? { ...prev, invitationSentAt } : prev));
-      toast.success(
-        whatsappSent
-          ? `Invitation sent to ${tenant.email} and WhatsApp.`
-          : `Invitation sent to ${tenant.email}.`,
-      );
+      if (emailSent && whatsappSent) {
+        toast.success(`Invitation sent to ${tenant.email} and WhatsApp.`);
+      } else if (emailSent) {
+        toast.success(`Invitation sent to ${tenant.email}.`);
+      } else if (whatsappSent) {
+        toast.success('Invitation sent via WhatsApp.');
+      } else {
+        toast.error('Invitation could not be delivered — check email/WhatsApp configuration in Settings.');
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to send invitation.');
     } finally {
@@ -1659,6 +1675,483 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
 
   const pendingPayments = payments.filter((p) => p.status === 'pending' || p.status === 'overdue');
   const pendingTotal = pendingPayments.reduce((sum, p) => sum + p.totalAmount, 0);
+
+  if (isMobile) {
+    return (
+      <div className="p-3 bg-gray-50 min-h-screen pb-24">
+        {/* Back navigation */}
+        <div className="flex items-center justify-between mb-4">
+          <Button variant="ghost" onClick={onBack} className="text-gray-600 px-2 py-1 h-auto active:bg-gray-200">
+            <ArrowLeft className="w-4 h-4 mr-1.5" /> Back
+          </Button>
+          
+          {/* Action trigger button */}
+          <Sheet open={actionsSheetOpen} onOpenChange={setActionsSheetOpen}>
+            <Button
+              onClick={() => setActionsSheetOpen(true)}
+              className="bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-xs px-3 py-1.5 h-8 rounded-lg font-semibold flex items-center gap-1"
+            >
+              Actions <ChevronDown className="w-3 h-3" />
+            </Button>
+            <SheetContent side="bottom" className="rounded-t-2xl px-4 pb-6 pt-4 max-h-[85vh] overflow-y-auto">
+              <SheetHeader className="mb-4">
+                <SheetTitle className="text-left text-sm font-bold uppercase tracking-wider text-gray-500">
+                  Manage Tenant: {tenant.name}
+                </SheetTitle>
+              </SheetHeader>
+              <div className="space-y-2.5">
+                {canActivate && (
+                  <Button
+                    size="lg"
+                    variant="outline"
+                    onClick={async () => {
+                      setActionsSheetOpen(false);
+                      try {
+                        const updated = await supabaseLifecycleApi.activateTenant(tenant.id);
+                        setTenant(updated);
+                        toast.success('Tenant lease activated successfully!');
+                      } catch (err) {
+                        toast.error(err instanceof Error ? err.message : 'Failed to activate tenant');
+                      }
+                    }}
+                    className="w-full border-green-300 text-green-700 hover:bg-green-50 active:bg-green-100 justify-start h-11"
+                  >
+                    <UserCheck className="w-4 h-4 mr-3" /> Activate Lease
+                  </Button>
+                )}
+                {tenant.status === 'active' && (
+                  <Button
+                    size="lg"
+                    variant="outline"
+                    onClick={() => {
+                      setActionsSheetOpen(false);
+                      setExtendOpen(true);
+                    }}
+                    className="w-full border-blue-300 text-blue-700 hover:bg-blue-50 active:bg-blue-100 justify-start h-11"
+                  >
+                    <Calendar className="w-4 h-4 mr-3" /> Extend Lease / Update Terms
+                  </Button>
+                )}
+                {canVacate && (
+                  <Button
+                    size="lg"
+                    variant="outline"
+                    onClick={() => {
+                      setActionsSheetOpen(false);
+                      setVacateOpen(true);
+                    }}
+                    className="w-full border-red-300 text-red-700 hover:bg-red-50 active:bg-red-100 justify-start h-11"
+                  >
+                    <LogOut className="w-4 h-4 mr-3" /> Submit Vacate Notice
+                  </Button>
+                )}
+                {canArchive && (
+                  <Button
+                    size="lg"
+                    variant="outline"
+                    onClick={() => {
+                      setActionsSheetOpen(false);
+                      void handleArchive();
+                    }}
+                    disabled={archiving}
+                    className="w-full border-gray-300 text-gray-700 hover:bg-gray-50 active:bg-gray-100 justify-start h-11"
+                  >
+                    {archiving ? (
+                      <Loader2 className="w-4 h-4 mr-3 animate-spin" />
+                    ) : (
+                      <Archive className="w-4 h-4 mr-3" />
+                    )}
+                    Archive Tenant
+                  </Button>
+                )}
+                
+                {/* Invitation Action inside Sheet */}
+                {(() => {
+                  const hasEmail = Boolean(tenant.email && !tenant.email.includes('noemail.'));
+                  const hasPhone = Boolean(tenant.phone);
+                  const canInvite = hasEmail || hasPhone;
+                  const sentAt = tenant.invitationSentAt;
+                  return (
+                    <Button
+                      size="lg"
+                      variant="outline"
+                      disabled={resendingInvite || !canInvite}
+                      onClick={() => {
+                        setActionsSheetOpen(false);
+                        void handleResendInvitation();
+                      }}
+                      className="w-full border-indigo-300 text-indigo-700 hover:bg-indigo-50 active:bg-indigo-100 justify-start h-11"
+                    >
+                      {resendingInvite ? (
+                        <Loader2 className="w-4 h-4 mr-3 animate-spin" />
+                      ) : (
+                        <Mail className="w-4 h-4 mr-3" />
+                      )}
+                      {sentAt ? 'Resend Portal Invitation' : 'Send Portal Invitation'}
+                    </Button>
+                  );
+                })()}
+              </div>
+            </SheetContent>
+          </Sheet>
+        </div>
+
+        {/* Move-out alert */}
+        {(tenant.status === 'notice_submitted' || tenant.status === 'vacating') && tenant.vacateDate && (
+          <div className="mb-4 bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-start gap-2.5 shadow-sm">
+            <AlertTriangle className="w-4.5 h-4.5 text-amber-600 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="text-xs font-semibold text-amber-800">
+                {tenant.status === 'vacating' ? 'Vacating Soon' : 'Vacate Notice Submitted'}
+              </p>
+              <p className="text-[11px] text-amber-700 mt-0.5">
+                Move-out: <strong>{new Date(tenant.vacateDate).toLocaleDateString('en-IN')}</strong>
+                {tenant.vacateReason && ` — ${tenant.vacateReason}`}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Mobile Profile Card */}
+        <Card className="border-gray-200 shadow-sm mb-4">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-3 mb-4">
+              <div
+                className="w-12 h-12 rounded-xl flex items-center justify-center font-bold text-sm"
+                style={{ background: '#EEF2FF', color: '#6366F1', letterSpacing: '-0.02em' }}
+              >
+                {initials}
+              </div>
+              <div className="min-w-0 flex-1">
+                <h1 className="text-lg font-bold text-gray-900 leading-tight truncate">{tenant.name}</h1>
+                <span className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold mt-1 ${statusClass}`}>
+                  {statusLabel}
+                </span>
+              </div>
+            </div>
+
+            {/* Quick Contact Icons */}
+            <div className="flex gap-2 mb-4 border-b border-gray-100 pb-3">
+              {tenant.phone && (
+                <a
+                  href={`tel:${tenant.phone}`}
+                  className="flex-1 flex items-center justify-center gap-1.5 border border-gray-200 rounded-lg text-xs font-semibold text-gray-700 bg-white hover:bg-gray-50 active:bg-gray-100 transition-colors py-2.5"
+                >
+                  <Phone className="w-3.5 h-3.5 text-indigo-500" /> Call Tenant
+                </a>
+              )}
+              {tenant.email && !tenant.email.includes('noemail.') && (
+                <a
+                  href={`mailto:${tenant.email}`}
+                  className="flex-1 flex items-center justify-center gap-1.5 border border-gray-200 rounded-lg text-xs font-semibold text-gray-700 bg-white hover:bg-gray-50 active:bg-gray-100 transition-colors py-2.5"
+                >
+                  <Mail className="w-3.5 h-3.5 text-indigo-500" /> Email Tenant
+                </a>
+              )}
+            </div>
+
+            {/* Critical details in 2x2 grid */}
+            <div className="grid grid-cols-2 gap-3 text-xs">
+              <div className="bg-gray-50 rounded-lg p-2.5 border border-gray-100">
+                <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-0.5">Rent</p>
+                <p className="font-bold text-gray-900 text-[13px]">₹{tenant.rent.toLocaleString()}</p>
+                <p className="text-[10px] text-gray-400 mt-0.5">Due: {tenant.rentDueDate}th</p>
+              </div>
+              <div className="bg-gray-50 rounded-lg p-2.5 border border-gray-100">
+                <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-0.5">Room & Floor</p>
+                <p className="font-bold text-gray-900 text-[13px]">Room {tenant.room}</p>
+                <p className="text-[10px] text-gray-400 mt-0.5">Floor {tenant.floor}{tenant.bed ? ` · Bed ${tenant.bed}` : ''}</p>
+              </div>
+              <div className="bg-gray-50 rounded-lg p-2.5 border border-gray-100">
+                <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-0.5">Security Deposit</p>
+                <p className="font-bold text-gray-900 text-[13px]">₹{tenant.securityDeposit.toLocaleString()}</p>
+              </div>
+              <div className="bg-gray-50 rounded-lg p-2.5 border border-gray-100">
+                <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-0.5">Joined Date</p>
+                <p className="font-bold text-gray-900 text-[13px]">{new Date(tenant.joinDate).toLocaleDateString('en-IN')}</p>
+              </div>
+            </div>
+
+            {/* Additional info */}
+            <div className="mt-3.5 pt-3.5 border-t border-gray-100 flex items-center justify-between text-xs text-gray-500">
+              <span className="flex items-center gap-1"><MapPin className="w-3.5 h-3.5 text-gray-450" /> {getPropertyName(tenant.propertyId)}</span>
+              {tenant.vacateDate && (
+                <span className="text-amber-600 font-semibold flex items-center gap-1">
+                  <LogOut className="w-3.5 h-3.5" /> Out: {new Date(tenant.vacateDate).toLocaleDateString('en-IN')}
+                </span>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Tabs block */}
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <TabsList className="mb-4 bg-white border border-gray-200 h-auto gap-1 overflow-x-auto flex-nowrap w-full justify-start py-1" style={{ display: 'flex', scrollbarWidth: 'none' }}>
+            <TabsTrigger value="activity" className="text-xs py-1.5 px-3 data-[state=active]:bg-[#4F46E5] data-[state=active]:text-white">
+              <Activity className="w-3.5 h-3.5 mr-1" /> Activity
+            </TabsTrigger>
+            <TabsTrigger value="payments" className="text-xs py-1.5 px-3 data-[state=active]:bg-[#4F46E5] data-[state=active]:text-white">
+              <IndianRupee className="w-3.5 h-3.5 mr-1" /> Payments
+            </TabsTrigger>
+            <TabsTrigger value="maintenance" className="text-xs py-1.5 px-3 data-[state=active]:bg-[#4F46E5] data-[state=active]:text-white">
+              <Wrench className="w-3.5 h-3.5 mr-1" /> Maintenance
+            </TabsTrigger>
+            <TabsTrigger value="profile" className="text-xs py-1.5 px-3 data-[state=active]:bg-[#4F46E5] data-[state=active]:text-white">
+              <ShieldCheck className="w-3.5 h-3.5 mr-1" /> Profile
+            </TabsTrigger>
+            <TabsTrigger value="documents" className="text-xs py-1.5 px-3 data-[state=active]:bg-[#4F46E5] data-[state=active]:text-white">
+              <FileText className="w-3.5 h-3.5 mr-1" /> Docs
+            </TabsTrigger>
+            {tenant.vacateDate && (
+              <TabsTrigger value="settlement" className="text-xs py-1.5 px-3 data-[state=active]:bg-[#4F46E5] data-[state=active]:text-white">
+                <History className="w-3.5 h-3.5 mr-1" /> Refund
+              </TabsTrigger>
+            )}
+          </TabsList>
+
+          {/* Activity tab */}
+          <TabsContent value="activity">
+            <Card className="border-gray-200 shadow-sm">
+              <CardHeader className="p-4 pb-2">
+                <CardTitle className="flex items-center gap-1.5 text-sm font-bold text-gray-800">
+                  <Activity className="w-4 h-4 text-indigo-600" /> Activity Timeline
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-4 pt-2">
+                <ActivityTimeline tickets={tickets} tenant={tenant} />
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Payments tab */}
+          <TabsContent value="payments">
+            <Card className="border-gray-200 shadow-sm">
+              <CardHeader className="p-4 pb-2"><CardTitle className="text-sm font-bold">Payment History</CardTitle></CardHeader>
+              <CardContent className="p-4 pt-2">
+                {deferredLoading ? (
+                  <div className="space-y-2">
+                    {[0, 1, 2].map((i) => <div key={i} className="ds-skeleton h-14 rounded-lg" />)}
+                  </div>
+                ) : payments.length === 0 ? (
+                  <div className="text-center py-6 text-gray-400">
+                    <Receipt className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                    <p className="text-xs font-semibold">No payment records</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {payments.map((p) => (
+                      <div key={p.id} className="bg-white border border-gray-200 rounded-xl p-3 flex flex-col gap-2 shadow-sm" style={{ opacity: !isCurrentlyInRoom && p.status !== 'paid' ? 0.6 : 1 }}>
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <p className="text-sm font-bold text-gray-900">₹{p.totalAmount.toLocaleString()}</p>
+                            <p className="text-[10px] text-gray-400 mt-0.5">
+                              Due {new Date(p.dueDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                            </p>
+                          </div>
+                          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${paymentStatusColor[p.status] ?? 'bg-gray-100 text-gray-700'}`}>
+                            {p.status === 'paid' && <CheckCircle className="w-3 h-3" />}
+                            {p.status === 'pending' && <Clock className="w-3 h-3" />}
+                            {p.status === 'overdue' && <AlertCircle className="w-3 h-3" />}
+                            {p.status}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center text-[11px] text-gray-500 border-t border-gray-50 pt-2 mt-1">
+                          <div className="flex gap-2">
+                            <span>Rent: ₹{p.monthlyRent.toLocaleString()}</span>
+                            {p.extraCharges > 0 && <span>Extra: ₹{p.extraCharges.toLocaleString()}</span>}
+                          </div>
+                          {p.paidDate && <span>Paid: {new Date(p.paidDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}</span>}
+                        </div>
+                        {p.status === 'paid' && (
+                          <Button size="sm" variant="outline" className="h-8 text-xs text-green-700 border-green-200 w-full mt-1.5" onClick={() => handleOpenDocument(p)}>
+                            <Receipt className="w-3.5 h-3.5 mr-1" /> View Receipt
+                          </Button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Maintenance tab */}
+          <TabsContent value="maintenance">
+            <Card className="border-gray-200 shadow-sm">
+              <CardHeader className="p-4 pb-2"><CardTitle className="text-sm font-bold">Maintenance Requests</CardTitle></CardHeader>
+              <CardContent className="p-4 pt-2">
+                {deferredLoading ? (
+                  <div className="space-y-2">
+                    {[0, 1, 2].map((i) => <div key={i} className="ds-skeleton h-14 rounded-lg" />)}
+                  </div>
+                ) : tickets.length === 0 ? (
+                  <div className="text-center py-6 text-gray-400">
+                    <Wrench className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                    <p className="text-xs font-semibold">No maintenance tickets</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {tickets.map((t) => (
+                      <div key={t.id} className="bg-white border border-gray-200 rounded-xl p-3 flex flex-col gap-2 shadow-sm">
+                        <div className="flex justify-between items-start">
+                          <div className="min-w-0">
+                            <p className="text-[10px] text-gray-400 font-bold">{t.ticketId}</p>
+                            <p className="text-xs font-bold text-gray-900 truncate mt-0.5">{t.issue}</p>
+                          </div>
+                          <span className={`flex-shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${ticketStatusColor[t.status] ?? 'bg-gray-100 text-gray-700'}`}>
+                            {ticketStatusLabel[t.status] ?? t.status}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center text-[11px] text-gray-500 border-t border-gray-50 pt-2 mt-1">
+                          <span className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold ${priorityColor[t.priority] ?? 'bg-gray-100 text-gray-700'}`}>
+                            {t.priority.toUpperCase()} PRIORITY
+                          </span>
+                          <span>{new Date(t.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* ID & Guardian tab */}
+          <TabsContent value="profile">
+            <div className="space-y-4">
+              <IdProofSection tenant={tenant} onUpdate={(updated) => setTenant(updated)} />
+              
+              <Card className="border-gray-200 shadow-sm">
+                <CardHeader className="p-4 pb-2"><CardTitle className="text-xs font-bold uppercase tracking-wider text-gray-400">Personal Details</CardTitle></CardHeader>
+                <CardContent className="p-4 pt-2 space-y-2.5 text-xs">
+                  {[
+                    ['Date of Birth', tenant.dob ? new Date(tenant.dob).toLocaleDateString('en-IN') : '—'],
+                    ['Gender', tenant.gender || '—'],
+                    ['Alternate Phone', tenant.alternatePhone || '—'],
+                  ].map(([label, value]) => (
+                    <div key={label} className="flex justify-between">
+                      <span className="text-gray-500">{label}</span>
+                      <span className="font-semibold text-gray-900">{String(value)}</span>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+
+              <Card className="border-gray-200 shadow-sm">
+                <CardHeader className="p-4 pb-2"><CardTitle className="text-xs font-bold uppercase tracking-wider text-gray-400">Guardian / Emergency</CardTitle></CardHeader>
+                <CardContent className="p-4 pt-2 space-y-2.5 text-xs">
+                  {[
+                    ['Name', tenant.parentName || '—'],
+                    ['Relationship', tenant.guardianRelationship || '—'],
+                    ['Phone', tenant.parentPhone || '—'],
+                  ].map(([label, value]) => (
+                    <div key={label} className="flex justify-between">
+                      <span className="text-gray-500">{label}</span>
+                      <span className="font-semibold text-gray-900">{String(value)}</span>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            </div>
+          </TabsContent>
+
+          {/* Documents Tab */}
+          <TabsContent value="documents">
+            <DocumentsTab
+              tenant={tenant}
+              payments={payments}
+              property={property}
+              receiptOwnerName={receiptOwnerName}
+              onTenantUpdate={(updated) => setTenant(updated)}
+              onOpenDocument={handleOpenDocument}
+            />
+          </TabsContent>
+
+          {/* Settlement Tab */}
+          {tenant.vacateDate && (
+            <TabsContent value="settlement">
+              <Card className="border-gray-200 shadow-sm">
+                <CardHeader className="p-4 pb-2">
+                  <CardTitle className="flex items-center gap-1.5 text-sm font-bold">
+                    <ReceiptText className="w-4.5 h-4.5 text-indigo-600" /> Settlement Record
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="p-4 pt-2 space-y-3 text-xs">
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      ['Move-Out Date', new Date(tenant.vacateDate).toLocaleDateString('en-IN')],
+                      ['Status', TENANT_STATUS_LABELS[tenant.status]],
+                      ['Security Deposit', `₹${tenant.securityDeposit.toLocaleString()}`],
+                      ['Reason', tenant.vacateReason ?? '—'],
+                    ].map(([label, value]) => (
+                      <div key={label} className="bg-gray-50 rounded-lg p-2.5 border border-gray-100">
+                        <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-0.5">{label}</p>
+                        <p className="font-bold text-gray-900">{value}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="bg-amber-50 border border-amber-100 rounded-lg p-2.5 text-[11px] text-amber-800 leading-normal">
+                    Full settlement breakdown generated at vacate. Print the receipt below for full breakdown details.
+                  </div>
+
+                  <Button
+                    variant="outline"
+                    className="w-full text-xs gap-1.5 text-gray-700 h-9"
+                    onClick={() => {
+                      printSettlementReceipt({
+                        tenantName: tenant.name,
+                        room: tenant.room,
+                        floor: String(tenant.floor),
+                        joinDate: tenant.joinDate,
+                        vacateDate: tenant.vacateDate!,
+                        reason: tenant.vacateReason ?? '',
+                        securityDeposit: tenant.securityDeposit,
+                        deductionBreakdown: [],
+                        totalDeductions: 0,
+                        netRefund: tenant.securityDeposit,
+                        pendingRentTotal: 0,
+                        settledAt: new Date().toISOString(),
+                        propertyName: property?.name ?? '',
+                        ownerName: receiptOwnerName ?? '',
+                      });
+                    }}
+                  >
+                    <Printer className="w-4 h-4" /> Print Settlement Receipt
+                  </Button>
+                </CardContent>
+              </Card>
+            </TabsContent>
+          )}
+        </Tabs>
+
+        {/* Existing modals */}
+        {extendOpen && <ExtendLeaseModal tenant={tenant} open={extendOpen} onClose={() => setExtendOpen(false)} onComplete={(t) => setTenant(t)} />}
+        {vacateOpen && (
+          <VacateWorkflowModal
+            tenant={tenant}
+            pendingPayments={pendingPayments}
+            propertyName={property?.name ?? ''}
+            ownerName={receiptOwnerName ?? ''}
+            open={vacateOpen}
+            onClose={() => setVacateOpen(false)}
+            onComplete={(updated) => {
+              setTenant(updated);
+              void load();
+            }}
+          />
+        )}
+
+        <PaymentDocumentDialog
+          open={docDialogOpen}
+          onOpenChange={setDocDialogOpen}
+          payment={selectedDocPayment}
+          propertyName={property?.name ?? ''}
+          ownerName={receiptOwnerName}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 bg-gray-50 min-h-screen pb-20 md:pb-6">
@@ -1797,6 +2290,8 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
               <div className="mt-4 flex flex-wrap items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5">
                 {(() => {
                   const hasEmail = Boolean(tenant.email && !tenant.email.includes('noemail.'));
+                  const hasPhone = Boolean(tenant.phone);
+                  const canInvite = hasEmail || hasPhone;
                   const sentAt = tenant.invitationSentAt;
                   return (
                     <>
@@ -1812,17 +2307,17 @@ export function TenantDetail({ tenantId, onBack }: TenantDetailProps) {
                       <span className="text-xs text-gray-500">
                         {sentAt
                           ? `Last sent: ${new Date(sentAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`
-                          : hasEmail
+                          : canInvite
                             ? 'No portal invitation has been sent yet.'
-                            : 'No email on file — add one to enable portal access.'}
+                            : 'No email or phone on file — add one to enable portal access.'}
                       </span>
                       <Button
                         size="sm"
                         variant="outline"
-                        disabled={resendingInvite || !hasEmail}
+                        disabled={resendingInvite || !canInvite}
                         onClick={() => void handleResendInvitation()}
                         className="ml-auto h-8 text-xs border-indigo-300 text-indigo-600 hover:bg-indigo-50 hover:border-indigo-400"
-                        title={hasEmail ? 'Send a fresh magic-link sign-in email' : 'Add an email address first'}
+                        title={canInvite ? 'Send the email and/or WhatsApp invitation' : 'Add an email address or phone number first'}
                       >
                         {resendingInvite
                           ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />

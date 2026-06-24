@@ -484,6 +484,56 @@ export async function getPayments(propertyId: string | 'all' = 'all'): Promise<P
   return structuredClone(data);
 }
 
+/**
+ * Proactively bills every currently-occupied tenant for next calendar month,
+ * just like a normal PG ledger raises the upcoming month's rent in advance
+ * rather than waiting for the current month to be settled. Idempotent — only
+ * creates a row for tenants who don't already have one for that due date.
+ * Returns the number of payment rows created.
+ */
+export async function ensureNextMonthPaymentsGenerated(propertyId: string | 'all' = 'all'): Promise<number> {
+  const mode = getAppMode();
+  if (mode === 'demo') {
+    const created = withDemoStoreMutation((store) => {
+      const now = new Date();
+      const targetYear = now.getFullYear();
+      const targetMonthIndex = now.getMonth() + 1;
+      const scopedTenants = filterByProperty(store.tenants, propertyId)
+        .filter((t) => isTenantCurrentlyInRoom(t.status));
+
+      let count = 0;
+      for (const tenant of scopedTenants) {
+        const dueDay = Math.min(Math.max(tenant.rentDueDate || 1, 1), 28);
+        const dueDate = new Date(targetYear, targetMonthIndex, dueDay);
+        const dueDateStr = toDateOnly(dueDate);
+        const alreadyExists = store.payments.some((p) => p.tenantId === tenant.id && p.dueDate === dueDateStr);
+        if (alreadyExists) continue;
+        store.payments.unshift({
+          id: createDemoId('payment'),
+          tenantId: tenant.id,
+          tenant: tenant.name,
+          propertyId: tenant.propertyId,
+          room: tenant.room,
+          monthlyRent: tenant.rent,
+          extraCharges: 0,
+          totalAmount: tenant.rent,
+          dueDate: dueDateStr,
+          paidDate: '',
+          status: 'pending',
+          createdAt: new Date().toISOString(),
+        });
+        count++;
+      }
+      return count;
+    });
+    return created;
+  }
+
+  const created = await runSupabase(mode, () => supabaseOwnerDataApi.ensureNextMonthPaymentsGenerated(propertyId));
+  invalidatePaymentCache(propertyId);
+  return created;
+}
+
 export async function getSupportTickets(propertyId: string | 'all' = 'all'): Promise<SupportTicketRecord[]> {
   const mode = getAppMode();
   if (mode === 'demo') {
@@ -711,17 +761,20 @@ export async function createTenantRecord(input: TenantCreateInput): Promise<Tena
   return runSupabase(mode, async () => {
     const created = await supabaseOwnerDataApi.createTenant(input);
 
-    // Auto-provision tenant auth account + send magic-link invitation (fire-and-forget,
-    // non-blocking). The owner never has to create the tenant's account separately.
+    // Auto-provision tenant auth account + send the email and/or WhatsApp
+    // invitation (fire-and-forget, non-blocking). Runs whenever the tenant has a
+    // real email and/or a phone number — the two channels are independent, so a
+    // tenant with only a phone number still gets a WhatsApp welcome message.
     void (async () => {
       try {
-        if (input.email && !input.email.includes('noemail.')) {
+        const hasRealEmail = Boolean(created.email) && !created.email.includes('noemail.');
+        if (hasRealEmail || created.phone) {
           const propertyName = await getProperties()
             .then((list) => list.find((p) => p.id === created.propertyId)?.name ?? null)
             .catch(() => null);
           await supabaseTenantProvisioningApi.inviteTenant({
             tenantId: created.id,
-            email: input.email,
+            email: created.email,
             name: created.name,
             ownerId: created.ownerId,
             propertyId: created.propertyId,
@@ -796,14 +849,15 @@ export async function resendTenantInvitation(tenant: {
   propertyId: string;
   phone?: string | null;
   propertyName?: string | null;
-}): Promise<{ invitationSentAt: string; whatsappSent: boolean }> {
+}): Promise<{ invitationSentAt: string; whatsappSent: boolean; emailSent: boolean }> {
   const mode = getAppMode();
   if (mode === 'demo') {
     // Demo mode never touches Supabase Auth — just simulate a successful send.
-    return { invitationSentAt: new Date().toISOString(), whatsappSent: false };
+    return { invitationSentAt: new Date().toISOString(), whatsappSent: false, emailSent: false };
   }
-  if (!tenant.email || tenant.email.includes('noemail.')) {
-    throw new Error('This tenant has no email address on file. Add an email before sending an invitation.');
+  const hasRealEmail = Boolean(tenant.email) && !tenant.email.includes('noemail.');
+  if (!hasRealEmail && !tenant.phone) {
+    throw new Error('This tenant has no email or phone number on file. Add at least one before sending an invitation.');
   }
   return runSupabase(mode, () => supabaseTenantProvisioningApi.inviteTenant({
     tenantId: tenant.id,

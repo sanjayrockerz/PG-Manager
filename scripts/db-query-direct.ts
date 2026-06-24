@@ -1,7 +1,12 @@
 import pg from 'pg';
 const { Client } = pg;
 
-const connectionString = 'postgresql://postgres.krkzklxfczukvllhucsg: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@db.krkzklxfczukvllhucsg.supabase.co:5432/postgres';
+// Set SUPABASE_DB_URL in .env.local (never hardcode credentials here).
+const connectionString = process.env.SUPABASE_DB_URL;
+if (!connectionString) {
+  console.error('Set SUPABASE_DB_URL in your environment before running this script.');
+  process.exit(1);
+}
 
 async function main() {
   const client = new Client({

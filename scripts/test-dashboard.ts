@@ -29,31 +29,28 @@ const anonKey = process.env['VITE_SUPABASE_ANON_KEY'] ?? '';
 const client = createClient(url, anonKey);
 
 async function run() {
-  const email = 'admin.demo@pgmanager.app';
-  const password = 'RentCare#Admin2026!'; // from verify-admin-login.ts
-  
+  const email = process.env['DEBUG_LOGIN_EMAIL'];
+  const password = process.env['DEBUG_LOGIN_PASSWORD'];
+  if (!email || !password) {
+    console.error('Set DEBUG_LOGIN_EMAIL and DEBUG_LOGIN_PASSWORD in your environment before running this script.');
+    process.exit(1);
+  }
+
   console.log(`Logging in as ${email}...`);
   const login = await client.auth.signInWithPassword({ email, password });
-  
+
   if (login.error) {
     console.log('Login failed:', login.error.message);
-    // try the other password
-    const login2 = await client.auth.signInWithPassword({ email, password: 'RentCare#Demo2026!' });
-    if (login2.error) {
-      console.log('Second login failed:', login2.error.message);
-      return;
-    }
-    console.log('Logged in with second password!');
-  } else {
-    console.log('Logged in!');
+    return;
   }
+  console.log('Logged in!');
 
   // Trace getting profiles
   const res = await client.from('profiles').select('id,email,full_name,phone,role').eq('role', 'owner');
   console.log('Profiles returned:', res.data?.length, 'error:', res.error);
 
   // Trace getting profile
-  const me = await client.from('profiles').select('*').eq('id', login.data?.user?.id ?? login2?.data?.user?.id);
+  const me = await client.from('profiles').select('*').eq('id', login.data?.user?.id);
   console.log('My profile:', me.data);
 }
 

@@ -10,10 +10,9 @@
 import { supabase } from './_supabase';
 
 const DEFAULT_EMAIL = 'admin@rentcare.com';
-const DEFAULT_PASSWORD = 'RentCare#Admin2026!';
 
 const email = process.env['ADMIN_EMAIL'] ?? DEFAULT_EMAIL;
-const password = process.env['ADMIN_PASSWORD'] ?? DEFAULT_PASSWORD;
+const password = process.env['ADMIN_PASSWORD'];
 
 async function main(): Promise<void> {
   if (!process.env['SUPABASE_SERVICE_ROLE_KEY']) {
@@ -21,6 +20,14 @@ async function main(): Promise<void> {
       '\nMissing SUPABASE_SERVICE_ROLE_KEY.\n' +
       'Set it in .env.local (Project Settings → API → service_role key in the Supabase dashboard).\n' +
       'The anon key cannot create auth users.\n'
+    );
+    process.exit(1);
+  }
+
+  if (!password) {
+    console.error(
+      '\nMissing ADMIN_PASSWORD.\n' +
+      "Run with ADMIN_PASSWORD='<a strong password>' npm run bootstrap:admin — never hardcode it in source.\n"
     );
     process.exit(1);
   }

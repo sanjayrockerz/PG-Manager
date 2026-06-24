@@ -30,11 +30,14 @@ const anonKey = process.env['VITE_SUPABASE_ANON_KEY'] ?? '';
 const client = createClient(url, anonKey);
 
 async function run() {
-  console.log('Logging in as admin.demo@pgmanager.app ...');
-  const login = await client.auth.signInWithPassword({
-    email: 'admin.demo@pgmanager.app',
-    password: 'RentCare#Demo2026!'
-  });
+  const email = process.env['DEBUG_LOGIN_EMAIL'];
+  const password = process.env['DEBUG_LOGIN_PASSWORD'];
+  if (!email || !password) {
+    console.error('Set DEBUG_LOGIN_EMAIL and DEBUG_LOGIN_PASSWORD in your environment before running this script.');
+    process.exit(1);
+  }
+  console.log(`Logging in as ${email} ...`);
+  const login = await client.auth.signInWithPassword({ email, password });
   console.log('Login result:');
   console.dir(login, { depth: null });
 }

@@ -57,6 +57,8 @@ type AdminView =
   | 'dashboard'
   | 'owners'
   | 'subscriptions'
+  | 'plans'
+  | 'offers-coupons'
   | 'transactions'
   | 'support'
   | 'analytics'
@@ -238,7 +240,7 @@ export function AdminSection() {
 
   // Owner detail state
   const [selectedOwner, setSelectedOwner] = useState<OwnerCard | null>(null);
-  const [ownerDetail, setOwnerDetail] = useState<Awaited<ReturnType<typeof supabaseAdminDataApi.getAdminOwnerDetailedView>> | null>(null);
+  const [ownerDetail, setOwnerDetail] = useState<any | null>(null);
   const [isLoadingDetail, setIsLoadingDetail] = useState(false);
   const [viewAsOwnerOpen, setViewAsOwnerOpen] = useState(false);
 
@@ -255,11 +257,53 @@ export function AdminSection() {
   const [supportPage, setSupportPage] = useState(1);
   const [expandedTicketId, setExpandedTicketId] = useState<string | null>(null);
 
-  const [activeOwnerTab, setActiveOwnerTab] = useState<'overview' | 'subscription' | 'properties' | 'tenants' | 'payments' | 'agreements' | 'documents' | 'support' | 'audit'>('overview');
+  const [activeOwnerTab, setActiveOwnerTab] = useState<'overview' | 'properties' | 'tenants' | 'payments' | 'team-members' | 'subscription' | 'support' | 'timeline' | 'audit-logs'>('overview');
   const [isOwnerDrawerOpen, setIsOwnerDrawerOpen] = useState(false);
   const [replyText, setReplyText] = useState('');
   const [replyInternal, setReplyInternal] = useState(false);
   const [isSendingReply, setIsSendingReply] = useState(false);
+
+  const [ownerTeamMembers, setOwnerTeamMembers] = useState<any[]>([]);
+  const [ownerSubHistory, setOwnerSubHistory] = useState<any[]>([]);
+
+  // Plans Catalog state
+  const [plansList, setPlansList] = useState<any[]>([]);
+  const [isLoadingPlans, setIsLoadingPlans] = useState(false);
+  const [editingPlan, setEditingPlan] = useState<any | null>(null);
+  const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
+  const [planForm, setPlanForm] = useState({
+    code: '',
+    label: '',
+    price: 0,
+    billingCycle: 'monthly',
+    propertyLimit: null as number | null,
+    tenantLimit: null as number | null,
+    features: [] as string[],
+    featureFlags: {
+      whatsapp: false,
+      aiAssistant: false,
+      tenantPortal: true,
+      multiUser: false,
+      receipts: true,
+      buildingView: true
+    }
+  });
+
+  // Coupons state
+  const [couponsList, setCouponsList] = useState<any[]>([]);
+  const [isLoadingCoupons, setIsLoadingCoupons] = useState(false);
+  const [editingCoupon, setEditingCoupon] = useState<any | null>(null);
+  const [isCouponModalOpen, setIsCouponModalOpen] = useState(false);
+  const [couponForm, setCouponForm] = useState({
+    code: '',
+    description: '',
+    discountType: 'percent' as 'percent' | 'flat',
+    discountValue: 0,
+    maxUses: '' as string | number,
+    validUntil: '',
+    planRestriction: '',
+    isActive: true
+  });
 
   // MRR / Analytics
   const [mrrData, setMrrData] = useState<Awaited<ReturnType<typeof supabaseAdminDataApi.getMRRHistory>> | null>(null);
@@ -398,7 +442,114 @@ export function AdminSection() {
     }
   }, []);
 
-  useEffect(() => { void loadSummary(); }, [loadSummary]);
+  const loadPlans = useCallback(async () => {
+    setIsLoadingPlans(true);
+    try {
+      if (isDemoModeEnabled()) {
+        setPlansList([
+          {
+            id: 'plan-starter',
+            code: 'starter',
+            label: 'Starter Plan',
+            price: 999,
+            billing_cycle: 'monthly',
+            property_limit: 2,
+            tenant_limit: 10,
+            features: ['Receipt Generator', 'Basic Support'],
+            feature_flags: { whatsapp: false, aiAssistant: false, tenantPortal: true, multiUser: false, receipts: true, buildingView: true },
+            is_active: true,
+            is_archived: false,
+            created_at: new Date().toISOString()
+          },
+          {
+            id: 'plan-growth',
+            code: 'growth',
+            label: 'Growth Plan',
+            price: 1999,
+            billing_cycle: 'monthly',
+            property_limit: 5,
+            tenant_limit: 30,
+            features: ['Receipt Generator', 'WhatsApp Integration', 'Basic Support'],
+            feature_flags: { whatsapp: true, aiAssistant: false, tenantPortal: true, multiUser: true, receipts: true, buildingView: true },
+            is_active: true,
+            is_archived: false,
+            created_at: new Date().toISOString()
+          },
+          {
+            id: 'plan-pro',
+            code: 'pro',
+            label: 'Pro Enterprise',
+            price: 2999,
+            billing_cycle: 'monthly',
+            property_limit: 20,
+            tenant_limit: 150,
+            features: ['Receipt Generator', 'WhatsApp Integration', 'AI Tenant Assistant', 'Priority Support'],
+            feature_flags: { whatsapp: true, aiAssistant: true, tenantPortal: true, multiUser: true, receipts: true, buildingView: true },
+            is_active: true,
+            is_archived: false,
+            created_at: new Date().toISOString()
+          }
+        ]);
+        return;
+      }
+      const data = await supabaseAdminDataApi.listPlans();
+      setPlansList(data);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to load plans.');
+    } finally {
+      setIsLoadingPlans(false);
+    }
+  }, []);
+
+  const loadCoupons = useCallback(async () => {
+    setIsLoadingCoupons(true);
+    try {
+      if (isDemoModeEnabled()) {
+        setCouponsList([
+          {
+            id: 'cp-1',
+            code: 'WELCOME50',
+            description: '50% discount on Starter/Growth plans',
+            discountType: 'percent',
+            discountValue: 50,
+            maxUses: 100,
+            usedCount: 42,
+            validFrom: new Date(Date.now() - 5*86400000).toISOString(),
+            validUntil: new Date(Date.now() + 30*86400000).toISOString(),
+            isActive: true,
+            planRestriction: 'starter,growth',
+            createdAt: new Date().toISOString()
+          },
+          {
+            id: 'cp-2',
+            code: 'FLAT500',
+            description: 'Flat ₹500 off on Pro plan',
+            discountType: 'flat',
+            discountValue: 500,
+            maxUses: 50,
+            usedCount: 15,
+            validFrom: new Date(Date.now() - 2*86400000).toISOString(),
+            validUntil: new Date(Date.now() + 15*86400000).toISOString(),
+            isActive: true,
+            planRestriction: 'pro',
+            createdAt: new Date().toISOString()
+          }
+        ]);
+        return;
+      }
+      const data = await supabaseAdminDataApi.listCoupons();
+      setCouponsList(data);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to load coupons.');
+    } finally {
+      setIsLoadingCoupons(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadSummary();
+    void loadPlans();
+  }, [loadSummary, loadPlans]);
 
   useEffect(() => {
     if (isDemoModeEnabled()) return;
@@ -409,21 +560,55 @@ export function AdminSection() {
 
   const loadOwnerDetail = useCallback(async (ownerId: string) => {
     if (isDemoModeEnabled()) {
-      // Provide a minimal demo detail view so the drawer works without a real session
       setOwnerDetail({
-        properties: [],
-        tenants: [],
-        agreements: [],
-        documents: [],
-        subscription: null,
-        auditLog: [],
+        properties: [
+          { id: 'prop-1', name: 'Sunset Premium PG Boys Hostel', city: 'Bangalore', total_rooms: 12 },
+          { id: 'prop-2', name: 'Co-Living Hub Girls', city: 'Noida', total_rooms: 8 }
+        ],
+        tenants: [
+          { id: 't-1', name: 'Aditya Sen', status: 'active' },
+          { id: 't-2', name: 'Rohan Sharma', status: 'pending_onboarding' }
+        ],
+        agreements: [
+          { id: 'agr-1', tenantName: 'Aditya Sen', status: 'active', createdAt: new Date(Date.now() - 15*86400000).toISOString() }
+        ],
+        documents: [
+          { id: 'doc-1', tenantName: 'Aditya Sen', docType: 'government_id', label: 'Aadhaar Card', fileUrl: 'https://example.com/id.pdf', createdAt: new Date(Date.now() - 15*86400000).toISOString() }
+        ],
+        subscription: { planCode: 'pro', status: 'active', amount: 2499, billingCycle: 'monthly', renewsAt: new Date(Date.now() + 15*86400000).toISOString(), seats: 5, updatedAt: new Date().toISOString() },
+        payments: [
+          { id: 'p-1', tenant_name: 'Aditya Sen', room: '101-A', total_amount: 8500, due_date: new Date().toISOString(), status: 'paid' },
+          { id: 'p-2', tenant_name: 'Rohan Sharma', room: '202-B', total_amount: 9000, due_date: new Date().toISOString(), status: 'pending' }
+        ],
+        support: [
+          { id: 's-1', subject: 'WhatsApp Gateway not sending messages', status: 'open' }
+        ],
+        audit: [
+          { id: 'a-1', event: 'TENANT_INVITED', detail: 'Invitation sent to Rohan Sharma', created_at: new Date().toISOString() }
+        ]
       } as any);
+
+      setOwnerTeamMembers([
+        { id: 'team-1', email: 'manager@hivedemo.com', full_name: 'Suresh Kumar', role: 'owner_manager' },
+        { id: 'team-2', email: 'staff@hivedemo.com', full_name: 'Ramesh Singh', role: 'staff' }
+      ]);
+
+      setOwnerSubHistory([
+        { id: 'sh-1', plan_code: 'pro', status: 'active', created_at: new Date().toISOString() },
+        { id: 'sh-2', plan_code: 'starter', status: 'trialing', created_at: new Date(Date.now() - 30*86400000).toISOString() }
+      ]);
       return;
     }
     setIsLoadingDetail(true);
     try {
-      const data = await supabaseAdminDataApi.getAdminOwnerDetailedView(ownerId);
-      setOwnerDetail(data);
+      const [detailData, teamData, historyData] = await Promise.all([
+        supabaseAdminDataApi.getAdminOwnerDetailedView(ownerId),
+        supabaseAdminDataApi.getOwnerTeamMembers(ownerId),
+        supabaseAdminDataApi.getSubscriptionHistory(ownerId),
+      ]);
+      setOwnerDetail(detailData);
+      setOwnerTeamMembers(teamData);
+      setOwnerSubHistory(historyData);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to load owner detail.');
     } finally {
@@ -494,8 +679,10 @@ export function AdminSection() {
     if (currentView === 'transactions') void loadTransactions();
     if (currentView === 'audit-logs') void loadAuditLog();
     if (currentView === 'analytics') void loadAnalytics();
+    if (currentView === 'plans') void loadPlans();
+    if (currentView === 'offers-coupons') void loadCoupons();
     if (isOwnerDrawerOpen && selectedOwner) void loadOwnerDetail(selectedOwner.id);
-  }, [currentView, isOwnerDrawerOpen, selectedOwner, loadSummary, loadTransactions, loadAuditLog, loadAnalytics, loadOwnerDetail]);
+  }, [currentView, isOwnerDrawerOpen, selectedOwner, loadSummary, loadTransactions, loadAuditLog, loadAnalytics, loadPlans, loadCoupons, loadOwnerDetail]);
 
   const { lastUpdatedAt, isSyncing } = useRealtimeRefresh({
     key: 'platform-admin-summary',
@@ -507,6 +694,11 @@ export function AdminSection() {
   useEffect(() => {
     if (currentView === 'analytics') void loadAnalytics();
   }, [range]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (currentView === 'plans') void loadPlans();
+    if (currentView === 'offers-coupons') void loadCoupons();
+  }, [currentView, loadPlans, loadCoupons]);
 
   // Overlay any DB-persisted email-template edits on top of the built-in defaults
   // so saved subject/body changes survive a reload (degrades to defaults when the
@@ -549,9 +741,139 @@ export function AdminSection() {
     if (view === 'team-management') void loadTeamInvites();
   };
 
+  // ── Plan & Coupon Actions ──────────────────────────────────────────────────
+
+  const handleSavePlan = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      if (editingPlan) {
+        await supabaseAdminDataApi.updatePlan(editingPlan.id, {
+          label: planForm.label,
+          price: planForm.price,
+          billingCycle: planForm.billingCycle,
+          propertyLimit: planForm.propertyLimit,
+          tenantLimit: planForm.tenantLimit,
+          features: planForm.features,
+          featureFlags: planForm.featureFlags
+        });
+        toast.success('Plan updated successfully');
+      } else {
+        await supabaseAdminDataApi.createPlan({
+          code: planForm.code,
+          label: planForm.label,
+          price: planForm.price,
+          billingCycle: planForm.billingCycle,
+          propertyLimit: planForm.propertyLimit,
+          tenantLimit: planForm.tenantLimit,
+          features: planForm.features,
+          featureFlags: planForm.featureFlags
+        });
+        toast.success('Plan created successfully');
+      }
+      setIsPlanModalOpen(false);
+      setEditingPlan(null);
+      void loadPlans();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save plan.');
+    }
+  };
+
+  const handleTogglePlanActive = async (plan: any) => {
+    try {
+      await supabaseAdminDataApi.updatePlan(plan.id, { isActive: !plan.is_active });
+      toast.success(`Plan ${plan.is_active ? 'deactivated' : 'activated'}`);
+      void loadPlans();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update plan status.');
+    }
+  };
+
+  const handleArchivePlan = async (plan: any) => {
+    try {
+      await supabaseAdminDataApi.updatePlan(plan.id, { isArchived: !plan.is_archived });
+      toast.success(`Plan ${plan.is_archived ? 'restored' : 'archived'}`);
+      void loadPlans();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to archive plan.');
+    }
+  };
+
+  const handleClonePlan = (plan: any) => {
+    setEditingPlan(null);
+    setPlanForm({
+      code: `${plan.code}-clone`,
+      label: `Copy of ${plan.label}`,
+      price: plan.price,
+      billingCycle: plan.billing_cycle || 'monthly',
+      propertyLimit: plan.property_limit,
+      tenantLimit: plan.tenant_limit,
+      features: [...(plan.features || [])],
+      featureFlags: {
+        whatsapp: plan.feature_flags?.whatsapp ?? false,
+        aiAssistant: plan.feature_flags?.aiAssistant ?? false,
+        tenantPortal: plan.feature_flags?.tenantPortal ?? true,
+        multiUser: plan.feature_flags?.multiUser ?? false,
+        receipts: plan.feature_flags?.receipts ?? true,
+        buildingView: plan.feature_flags?.buildingView ?? true
+      }
+    });
+    setIsPlanModalOpen(true);
+  };
+
+  const handleSaveCoupon = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      if (editingCoupon) {
+        await supabaseAdminDataApi.updateCoupon(editingCoupon.id, {
+          isActive: couponForm.isActive ?? true,
+          maxUses: couponForm.maxUses ? Number(couponForm.maxUses) : undefined,
+          validUntil: couponForm.validUntil || undefined
+        });
+        toast.success('Coupon updated successfully');
+      } else {
+        await supabaseAdminDataApi.createCoupon({
+          code: couponForm.code,
+          description: couponForm.description,
+          discountType: couponForm.discountType,
+          discountValue: couponForm.discountValue,
+          maxUses: couponForm.maxUses ? Number(couponForm.maxUses) : undefined,
+          validUntil: couponForm.validUntil || undefined,
+          planRestriction: couponForm.planRestriction || undefined
+        });
+        toast.success('Coupon created successfully');
+      }
+      setIsCouponModalOpen(false);
+      setEditingCoupon(null);
+      void loadCoupons();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save coupon.');
+    }
+  };
+
+  const handleToggleCouponActive = async (coupon: any) => {
+    try {
+      await supabaseAdminDataApi.updateCoupon(coupon.id, { isActive: !coupon.isActive });
+      toast.success(`Coupon ${coupon.isActive ? 'deactivated' : 'activated'}`);
+      void loadCoupons();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update coupon status.');
+    }
+  };
+
+  const handleDeleteCoupon = async (couponId: string) => {
+    if (!window.confirm('Are you sure you want to delete this coupon?')) return;
+    try {
+      await supabaseAdminDataApi.deleteCoupon(couponId);
+      toast.success('Coupon deleted');
+      void loadCoupons();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to delete coupon.');
+    }
+  };
+
   // ── Actions ──────────────────────────────────────────────────────────────
 
-  const handleSubscriptionStatusChange = async (ownerId: string, status: 'trialing' | 'active' | 'past_due' | 'cancelled') => {
+  const handleSubscriptionStatusChange = async (ownerId: string, status: 'trialing' | 'active' | 'paused' | 'past_due' | 'cancelled') => {
     try {
       await supabaseAdminDataApi.updateOwnerSubscription(ownerId, { status });
       toast.success('Subscription status updated');
@@ -915,7 +1237,55 @@ export function AdminSection() {
         </div>
 
         <div className="bg-white rounded-[20px] shadow-[0_4px_24px_rgba(0,0,0,0.02)] border border-gray-100 overflow-hidden">
-          <div className="overflow-x-auto">
+          {/* Mobile cards */}
+          <div className="md:hidden ds-card-list p-3">
+            {pagedOwners.map((owner) => {
+              const initials = owner.name
+                ? owner.name.split(' ').filter(Boolean).map((n) => n[0]).join('').toUpperCase().slice(0, 2)
+                : 'OW';
+              return (
+                <div key={owner.id} className="ds-card-list-item" onClick={() => openOwnerDetail(owner, 'overview')}>
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-full bg-gradient-to-br from-violet-100 to-violet-200 text-violet-700 flex items-center justify-center font-bold text-[13px] overflow-hidden shrink-0 shadow-sm border border-violet-100/50">
+                      {owner.photoUrl ? <img src={owner.photoUrl} alt={owner.name} className="w-full h-full object-cover" /> : initials}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-semibold text-[14px] text-gray-900 truncate">{owner.name}</p>
+                      <p className="text-[12px] text-gray-500 truncate">{owner.email}</p>
+                    </div>
+                    <span className={`px-2 py-1 rounded-full text-[10px] font-bold tracking-wide uppercase flex-shrink-0 ${statusColor(owner.subscriptionStatus)}`}>
+                      {owner.subscriptionStatus}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 pt-2 border-t border-gray-100">
+                    <div className="ds-card-list-row"><span className="ds-card-list-label">Plan</span><span className="ds-card-list-value">{owner.planCode}</span></div>
+                    <div className="ds-card-list-row"><span className="ds-card-list-label">Revenue</span><span className="ds-card-list-value">{formatRs(owner.revenue)}</span></div>
+                    <div className="ds-card-list-row"><span className="ds-card-list-label">Properties</span><span className="ds-card-list-value">{owner.propertyCount}</span></div>
+                    <div className="ds-card-list-row"><span className="ds-card-list-label">Tenants</span><span className="ds-card-list-value">{owner.tenantCount}</span></div>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 pt-2 border-t border-gray-100" onClick={(e) => e.stopPropagation()}>
+                    <span className="text-[11px] text-gray-400">{fmtRelative(owner.lastActive)}</span>
+                    <div className="flex items-center gap-3">
+                      <button onClick={() => openOwnerDetail(owner, 'overview')} className="text-[13px] font-medium text-violet-600">View</button>
+                      {owner.isSuspended ? (
+                        <button onClick={() => void handleUnsuspend(owner)} className="text-[13px] font-medium text-emerald-600">Activate</button>
+                      ) : (
+                        <button onClick={() => { setSuspendTarget(owner); setSuspendReason(''); }} className="text-[13px] font-medium text-rose-600">Suspend</button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+            {pagedOwners.length === 0 && (
+              <div className="ds-empty-state">
+                <div className="ds-empty-icon"><Users style={{ width: 22, height: 22 }} /></div>
+                <p className="ds-empty-title">No owners found</p>
+                <p className="ds-empty-description">Try adjusting your filters or search terms.</p>
+              </div>
+            )}
+          </div>
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full min-w-[1100px] text-left border-collapse">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-100 sticky top-0 z-10">
@@ -1020,255 +1390,539 @@ export function AdminSection() {
     );
   };
 
-  // ── View: Owner Detail Drawer ────────────────────────────────────────────────────
-
   const renderOwnerDrawer = () => {
     if (!selectedOwner || !isOwnerDrawerOpen) return null;
     const subscription = ownerDetail?.subscription ?? summary?.subscriptions.find((s) => s.ownerId === selectedOwner.id);
 
     return (
       <div className="fixed inset-0 z-[100] flex flex-col justify-end md:flex-row">
-        <div className="absolute inset-0 bg-black/30 backdrop-blur-sm transition-opacity" onClick={() => setIsOwnerDrawerOpen(false)} />
+        <div className="absolute inset-0 bg-black/40 backdrop-blur-xs transition-opacity" onClick={() => setIsOwnerDrawerOpen(false)} />
         <div className="relative w-full h-[90dvh] md:h-full md:max-w-3xl bg-white shadow-2xl flex flex-col animate-in slide-in-from-bottom md:slide-in-from-right duration-300 rounded-t-2xl md:rounded-none">
           <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 shrink-0">
             <div>
-              <h2 className="text-xl font-semibold text-gray-900">{selectedOwner.name}</h2>
-              <p className="text-sm text-gray-500">{selectedOwner.email} · {selectedOwner.city}</p>
+              <h2 className="text-xl font-bold text-gray-900">{selectedOwner.name}</h2>
+              <p className="text-xs text-gray-500">{selectedOwner.email} · {selectedOwner.city || 'No City'}</p>
             </div>
             <button onClick={() => setIsOwnerDrawerOpen(false)} className="p-2 rounded-full hover:bg-gray-100"><XCircle className="w-6 h-6 text-gray-400" /></button>
           </div>
 
-          <div className="flex px-6 border-b border-gray-200 shrink-0 overflow-x-auto hide-scrollbar">
-            {['overview', 'subscription', 'properties', 'tenants', 'payments', 'agreements', 'documents', 'support', 'audit'].map((tab) => (
+          <div className="flex px-6 border-b border-gray-200 shrink-0 overflow-x-auto hide-scrollbar bg-gray-50/50">
+            {[
+              { id: 'overview', label: 'Overview' },
+              { id: 'properties', label: 'Properties' },
+              { id: 'tenants', label: 'Tenants' },
+              { id: 'payments', label: 'Payments' },
+              { id: 'team-members', label: 'Team Members' },
+              { id: 'subscription', label: 'Subscription' },
+              { id: 'support', label: 'Support Tickets' },
+              { id: 'timeline', label: 'Activity Timeline' },
+              { id: 'audit-logs', label: 'Audit Logs' }
+            ].map((tab) => (
               <button
-                key={tab}
-                onClick={() => setActiveOwnerTab(tab as any)}
-                className={`py-3 px-4 text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${activeOwnerTab === tab ? 'border-violet-600 text-violet-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}
+                key={tab.id}
+                onClick={() => setActiveOwnerTab(tab.id as any)}
+                className={`py-3 px-4 text-xs font-semibold border-b-2 whitespace-nowrap transition-colors ${activeOwnerTab === tab.id ? 'border-violet-600 text-violet-600' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}`}
               >
-                {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                {tab.label}
               </button>
             ))}
           </div>
 
-          <div className="flex-1 overflow-y-auto p-6 bg-gray-50/50">
+          <div className="flex-1 overflow-y-auto p-6 bg-slate-50/40">
             {isLoadingDetail ? (
-              <div className="flex justify-center py-12"><div className="w-8 h-8 border-4 border-violet-200 border-t-violet-600 rounded-full animate-spin" /></div>
-            ) : activeOwnerTab === 'overview' ? (
-              <div className="space-y-6">
-                <div className="flex flex-wrap gap-2">
-                  <span className={`px-3 py-1 rounded-full text-sm ${statusColor(selectedOwner.subscriptionStatus)}`}>{selectedOwner.subscriptionStatus}</span>
-                  {selectedOwner.isSuspended && <span className="px-3 py-1 rounded-full text-sm bg-red-100 text-red-700">Suspended</span>}
-                  {selectedOwner.verifiedAt && <span className="px-3 py-1 rounded-full text-sm bg-green-100 text-green-700 flex items-center gap-1"><CheckCircle className="w-3 h-3" />Verified {fmtDate(selectedOwner.verifiedAt)}</span>}
-                  
-                  <div className="flex gap-2 ml-auto">
-                    {!selectedOwner.verifiedAt && (
-                      <button onClick={() => void handleVerify(selectedOwner)} className="px-3 py-1.5 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700 flex items-center gap-1"><CheckCircle className="w-3.5 h-3.5" />Verify</button>
-                    )}
-                    {selectedOwner.isSuspended ? (
-                      <button onClick={() => void handleUnsuspend(selectedOwner)} className="px-3 py-1.5 bg-green-600 text-white rounded-lg text-sm hover:bg-green-700">Activate (Unsuspend)</button>
-                    ) : (
-                      <button onClick={() => setSuspendTarget(selectedOwner)} className="px-3 py-1.5 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700 flex items-center gap-1"><XCircle className="w-3.5 h-3.5" />Suspend</button>
-                    )}
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
-                  <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
-                    <p className="text-xs text-gray-500 uppercase">Properties</p>
-                    <p className="text-2xl font-semibold text-gray-900 mt-1">{selectedOwner.propertyCount}</p>
-                  </div>
-                  <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
-                    <p className="text-xs text-gray-500 uppercase">Tenants</p>
-                    <p className="text-2xl font-semibold text-gray-900 mt-1">{selectedOwner.tenantCount}</p>
-                  </div>
-                  <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
-                    <p className="text-xs text-gray-500 uppercase">Revenue</p>
-                    <p className="text-2xl font-semibold text-gray-900 mt-1">{formatRs(selectedOwner.revenue)}</p>
-                  </div>
-                  <div className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
-                    <p className="text-xs text-gray-500 uppercase">Last Active</p>
-                    <p className="text-sm font-medium text-gray-900 mt-2">{fmtRelative(selectedOwner.lastActive)}</p>
-                  </div>
-                </div>
-
-                <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-3 shadow-sm">
-                  <h3 className="text-gray-900 font-medium">Business Details</h3>
-                  <div className="grid grid-cols-2 gap-4 text-sm">
-                    <div>
-                      <p className="text-xs text-gray-500">PG Name</p>
-                      <p className="font-medium text-gray-900 mt-0.5">{selectedOwner.pgName || 'N/A'}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-500">City</p>
-                      <p className="font-medium text-gray-900 mt-0.5">{selectedOwner.city || 'N/A'}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-500">Phone</p>
-                      <p className="font-medium text-gray-900 mt-0.5">{selectedOwner.phone || 'N/A'}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-500">Joined Platform</p>
-                      <p className="font-medium text-gray-900 mt-0.5">{fmtDate(selectedOwner.joinedAt)}</p>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-3 shadow-sm">
-                  <h3 className="text-gray-900 font-medium">Quick Actions</h3>
-                  <div className="flex flex-wrap gap-2">
-                    <button onClick={() => setActiveOwnerTab('properties')} className="px-3 py-1.5 border border-gray-300 hover:border-violet-600 hover:text-violet-600 rounded-lg text-sm transition-colors font-medium text-gray-700 bg-white">View Properties</button>
-                    <button onClick={() => setActiveOwnerTab('payments')} className="px-3 py-1.5 border border-gray-300 hover:border-violet-600 hover:text-violet-600 rounded-lg text-sm transition-colors font-medium text-gray-700 bg-white">View Payments</button>
-                    <button onClick={() => setActiveOwnerTab('agreements')} className="px-3 py-1.5 border border-gray-300 hover:border-violet-600 hover:text-violet-600 rounded-lg text-sm transition-colors font-medium text-gray-700 bg-white">View Agreements</button>
-                    <button onClick={() => setActiveOwnerTab('documents')} className="px-3 py-1.5 border border-gray-300 hover:border-violet-600 hover:text-violet-600 rounded-lg text-sm transition-colors font-medium text-gray-700 bg-white">View Documents</button>
-                    <button onClick={() => void handleResetAccess(selectedOwner)} className="px-3 py-1.5 border border-amber-300 text-amber-700 hover:bg-amber-50 rounded-lg text-sm transition-colors font-medium bg-white flex items-center gap-1.5"><Lock className="w-3.5 h-3.5" />Reset Access</button>
-                    <button onClick={() => void handleImpersonate(selectedOwner)} className="px-3 py-1.5 border border-blue-300 text-blue-700 hover:bg-blue-50 rounded-lg text-sm transition-colors font-medium bg-white flex items-center gap-1.5"><User className="w-3.5 h-3.5" />Impersonate</button>
-                  </div>
-                </div>
+              <div className="flex flex-col items-center justify-center py-24 gap-3">
+                <div className="w-8 h-8 border-4 border-violet-200 border-t-violet-600 rounded-full animate-spin" />
+                <p className="text-xs text-gray-500 font-medium">Fetching owner credentials & telemetry...</p>
               </div>
-            ) : activeOwnerTab === 'subscription' ? (
+            ) : (
               <div className="space-y-6">
-                <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm">
-                  <h3 className="text-gray-900 font-medium mb-4">Subscription & Plan</h3>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <p className="text-xs text-gray-500 uppercase mb-1">Current Plan</p>
-                      <select value={selectedOwner.planCode} onChange={(e) => void handlePlanChange(selectedOwner.id, e.target.value)} className="px-2 py-1.5 border border-gray-300 rounded text-sm w-full bg-white font-medium text-gray-700">
-                        <option value="starter">Starter</option><option value="growth">Growth</option><option value="pro">Pro</option>
-                      </select>
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-500 uppercase mb-1">Subscription Status</p>
-                      <select value={selectedOwner.subscriptionStatus === 'not_configured' ? 'trialing' : selectedOwner.subscriptionStatus} onChange={(e) => void handleSubscriptionStatusChange(selectedOwner.id, e.target.value as any)} className="px-2 py-1.5 border border-gray-300 rounded text-sm w-full bg-white font-medium text-gray-700">
-                        <option value="trialing">Trialing</option><option value="active">Active</option><option value="past_due">Past Due</option><option value="cancelled">Cancelled</option>
-                      </select>
-                    </div>
-                  </div>
-                </div>
+                {activeOwnerTab === 'overview' && (
+                  <div className="space-y-6">
+                    {/* Header Badges */}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={`px-2.5 py-1 rounded-full text-xs font-semibold uppercase tracking-wider ${statusColor(selectedOwner.subscriptionStatus)}`}>
+                        {selectedOwner.subscriptionStatus}
+                      </span>
+                      {selectedOwner.isSuspended ? (
+                        <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-100 text-rose-700 border border-rose-200">Suspended</span>
+                      ) : (
+                        <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-700 border border-emerald-200">Active Access</span>
+                      )}
+                      {selectedOwner.verifiedAt ? (
+                        <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-700 border border-green-200 flex items-center gap-1">
+                          <CheckCircle className="w-3.5 h-3.5" /> Verified {fmtDate(selectedOwner.verifiedAt)}
+                        </span>
+                      ) : (
+                        <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-700 border border-amber-200">Pending Verification</span>
+                      )}
 
-                {subscription && (
-                  <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-3 shadow-sm">
-                    <h3 className="text-gray-900 font-medium">Subscription Billing Details</h3>
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div>
-                        <p className="text-xs text-gray-500 font-medium">Amount</p>
-                        <p className="font-semibold text-gray-900 mt-0.5">{formatRs(subscription.amount)} / {subscription.billingCycle}</p>
+                      <div className="flex gap-2 ml-auto">
+                        {!selectedOwner.verifiedAt && (
+                          <button onClick={() => void handleVerify(selectedOwner)} className="px-3 py-1 bg-green-600 text-white rounded-lg text-xs font-semibold hover:bg-green-700 flex items-center gap-1.5 shadow-sm transition-colors">
+                            <CheckCircle className="w-3.5 h-3.5" /> Verify
+                          </button>
+                        )}
+                        {selectedOwner.isSuspended ? (
+                          <button onClick={() => void handleUnsuspend(selectedOwner)} className="px-3 py-1 bg-green-600 text-white rounded-lg text-xs font-semibold hover:bg-green-700 shadow-sm transition-colors">
+                            Activate Owner
+                          </button>
+                        ) : (
+                          <button onClick={() => setSuspendTarget(selectedOwner)} className="px-3 py-1 bg-rose-600 text-white rounded-lg text-xs font-semibold hover:bg-rose-700 flex items-center gap-1.5 shadow-sm transition-colors">
+                            <XCircle className="w-3.5 h-3.5" /> Suspend
+                          </button>
+                        )}
                       </div>
-                      <div>
-                        <p className="text-xs text-gray-500 font-medium">Renews At</p>
-                        <p className="font-semibold text-gray-900 mt-0.5">{fmtDate(subscription.renewsAt)}</p>
+                    </div>
+
+                    {/* Telemetry Stats */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <div className="bg-white rounded-xl border border-gray-200/80 p-4 shadow-xs">
+                        <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Properties</p>
+                        <p className="text-xl font-bold text-gray-900 mt-1">{selectedOwner.propertyCount}</p>
                       </div>
-                      <div>
-                        <p className="text-xs text-gray-500 font-medium">Seats (Max Users)</p>
-                        <p className="font-semibold text-gray-900 mt-0.5">{subscription.seats ?? 'N/A'}</p>
+                      <div className="bg-white rounded-xl border border-gray-200/80 p-4 shadow-xs">
+                        <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Tenants</p>
+                        <p className="text-xl font-bold text-gray-900 mt-1">{selectedOwner.tenantCount}</p>
                       </div>
-                      <div>
-                        <p className="text-xs text-gray-500 font-medium">Last Updated</p>
-                        <p className="font-semibold text-gray-900 mt-0.5">{fmtDate(subscription.updatedAt)}</p>
+                      <div className="bg-white rounded-xl border border-gray-200/80 p-4 shadow-xs">
+                        <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Billed Revenue</p>
+                        <p className="text-xl font-bold text-gray-900 mt-1">{formatRs(selectedOwner.revenue)}</p>
+                      </div>
+                      <div className="bg-white rounded-xl border border-gray-200/80 p-4 shadow-xs">
+                        <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Telemetry Last Seen</p>
+                        <p className="text-xs font-semibold text-gray-800 mt-2.5 truncate">{fmtRelative(selectedOwner.lastActive)}</p>
+                      </div>
+                    </div>
+
+                    {/* Business Details card */}
+                    <div className="bg-white rounded-xl border border-gray-200/80 p-5 shadow-xs space-y-4">
+                      <h3 className="text-sm font-semibold text-gray-900">Platform Credentials & Profile</h3>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                        <div>
+                          <p className="text-gray-400 font-medium">Platform Account ID</p>
+                          <p className="font-mono text-gray-900 mt-1 font-semibold">{selectedOwner.id}</p>
+                        </div>
+                        <div>
+                          <p className="text-gray-400 font-medium">Business / PG Name</p>
+                          <p className="font-semibold text-gray-900 mt-1">{selectedOwner.pgName || 'Not Set'}</p>
+                        </div>
+                        <div>
+                          <p className="text-gray-400 font-medium">City Location</p>
+                          <p className="font-semibold text-gray-900 mt-1">{selectedOwner.city || 'Not Provided'}</p>
+                        </div>
+                        <div>
+                          <p className="text-gray-400 font-medium">Owner Phone</p>
+                          <p className="font-semibold text-gray-900 mt-1">{selectedOwner.phone || 'Not Provided'}</p>
+                        </div>
+                        <div>
+                          <p className="text-gray-400 font-medium">Joined Platform</p>
+                          <p className="font-semibold text-gray-900 mt-1">{fmtDate(selectedOwner.joinedAt)}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Quick actions */}
+                    <div className="bg-white rounded-xl border border-gray-200/80 p-5 shadow-xs space-y-3">
+                      <h3 className="text-sm font-semibold text-gray-900">SaaS Control Tower Commands</h3>
+                      <div className="flex flex-wrap gap-2">
+                        <button onClick={() => void handleResetAccess(selectedOwner)} className="px-3 py-1.5 border border-amber-300 text-amber-700 hover:bg-amber-50 rounded-lg text-xs font-semibold transition-colors bg-white flex items-center gap-1.5">
+                          <Lock className="w-3.5 h-3.5" /> Force Password Reset
+                        </button>
+                        <button onClick={() => void handleImpersonate(selectedOwner)} className="px-3 py-1.5 border border-violet-300 text-violet-700 hover:bg-violet-50 rounded-lg text-xs font-semibold transition-colors bg-white flex items-center gap-1.5">
+                          <User className="w-3.5 h-3.5" /> View As Owner (Impersonate)
+                        </button>
                       </div>
                     </div>
                   </div>
                 )}
-              </div>
-            ) : ownerDetail ? (
-              <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+
                 {activeOwnerTab === 'properties' && (
-                  <ul className="divide-y divide-gray-100">
-                    {(ownerDetail.properties as any[]).map((p) => (
-                      <li key={p.id} className="p-4 flex justify-between items-center hover:bg-gray-50/50">
-                        <span className="text-sm font-semibold text-gray-900">{p.name}</span>
-                        <span className="text-sm text-gray-500">{p.city} · {p.total_rooms} rooms</span>
-                      </li>
-                    ))}
-                    {(ownerDetail.properties as any[]).length === 0 && <li className="p-4 text-sm text-gray-500 text-center">No properties</li>}
-                  </ul>
+                  <div className="bg-white rounded-xl border border-gray-200 shadow-xs overflow-hidden">
+                    <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+                      <h3 className="text-sm font-semibold text-gray-900">Registered Properties</h3>
+                      <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+                        {ownerDetail?.properties?.length ?? 0} total
+                      </span>
+                    </div>
+                    <ul className="divide-y divide-gray-100">
+                      {(ownerDetail?.properties as any[] ?? []).map((p) => (
+                        <li key={p.id} className="p-4 flex justify-between items-center hover:bg-gray-50/40 transition-colors">
+                          <div className="flex items-center gap-3">
+                            <div className="p-2 bg-violet-50 text-violet-600 rounded-lg"><Building2 className="w-4 h-4" /></div>
+                            <div>
+                              <p className="text-xs font-bold text-gray-900">{p.name}</p>
+                              <p className="text-[10px] text-gray-400 mt-0.5">{p.city || 'Bangalore'}</p>
+                            </div>
+                          </div>
+                          <span className="text-xs font-semibold text-gray-700 bg-slate-100 px-2 py-1 rounded-md">{p.total_rooms || 0} Rooms</span>
+                        </li>
+                      ))}
+                      {(ownerDetail?.properties as any[] ?? []).length === 0 && (
+                        <li className="p-8 text-center text-xs text-gray-500">No properties registered under this account</li>
+                      )}
+                    </ul>
+                  </div>
                 )}
+
                 {activeOwnerTab === 'tenants' && (
-                  <ul className="divide-y divide-gray-100">
-                    {(ownerDetail.tenants as any[]).map((t) => (
-                      <li key={t.id} className="p-4 flex justify-between items-center hover:bg-gray-50/50">
-                        <span className="text-sm font-semibold text-gray-900">{t.name}</span>
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${statusColor(t.status)}`}>{t.status.replace(/_/g, ' ')}</span>
-                      </li>
-                    ))}
-                    {(ownerDetail.tenants as any[]).length === 0 && <li className="p-4 text-sm text-gray-500 text-center">No tenants</li>}
-                  </ul>
+                  <div className="bg-white rounded-xl border border-gray-200 shadow-xs overflow-hidden">
+                    <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+                      <h3 className="text-sm font-semibold text-gray-900">Connected Tenants</h3>
+                      <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+                        {ownerDetail?.tenants?.length ?? 0} total
+                      </span>
+                    </div>
+                    <ul className="divide-y divide-gray-100">
+                      {(ownerDetail?.tenants as any[] ?? []).map((t) => (
+                        <li key={t.id} className="p-4 flex justify-between items-center hover:bg-gray-50/40 transition-colors">
+                          <div className="flex items-center gap-3">
+                            <div className="p-2 bg-blue-50 text-blue-600 rounded-lg"><User className="w-4 h-4" /></div>
+                            <div>
+                              <p className="text-xs font-bold text-gray-900">{t.name}</p>
+                              <p className="text-[10px] text-gray-400 mt-0.5">Rent: {t.rent ? formatRs(t.rent) : 'Not Set'}</p>
+                            </div>
+                          </div>
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${statusColor(t.status)}`}>
+                            {t.status?.replace(/_/g, ' ') || 'active'}
+                          </span>
+                        </li>
+                      ))}
+                      {(ownerDetail?.tenants as any[] ?? []).length === 0 && (
+                        <li className="p-8 text-center text-xs text-gray-500">No tenants assigned</li>
+                      )}
+                    </ul>
+                  </div>
                 )}
-                {activeOwnerTab === 'agreements' && (
-                  <ul className="divide-y divide-gray-100">
-                    {(ownerDetail.agreements as any[]).map((a) => (
-                      <li key={a.id} className="p-4 flex justify-between items-center hover:bg-gray-50/50">
-                        <div>
-                          <span className="text-sm font-semibold text-gray-900">{a.tenantName}</span>
-                          <p className="text-xs text-gray-500">Created on {fmtDate(a.createdAt)}</p>
-                        </div>
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${statusColor(a.status)}`}>{a.status}</span>
-                      </li>
-                    ))}
-                    {(ownerDetail.agreements as any[]).length === 0 && <li className="p-4 text-sm text-gray-500 text-center">No agreements</li>}
-                  </ul>
-                )}
+
                 {activeOwnerTab === 'payments' && (
-                  <ul className="divide-y divide-gray-100">
-                    {((ownerDetail as any).payments as any[]).map((p) => (
-                      <li key={p.id} className="p-4 flex justify-between items-center hover:bg-gray-50/50">
-                        <div>
-                          <span className="text-sm font-semibold text-gray-900">{p.tenant_name ?? 'Tenant'}</span>
-                          <p className="text-xs text-gray-500">Room {p.room} · Due {fmtDate(p.due_date)}</p>
-                        </div>
-                        <div className="text-right">
-                          <span className="text-sm font-semibold text-gray-900 block">{formatRs(Number(p.total_amount))}</span>
-                          <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${statusColor(p.status)}`}>{p.status}</span>
-                        </div>
-                      </li>
-                    ))}
-                    {((ownerDetail as any).payments as any[]).length === 0 && <li className="p-4 text-sm text-gray-500 text-center">No payments</li>}
-                  </ul>
+                  <div className="bg-white rounded-xl border border-gray-200 shadow-xs overflow-hidden">
+                    <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+                      <h3 className="text-sm font-semibold text-gray-900">Recent Rent Bills</h3>
+                      <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">Last 50 payments</span>
+                    </div>
+                    <ul className="divide-y divide-gray-100">
+                      {(ownerDetail?.payments as any[] ?? []).map((p) => (
+                        <li key={p.id} className="p-4 flex justify-between items-center hover:bg-gray-50/40 transition-colors">
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-bold text-gray-900 truncate">{p.tenant_name ?? 'Tenant'}</p>
+                            <p className="text-[10px] text-gray-400 mt-0.5">Room {p.room ?? '—'} · Due {fmtDate(p.due_date)}</p>
+                          </div>
+                          <div className="text-right ml-4 shrink-0 flex items-center gap-3">
+                            <div>
+                              <p className="text-xs font-bold text-gray-900">{formatRs(Number(p.total_amount))}</p>
+                              <span className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-bold mt-1 uppercase ${p.status === 'paid' ? 'bg-emerald-100 text-emerald-700' : p.status === 'pending' ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700'}`}>
+                                {p.status}
+                              </span>
+                            </div>
+                          </div>
+                        </li>
+                      ))}
+                      {(ownerDetail?.payments as any[] ?? []).length === 0 && (
+                        <li className="p-8 text-center text-xs text-gray-500">No billing activity recorded</li>
+                      )}
+                    </ul>
+                  </div>
                 )}
-                {activeOwnerTab === 'documents' && (
-                  <ul className="divide-y divide-gray-100">
-                    {(ownerDetail.documents).map((d) => (
-                      <li key={d.id} className="p-4 flex justify-between items-center hover:bg-gray-50/50">
-                        <div>
-                          <span className="text-sm font-semibold text-gray-900">{d.label}</span>
-                          <p className="text-xs text-gray-500 mt-0.5">{d.tenantName} · {d.docType.replace(/_/g, ' ')}</p>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <span className="text-xs text-gray-400">{fmtDate(d.createdAt)}</span>
-                          {d.fileUrl && (
-                            <a href={d.fileUrl} target="_blank" rel="noreferrer" className="text-xs font-medium text-violet-600 hover:text-violet-700 flex items-center gap-1">
-                              <Eye className="w-3.5 h-3.5" />View
-                            </a>
-                          )}
-                        </div>
-                      </li>
-                    ))}
-                    {ownerDetail.documents.length === 0 && <li className="p-4 text-sm text-gray-500 text-center">No documents</li>}
-                  </ul>
+
+                {activeOwnerTab === 'team-members' && (
+                  <div className="bg-white rounded-xl border border-gray-200 shadow-xs overflow-hidden">
+                    <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+                      <h3 className="text-sm font-semibold text-gray-900">Team Members & Managers</h3>
+                      <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+                        {ownerTeamMembers.length} active
+                      </span>
+                    </div>
+                    <ul className="divide-y divide-gray-100">
+                      {ownerTeamMembers.map((member) => (
+                        <li key={member.id} className="p-4 flex justify-between items-center hover:bg-gray-50/40 transition-colors">
+                          <div className="flex items-center gap-3">
+                            <div className="p-2 bg-emerald-50 text-emerald-600 rounded-lg"><Users className="w-4 h-4" /></div>
+                            <div>
+                              <p className="text-xs font-bold text-gray-900">{member.full_name}</p>
+                              <p className="text-[10px] text-gray-400 mt-0.5">{member.email}</p>
+                            </div>
+                          </div>
+                          <span className="px-2.5 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 border border-slate-200 text-slate-700 uppercase tracking-wide">
+                            {member.role?.replace('owner_', '')}
+                          </span>
+                        </li>
+                      ))}
+                      {ownerTeamMembers.length === 0 && (
+                        <li className="p-8 text-center text-xs text-gray-500">This owner operates solo (no team accounts)</li>
+                      )}
+                    </ul>
+                  </div>
                 )}
+
+                {activeOwnerTab === 'subscription' && (
+                  <div className="space-y-6">
+                    {/* Controls */}
+                    <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-xs space-y-4">
+                      <h3 className="text-sm font-semibold text-gray-900">Subscription & Limits</h3>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="text-[10px] text-gray-400 uppercase tracking-wider font-bold block mb-1">Upgrade / Downgrade Plan</label>
+                          <select
+                            value={selectedOwner.planCode}
+                            onChange={(e) => void handlePlanChange(selectedOwner.id, e.target.value)}
+                            className="px-3 py-2 border border-gray-300 rounded-lg text-xs w-full bg-white font-semibold text-gray-700 focus:outline-none focus:border-violet-500"
+                          >
+                            <option value="starter">Starter</option>
+                            <option value="growth">Growth</option>
+                            <option value="pro">Pro</option>
+                            {plansList.filter(p => !['starter', 'growth', 'pro'].includes(p.code)).map(p => (
+                              <option key={p.id} value={p.code}>{p.label}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-gray-400 uppercase tracking-wider font-bold block mb-1">State Lifecycle</label>
+                          <select
+                            value={selectedOwner.subscriptionStatus === 'not_configured' ? 'trialing' : selectedOwner.subscriptionStatus}
+                            onChange={(e) => void handleSubscriptionStatusChange(selectedOwner.id, e.target.value as any)}
+                            className="px-3 py-2 border border-gray-300 rounded-lg text-xs w-full bg-white font-semibold text-gray-700 focus:outline-none focus:border-violet-500"
+                          >
+                            <option value="trialing">Trialing</option>
+                            <option value="active">Active (Subscribed)</option>
+                            <option value="paused">Paused</option>
+                            <option value="past_due">Past Due</option>
+                            <option value="cancelled">Cancelled</option>
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Metadata Card */}
+                    {subscription && (
+                      <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-xs space-y-3">
+                        <h3 className="text-sm font-semibold text-gray-900">Current Agreement Terms</h3>
+                        <div className="grid grid-cols-2 gap-4 text-xs">
+                          <div>
+                            <p className="text-gray-400 font-medium">Billed Rate</p>
+                            <p className="font-semibold text-gray-900 mt-1">{formatRs(subscription.amount)} / {subscription.billingCycle || 'monthly'}</p>
+                          </div>
+                          <div>
+                            <p className="text-gray-400 font-medium">Renewal Target Date</p>
+                            <p className="font-semibold text-gray-900 mt-1">{fmtDate(subscription.renewsAt)}</p>
+                          </div>
+                          <div>
+                            <p className="text-gray-400 font-medium">Workspace Seats (Max Users)</p>
+                            <p className="font-semibold text-gray-900 mt-1">{subscription.seats ?? 'N/A'}</p>
+                          </div>
+                          <div>
+                            <p className="text-gray-400 font-medium">Last State Refresh</p>
+                            <p className="font-semibold text-gray-900 mt-1">{fmtDate(subscription.updatedAt)}</p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Plan History Logs */}
+                    <div className="bg-white rounded-xl border border-gray-200 shadow-xs overflow-hidden">
+                      <div className="px-5 py-4 border-b border-gray-100">
+                        <h3 className="text-sm font-semibold text-gray-900">Subscription Audit Trail</h3>
+                      </div>
+                      {/* Mobile cards */}
+                      <div className="sm:hidden ds-card-list p-3">
+                        {ownerSubHistory.map((history) => (
+                          <div key={history.id} className="ds-card-list-item">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-semibold text-gray-800 uppercase text-xs">{history.plan_code}</span>
+                              <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${history.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                                {history.status}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between text-[11px] pt-2 border-t border-gray-100">
+                              <span className="text-gray-500 font-mono">{fmtDate(history.created_at || history.createdAt)}</span>
+                              <span className="text-gray-900 font-medium">{history.amount !== null ? formatRs(history.amount) : '—'}</span>
+                            </div>
+                          </div>
+                        ))}
+                        {ownerSubHistory.length === 0 && (
+                          <p className="text-center text-gray-500 text-xs py-6">No historical changes logged yet.</p>
+                        )}
+                      </div>
+                      <div className="hidden sm:block overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead className="bg-slate-50 border-b border-slate-100">
+                            <tr>
+                              <th className="px-5 py-2.5 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">Timestamp</th>
+                              <th className="px-5 py-2.5 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">Plan</th>
+                              <th className="px-5 py-2.5 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">Status</th>
+                              <th className="px-5 py-2.5 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider">Amount</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-100">
+                            {ownerSubHistory.map((history) => (
+                              <tr key={history.id} className="hover:bg-slate-50/55 transition-colors">
+                                <td className="px-5 py-3 text-gray-500 font-mono text-[10px]">{fmtDate(history.created_at || history.createdAt)}</td>
+                                <td className="px-5 py-3 font-semibold text-gray-800 uppercase">{history.plan_code}</td>
+                                <td className="px-5 py-3">
+                                  <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase ${history.status === 'active' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                                    {history.status}
+                                  </span>
+                                </td>
+                                <td className="px-5 py-3 text-gray-900 font-medium">{history.amount !== null ? formatRs(history.amount) : '—'}</td>
+                              </tr>
+                            ))}
+                            {ownerSubHistory.length === 0 && (
+                              <tr>
+                                <td colSpan={4} className="px-5 py-6 text-center text-gray-500 text-xs">No historical changes logged yet.</td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {activeOwnerTab === 'support' && (
-                  <ul className="divide-y divide-gray-100">
-                    {((ownerDetail as any).support as any[]).map((s) => (
-                      <li key={s.id} className="p-4 flex justify-between items-center hover:bg-gray-50/50">
-                        <span className="text-sm font-semibold text-gray-900">{s.subject}</span>
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${statusColor(s.status)}`}>{s.status}</span>
-                      </li>
-                    ))}
-                    {((ownerDetail as any).support as any[]).length === 0 && <li className="p-4 text-sm text-gray-500 text-center">No support tickets</li>}
-                  </ul>
+                  <div className="bg-white rounded-xl border border-gray-200 shadow-xs overflow-hidden">
+                    <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+                      <h3 className="text-sm font-semibold text-gray-900">Support Ticket Log</h3>
+                      <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+                        {ownerDetail?.support?.length ?? 0} tickets
+                      </span>
+                    </div>
+                    <ul className="divide-y divide-gray-100">
+                      {(ownerDetail?.support as any[] ?? []).map((s) => (
+                        <li key={s.id} className="p-4 flex justify-between items-center hover:bg-gray-50/40 transition-colors">
+                          <div>
+                            <p className="text-xs font-bold text-gray-900">{s.subject}</p>
+                            <p className="text-[10px] text-gray-400 mt-0.5">Priority: {s.priority || 'medium'} · Opened {fmtDate(s.createdAt)}</p>
+                          </div>
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${s.status === 'open' ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-600'}`}>
+                            {s.status}
+                          </span>
+                        </li>
+                      ))}
+                      {(ownerDetail?.support as any[] ?? []).length === 0 && (
+                        <li className="p-8 text-center text-xs text-gray-500">No support tickets opened by this owner</li>
+                      )}
+                    </ul>
+                  </div>
                 )}
-                {activeOwnerTab === 'audit' && (
-                  <ul className="divide-y divide-gray-100">
-                    {((ownerDetail as any).audit as any[]).map((a) => (
-                      <li key={a.id} className="p-4 flex flex-col gap-1 hover:bg-gray-50/50">
-                        <span className="text-sm font-semibold text-gray-900">{a.event.replace(/_/g, ' ')}</span>
-                        <span className="text-xs text-gray-500">{a.detail} · {fmtRelative(a.created_at)}</span>
-                      </li>
-                    ))}
-                    {((ownerDetail as any).audit as any[]).length === 0 && <li className="p-4 text-sm text-gray-500 text-center">No audit logs</li>}
-                  </ul>
+
+                {activeOwnerTab === 'timeline' && (
+                  <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-xs space-y-6">
+                    <h3 className="text-sm font-semibold text-gray-900">Telemetry Activity Timeline</h3>
+                    <div className="relative border-l-2 border-slate-100 pl-6 ml-3 space-y-6">
+                      {[
+                        // Merge various lists into clean chronologically sorted timeline items
+                        ...(ownerDetail?.properties as any[] ?? []).map((p) => ({
+                          date: p.created_at || new Date().toISOString(),
+                          title: 'Property Registered',
+                          body: `${p.name} was added to the workspace in ${p.city || 'Bangalore'}.`,
+                          icon: <Building2 className="w-3 h-3 text-violet-600" />,
+                          bg: 'bg-violet-50'
+                        })),
+                        ...(ownerDetail?.tenants as any[] ?? []).map((t) => ({
+                          date: t.created_at || new Date().toISOString(),
+                          title: 'Tenant Registered',
+                          body: `${t.name} joined with onboarding status ${t.status?.replace(/_/g, ' ')}.`,
+                          icon: <User className="w-3 h-3 text-blue-600" />,
+                          bg: 'bg-blue-50'
+                        })),
+                        ...(ownerDetail?.support as any[] ?? []).map((s) => ({
+                          date: s.createdAt || new Date().toISOString(),
+                          title: 'Support Ticket Raised',
+                          body: `Ticket: "${s.subject}" raised with priority ${s.priority || 'medium'}.`,
+                          icon: <MessageSquare className="w-3 h-3 text-rose-600" />,
+                          bg: 'bg-rose-50'
+                        })),
+                        ...(ownerSubHistory ?? []).map((sh) => ({
+                          date: sh.created_at || sh.createdAt || new Date().toISOString(),
+                          title: 'Plan Updated',
+                          body: `Subscription switched to ${sh.plan_code || sh.planCode} plan (${sh.status}).`,
+                          icon: <Package className="w-3 h-3 text-emerald-600" />,
+                          bg: 'bg-emerald-50'
+                        }))
+                      ]
+                        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                        .slice(0, 15) // Limit to latest 15 telemetry items
+                        .map((item, idx) => (
+                          <div key={idx} className="relative">
+                            <span className="absolute -left-[31px] top-1 flex h-4 w-4 items-center justify-center rounded-full bg-white ring-4 ring-white">
+                              <div className={`p-1 rounded-full ${item.bg}`}>{item.icon}</div>
+                            </span>
+                            <div className="text-xs">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-bold text-gray-900">{item.title}</span>
+                                <span className="text-[10px] text-gray-400 tabular-nums">{fmtRelative(item.date)}</span>
+                              </div>
+                              <p className="text-gray-600 mt-1 leading-relaxed">{item.body}</p>
+                            </div>
+                          </div>
+                        ))}
+                      {[
+                        ...(ownerDetail?.properties as any[] ?? []),
+                        ...(ownerDetail?.tenants as any[] ?? []),
+                        ...(ownerDetail?.support as any[] ?? []),
+                        ...(ownerSubHistory ?? [])
+                      ].length === 0 && (
+                        <p className="text-xs text-gray-500 text-center py-4">No recent activities on record for this owner.</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {activeOwnerTab === 'audit-logs' && (
+                  <div className="bg-white rounded-xl border border-gray-200 shadow-xs overflow-hidden">
+                    <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+                      <h3 className="text-sm font-semibold text-gray-900">Audit Logs</h3>
+                      <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">Last 50 events</span>
+                    </div>
+                    {/* Mobile cards */}
+                    <div className="sm:hidden ds-card-list p-3">
+                      {(ownerDetail?.audit as any[] ?? []).map((a) => (
+                        <div key={a.id} className="ds-card-list-item">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="px-2 py-0.5 rounded-md bg-gray-100 text-[10px] font-bold uppercase tracking-wider truncate">
+                              {(a.event || 'PLATFORM_EVENT').replace(/_/g, ' ')}
+                            </span>
+                            <span className="text-gray-400 font-mono text-[10px] whitespace-nowrap flex-shrink-0">{fmtDate(a.created_at || a.createdAt)}</span>
+                          </div>
+                          <p className="text-gray-600 text-xs leading-normal pt-1 border-t border-gray-100">{a.detail}</p>
+                        </div>
+                      ))}
+                      {(ownerDetail?.audit as any[] ?? []).length === 0 && (
+                        <p className="text-center text-gray-500 text-xs py-8">No system audits found for this owner.</p>
+                      )}
+                    </div>
+                    <div className="hidden sm:block overflow-x-auto">
+                      <table className="w-full text-xs text-left">
+                        <thead className="bg-slate-50 border-b border-slate-100 text-gray-500">
+                          <tr>
+                            <th className="px-5 py-3 font-semibold text-[10px] uppercase tracking-wider">Timestamp</th>
+                            <th className="px-5 py-3 font-semibold text-[10px] uppercase tracking-wider">Event ID</th>
+                            <th className="px-5 py-3 font-semibold text-[10px] uppercase tracking-wider">Description</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {(ownerDetail?.audit as any[] ?? []).map((a) => (
+                            <tr key={a.id} className="hover:bg-slate-50/50 transition-colors">
+                              <td className="px-5 py-3.5 text-gray-400 font-mono text-[10px] whitespace-nowrap">{fmtDate(a.created_at || a.createdAt)}</td>
+                              <td className="px-5 py-3.5 font-bold text-gray-800">
+                                <span className="px-2 py-0.5 rounded-md bg-gray-100 text-[10px] font-bold uppercase tracking-wider">
+                                  {(a.event || 'PLATFORM_EVENT').replace(/_/g, ' ')}
+                                </span>
+                              </td>
+                              <td className="px-5 py-3.5 text-gray-600 leading-normal">{a.detail}</td>
+                            </tr>
+                          ))}
+                          {(ownerDetail?.audit as any[] ?? []).length === 0 && (
+                            <tr>
+                              <td colSpan={3} className="px-5 py-8 text-center text-gray-500">No system audits found for this owner.</td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
                 )}
               </div>
-            ) : null}
+            )}
           </div>
         </div>
       </div>
@@ -1345,58 +1999,162 @@ export function AdminSection() {
         </div>
 
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
-          <div className="overflow-x-auto">
+          {/* Mobile cards */}
+          <div className="md:hidden ds-card-list p-3">
+            {summary.owners.map((owner) => {
+              const sub = summary.subscriptions?.find((s) => s.ownerId === owner.id);
+              const isPaused = owner.subscriptionStatus === 'paused';
+              const isCancelled = owner.subscriptionStatus === 'cancelled';
+              return (
+                <div key={owner.id} className="ds-card-list-item">
+                  <div className="cursor-pointer" onClick={() => openOwnerDetail(owner)}>
+                    <p className="font-semibold text-gray-900 text-[14px]">{owner.name}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">{owner.email}</p>
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap pt-2 border-t border-gray-100">
+                    <select
+                      value={owner.planCode}
+                      onChange={(e) => void handlePlanChange(owner.id, e.target.value)}
+                      className="px-2 py-1.5 border border-gray-300 rounded-lg text-xs bg-white font-semibold text-gray-700 focus:outline-none focus:border-violet-500 cursor-pointer"
+                    >
+                      <option value="starter">Starter</option>
+                      <option value="growth">Growth</option>
+                      <option value="pro">Pro</option>
+                      {plansList.filter(p => !['starter', 'growth', 'pro'].includes(p.code)).map(p => (
+                        <option key={p.id} value={p.code}>{p.label}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={owner.subscriptionStatus === 'not_configured' ? 'trialing' : owner.subscriptionStatus}
+                      onChange={(e) => void handleSubscriptionStatusChange(owner.id, e.target.value as any)}
+                      className="px-2 py-1.5 border border-gray-300 rounded-lg text-xs bg-white font-semibold text-gray-700 focus:outline-none focus:border-violet-500 cursor-pointer"
+                    >
+                      <option value="trialing">Trialing</option>
+                      <option value="active">Active</option>
+                      <option value="paused">Paused</option>
+                      <option value="past_due">Past Due</option>
+                      <option value="cancelled">Cancelled</option>
+                    </select>
+                  </div>
+                  {sub && (
+                    <div className="text-xs text-gray-600">
+                      <p className="font-bold text-gray-800">{formatRs(sub.amount)} / {sub.billingCycle || 'mo'}</p>
+                      <p className="text-[10px] text-gray-400">Renews: {fmtDate(sub.renewsAt)}</p>
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2 flex-wrap pt-2 border-t border-gray-100">
+                    {isPaused ? (
+                      <button onClick={() => void handleSubscriptionStatusChange(owner.id, 'active')} className="px-2.5 py-1 text-[11px] font-bold border border-green-300 bg-green-50 text-green-700 rounded-md">Resume</button>
+                    ) : !isCancelled ? (
+                      <button onClick={() => void handleSubscriptionStatusChange(owner.id, 'paused')} className="px-2.5 py-1 text-[11px] font-bold border border-amber-300 bg-amber-50 text-amber-700 rounded-md">Pause</button>
+                    ) : null}
+                    {!isCancelled && (
+                      <button onClick={() => void handleSubscriptionStatusChange(owner.id, 'cancelled')} className="px-2.5 py-1 text-[11px] font-bold border border-rose-300 bg-rose-50 text-rose-700 rounded-md">Cancel</button>
+                    )}
+                    <button onClick={() => openOwnerDetail(owner, 'subscription')} className="text-xs font-semibold text-violet-600 ml-auto">View History</button>
+                  </div>
+                </div>
+              );
+            })}
+            {summary.owners.length === 0 && (
+              <p className="text-center text-sm text-gray-500 py-8">No subscriptions found.</p>
+            )}
+          </div>
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-200 sticky top-0 z-10">
                 <tr>
                   <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Owner</th>
                   <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Plan</th>
                   <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Status</th>
+                  <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Renewal & Rate</th>
                   <th className="px-5 py-3.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {summary.owners.map((owner) => (
-                  <tr key={owner.id} className="hover:bg-gray-50/50 transition-colors">
-                    <td className="px-5 py-3">
-                      <div className="cursor-pointer hover:underline" onClick={() => openOwnerDetail(owner)}>
-                        <p className="font-medium text-gray-900">{owner.name}</p>
-                        <p className="text-xs text-gray-500 mt-0.5">{owner.email}</p>
-                      </div>
-                    </td>
-                    <td className="px-5 py-3">
-                      <select
-                        value={owner.planCode}
-                        onChange={(e) => void handlePlanChange(owner.id, e.target.value)}
-                        className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white font-medium text-gray-700 focus:outline-none focus:border-violet-500"
-                      >
-                        <option value="starter">Starter</option>
-                        <option value="growth">Growth</option>
-                        <option value="pro">Pro</option>
-                      </select>
-                    </td>
-                    <td className="px-5 py-3">
-                      <select
-                        value={owner.subscriptionStatus === 'not_configured' ? 'trialing' : owner.subscriptionStatus}
-                        onChange={(e) => void handleSubscriptionStatusChange(owner.id, e.target.value as 'trialing' | 'active' | 'past_due' | 'cancelled')}
-                        className="px-2 py-1.5 border border-gray-300 rounded-lg text-sm bg-white font-medium text-gray-700 focus:outline-none focus:border-violet-500"
-                      >
-                        <option value="trialing">Trialing</option>
-                        <option value="active">Active</option>
-                        <option value="past_due">Past Due</option>
-                        <option value="cancelled">Cancelled</option>
-                      </select>
-                    </td>
-                    <td className="px-5 py-3">
-                      <button onClick={() => openOwnerDetail(owner, 'subscription')} className="text-xs font-medium text-violet-600 hover:text-violet-700">
-                        View details
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {summary.owners.map((owner) => {
+                  const sub = summary.subscriptions?.find((s) => s.ownerId === owner.id);
+                  const isPaused = owner.subscriptionStatus === 'paused';
+                  const isCancelled = owner.subscriptionStatus === 'cancelled';
+                  return (
+                    <tr key={owner.id} className="hover:bg-gray-50/50 transition-colors">
+                      <td className="px-5 py-3">
+                        <div className="cursor-pointer hover:underline" onClick={() => openOwnerDetail(owner)}>
+                          <p className="font-semibold text-gray-900">{owner.name}</p>
+                          <p className="text-xs text-gray-400 mt-0.5">{owner.email}</p>
+                        </div>
+                      </td>
+                      <td className="px-5 py-3">
+                        <select
+                          value={owner.planCode}
+                          onChange={(e) => void handlePlanChange(owner.id, e.target.value)}
+                          className="px-2 py-1.5 border border-gray-300 rounded-lg text-xs bg-white font-semibold text-gray-700 focus:outline-none focus:border-violet-500 cursor-pointer"
+                        >
+                          <option value="starter">Starter</option>
+                          <option value="growth">Growth</option>
+                          <option value="pro">Pro</option>
+                          {plansList.filter(p => !['starter', 'growth', 'pro'].includes(p.code)).map(p => (
+                            <option key={p.id} value={p.code}>{p.label}</option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="px-5 py-3">
+                        <select
+                          value={owner.subscriptionStatus === 'not_configured' ? 'trialing' : owner.subscriptionStatus}
+                          onChange={(e) => void handleSubscriptionStatusChange(owner.id, e.target.value as any)}
+                          className="px-2 py-1.5 border border-gray-300 rounded-lg text-xs bg-white font-semibold text-gray-700 focus:outline-none focus:border-violet-500 cursor-pointer"
+                        >
+                          <option value="trialing">Trialing</option>
+                          <option value="active">Active</option>
+                          <option value="paused">Paused</option>
+                          <option value="past_due">Past Due</option>
+                          <option value="cancelled">Cancelled</option>
+                        </select>
+                      </td>
+                      <td className="px-5 py-3 text-xs text-gray-600">
+                        {sub ? (
+                          <div className="space-y-0.5">
+                            <p className="font-bold text-gray-800">{formatRs(sub.amount)} / {sub.billingCycle || 'mo'}</p>
+                            <p className="text-[10px] text-gray-400">Renews: {fmtDate(sub.renewsAt)}</p>
+                          </div>
+                        ) : (
+                          <span className="text-gray-400 font-medium">—</span>
+                        )}
+                      </td>
+                      <td className="px-5 py-3 flex items-center gap-2">
+                        {isPaused ? (
+                          <button
+                            onClick={() => void handleSubscriptionStatusChange(owner.id, 'active')}
+                            className="px-2.5 py-1 text-[11px] font-bold border border-green-300 bg-green-50 text-green-700 hover:bg-green-100 rounded-md transition-colors"
+                          >
+                            Resume
+                          </button>
+                        ) : !isCancelled ? (
+                          <button
+                            onClick={() => void handleSubscriptionStatusChange(owner.id, 'paused')}
+                            className="px-2.5 py-1 text-[11px] font-bold border border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 rounded-md transition-colors"
+                          >
+                            Pause
+                          </button>
+                        ) : null}
+                        {!isCancelled && (
+                          <button
+                            onClick={() => void handleSubscriptionStatusChange(owner.id, 'cancelled')}
+                            className="px-2.5 py-1 text-[11px] font-bold border border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100 rounded-md transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        )}
+                        <button onClick={() => openOwnerDetail(owner, 'subscription')} className="text-xs font-semibold text-violet-600 hover:text-violet-700 ml-2">
+                          View History
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
                 {summary.owners.length === 0 && (
                   <tr>
-                    <td colSpan={4} className="px-5 py-8 text-center text-sm text-gray-500">No subscriptions found.</td>
+                    <td colSpan={5} className="px-5 py-8 text-center text-sm text-gray-500">No subscriptions found.</td>
                   </tr>
                 )}
               </tbody>
@@ -1481,7 +2239,34 @@ export function AdminSection() {
 
         {/* Table */}
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
-          <div className="overflow-x-auto">
+          {/* Mobile cards */}
+          <div className="md:hidden ds-card-list p-3">
+            {paged.map((tx) => (
+              <div key={tx.id} className="ds-card-list-item">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="font-medium text-gray-900 truncate">{tx.tenantName}</p>
+                    <p className="text-xs text-gray-500 truncate">{tx.ownerName} · {tx.propertyName}</p>
+                  </div>
+                  <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium flex-shrink-0 ${tx.status === 'paid' ? 'bg-emerald-100 text-emerald-700' : tx.status === 'overdue' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'}`}>
+                    {tx.status}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between pt-2 border-t border-gray-100">
+                  <span className="font-semibold text-gray-900 tabular-nums">{formatRs(tx.amount)}</span>
+                  <span className="text-xs text-gray-500">{tx.paymentMode ?? '—'}</span>
+                  <span className="text-xs text-gray-500 tabular-nums">{fmtDate(tx.paidDate ?? tx.dueDate)}</span>
+                </div>
+              </div>
+            ))}
+            {paged.length === 0 && (
+              <div className="ds-empty-state">
+                <div className="ds-empty-icon"><Download style={{ width: 22, height: 22 }} /></div>
+                <p className="ds-empty-title">No transactions found</p>
+              </div>
+            )}
+          </div>
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-200 sticky top-0 z-10">
                 <tr>
@@ -1588,7 +2373,28 @@ export function AdminSection() {
 
         {/* Table */}
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
-          <div className="overflow-x-auto">
+          {/* Mobile cards */}
+          <div className="md:hidden ds-card-list p-3">
+            {paged.map((entry) => (
+              <div key={entry.id} className="ds-card-list-item">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="px-2 py-1 rounded-md text-[11px] font-medium bg-gray-100 text-gray-700 border border-gray-200 uppercase tracking-wider truncate">
+                    {entry.event.replace(/_/g, ' ')}
+                  </span>
+                  <span className="text-xs text-gray-500 tabular-nums flex-shrink-0">{fmtDate(entry.createdAt)}</span>
+                </div>
+                <p className="text-gray-800 text-sm">{entry.detail}</p>
+                <p className="text-xs text-gray-500 font-mono pt-1 border-t border-gray-100">{entry.ownerId || 'system'}</p>
+              </div>
+            ))}
+            {paged.length === 0 && (
+              <div className="ds-empty-state">
+                <div className="ds-empty-icon"><FileClock style={{ width: 22, height: 22 }} /></div>
+                <p className="ds-empty-title">No audit logs found</p>
+              </div>
+            )}
+          </div>
+          <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b border-gray-200 sticky top-0 z-10">
                 <tr>
@@ -1645,44 +2451,135 @@ export function AdminSection() {
 
     const maxMRR = Math.max(...mrrData.map((m) => m.mrr), 1);
 
+    // SaaS Control Tower Metrics
+    const activeSubs = summary.owners.filter(o => ['active', 'trialing', 'paused'].includes(o.subscriptionStatus));
+    const churnRate = ((summary.stats.churnMrr || 0) / (summary.stats.monthlyRevenue || 1)) * 100;
+
+    // Upcoming Renewals list
+    const upcomingRenewals = [...(summary.subscriptions || [])]
+      .map(s => {
+        const owner = summary.owners.find(o => o.id === s.ownerId);
+        return { ...s, ownerName: owner?.name || 'Unknown Owner', email: owner?.email };
+      })
+      .filter((s) => s.renewsAt && new Date(s.renewsAt).getTime() > Date.now())
+      .sort((a, b) => new Date(a.renewsAt).getTime() - new Date(b.renewsAt).getTime())
+      .slice(0, 5);
+
     return (
       <div className="space-y-6">
         <div>
-          <h1 className="ds-page-title">Platform Analytics</h1>
-          <p className="text-gray-600 mt-1">Revenue trends, owner growth, occupancy, and platform health.</p>
+          <h1 className="ds-page-title">SaaS Control Tower Analytics</h1>
+          <p className="text-gray-600 mt-1">Real-time revenue metrics, active subscriptions, MRR/ARR, churn rates, and renewal cycles.</p>
         </div>
 
-        {/* MRR trend */}
-        <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
-          <div className="flex items-center gap-2 mb-6">
-            <TrendingUp className="w-5 h-5 text-emerald-600" />
-            <h2 className="text-sm font-semibold text-gray-900 uppercase tracking-wide">Revenue Collected (12 months)</h2>
+        {/* SaaS KPIs Row */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-xs flex flex-col justify-between">
+            <div>
+              <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Monthly Recurring Revenue (MRR)</p>
+              <p className="text-2xl font-bold text-slate-900 mt-1.5">{formatRs(summary.stats.monthlyRevenue)}</p>
+            </div>
+            <span className="text-[10px] text-emerald-600 font-semibold mt-2 flex items-center gap-1">
+              <TrendingUp className="w-3 h-3" /> Live Telemetry
+            </span>
           </div>
-          <div className="space-y-3">
-            {mrrData.map((m) => (
-              <div key={m.month} className="flex items-center gap-4">
-                <span className="text-xs font-medium text-gray-500 w-16 shrink-0">{m.month}</span>
-                <div className="flex-1">
-                  <Bar value={m.mrr} max={maxMRR} color="bg-emerald-500" />
-                </div>
-                <span className="text-sm font-semibold text-gray-900 w-24 text-right shrink-0 tabular-nums">{formatRs(m.mrr)}</span>
-                <span className="text-xs text-gray-400 w-16 text-right shrink-0">{m.paymentCount} pmts</span>
+          <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-xs flex flex-col justify-between">
+            <div>
+              <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Annual Recurring Revenue (ARR)</p>
+              <p className="text-2xl font-bold text-slate-900 mt-1.5">{formatRs(summary.stats.arr)}</p>
+            </div>
+            <span className="text-[10px] text-emerald-600 font-semibold mt-2 flex items-center gap-1">
+              <TrendingUp className="w-3 h-3" /> Live Telemetry
+            </span>
+          </div>
+          <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-xs flex flex-col justify-between">
+            <div>
+              <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Active Subscription Contracts</p>
+              <p className="text-2xl font-bold text-slate-900 mt-1.5">{activeSubs.length} active</p>
+            </div>
+            <span className="text-[10px] text-slate-500 font-semibold mt-2">
+              Out of {summary.owners.length} total signups
+            </span>
+          </div>
+          <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-xs flex flex-col justify-between">
+            <div>
+              <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Platform Churn Rate</p>
+              <p className="text-2xl font-bold text-rose-600 mt-1.5">{churnRate.toFixed(1)}%</p>
+            </div>
+            <span className="text-[10px] text-rose-500 font-semibold mt-2 flex items-center gap-1">
+              <TrendingDown className="w-3 h-3" /> -{formatRs(summary.stats.churnMrr)} lost
+            </span>
+          </div>
+        </div>
+
+        {/* 2-Column Revenue & Renewal Section */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Revenue Collected Graph (takes 2 cols) */}
+          <div className="lg:col-span-2 bg-white rounded-xl border border-gray-200 p-6 shadow-sm flex flex-col justify-between">
+            <div>
+              <div className="flex items-center gap-2 mb-6">
+                <TrendingUp className="w-5 h-5 text-emerald-600" />
+                <h2 className="text-sm font-semibold text-gray-900 uppercase tracking-wide">Revenue Collected (12 months)</h2>
               </div>
-            ))}
-          </div>
-          <div className="mt-6 pt-5 border-t border-gray-100 flex gap-6 text-sm">
-            <div className="flex flex-col">
-              <span className="text-gray-500 text-xs uppercase tracking-wide">Total Collected</span>
-              <span className="font-semibold text-gray-900 text-lg tabular-nums mt-0.5">{formatRs(mrrData.reduce((s, m) => s + m.mrr, 0))}</span>
+              <div className="space-y-3">
+                {mrrData.map((m) => (
+                  <div key={m.month} className="flex items-center gap-4">
+                    <span className="text-xs font-medium text-gray-500 w-16 shrink-0">{m.month}</span>
+                    <div className="flex-1">
+                      <Bar value={m.mrr} max={maxMRR} color="bg-emerald-500" />
+                    </div>
+                    <span className="text-sm font-semibold text-gray-900 w-24 text-right shrink-0 tabular-nums">{formatRs(m.mrr)}</span>
+                    <span className="text-xs text-gray-400 w-16 text-right shrink-0">{m.paymentCount} pmts</span>
+                  </div>
+                ))}
+              </div>
             </div>
-            <div className="flex flex-col">
-              <span className="text-gray-500 text-xs uppercase tracking-wide">Avg Monthly</span>
-              <span className="font-semibold text-gray-900 text-lg tabular-nums mt-0.5">{formatRs(Math.round(mrrData.reduce((s, m) => s + m.mrr, 0) / 12))}</span>
+            <div className="mt-6 pt-5 border-t border-gray-100 flex gap-6 text-sm">
+              <div className="flex flex-col">
+                <span className="text-gray-500 text-xs uppercase tracking-wide">Total Collected</span>
+                <span className="font-semibold text-gray-900 text-lg tabular-nums mt-0.5">{formatRs(mrrData.reduce((s, m) => s + m.mrr, 0))}</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-gray-500 text-xs uppercase tracking-wide">Avg Monthly</span>
+                <span className="font-semibold text-gray-900 text-lg tabular-nums mt-0.5">{formatRs(Math.round(mrrData.reduce((s, m) => s + m.mrr, 0) / 12))}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Upcoming Renewals (takes 1 col) */}
+          <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm flex flex-col justify-between">
+            <div>
+              <div className="flex items-center gap-2 mb-6">
+                <Clock className="w-5 h-5 text-violet-600" />
+                <h2 className="text-sm font-semibold text-gray-900 uppercase tracking-wide">Upcoming Renewals</h2>
+              </div>
+              <ul className="divide-y divide-gray-100">
+                {upcomingRenewals.map((r, idx) => (
+                  <li key={idx} className="py-3 flex flex-col gap-1 first:pt-0 last:pb-0">
+                    <div className="flex justify-between items-start gap-2">
+                      <span className="text-xs font-bold text-gray-900 truncate">{r.ownerName}</span>
+                      <span className="text-xs font-extrabold text-gray-800 shrink-0">{formatRs(r.amount)}</span>
+                    </div>
+                    <div className="flex justify-between text-[10px] text-gray-400">
+                      <span className="uppercase font-semibold tracking-wider">{r.planCode}</span>
+                      <span>Due {fmtDate(r.renewsAt)}</span>
+                    </div>
+                  </li>
+                ))}
+                {upcomingRenewals.length === 0 && (
+                  <li className="py-6 text-center text-xs text-gray-400 font-medium">No upcoming renewals detected</li>
+                )}
+              </ul>
+            </div>
+            <div className="pt-4 border-t border-gray-100 mt-6">
+              <button onClick={() => navigateTo('subscriptions')} className="w-full py-2 bg-violet-50 text-violet-700 hover:bg-violet-100 rounded-lg text-xs font-semibold transition-colors">
+                Manage All Subscriptions
+              </button>
             </div>
           </div>
         </div>
 
-        {/* Owner growth */}
+        {/* Owner signup trends */}
         <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
           <div className="flex items-center gap-2 mb-6">
             <Users className="w-5 h-5 text-blue-600" />
@@ -1701,7 +2598,7 @@ export function AdminSection() {
           </div>
         </div>
 
-        {/* Stats grid */}
+        {/* Grid for Tenant Distribution & Top Cities */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="bg-white rounded-xl border border-gray-200 p-5 shadow-sm flex flex-col">
             <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-4">Tenant Distribution</h2>
@@ -1923,6 +2820,611 @@ export function AdminSection() {
   };
 
 
+
+  // ── View: Plans Catalog (CRUD, Limits, Feature Flags) ────────────────────
+
+  const renderPlans = () => {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h1 className="ds-page-title">Plans Catalog</h1>
+            <p className="text-gray-600 mt-1">Configure pricing tiers, features, limits, and service flags.</p>
+          </div>
+          <button
+            onClick={() => {
+              setEditingPlan(null);
+              setPlanForm({
+                code: '',
+                label: '',
+                price: 0,
+                billingCycle: 'monthly',
+                propertyLimit: null,
+                tenantLimit: null,
+                features: [],
+                featureFlags: {
+                  whatsapp: false,
+                  aiAssistant: false,
+                  tenantPortal: true,
+                  multiUser: false,
+                  receipts: true,
+                  buildingView: true
+                }
+              });
+              setIsPlanModalOpen(true);
+            }}
+            className="px-4 py-2 bg-violet-600 text-white rounded-lg text-sm font-semibold hover:bg-violet-700 transition-colors flex items-center gap-2 shadow-sm"
+          >
+            <Plus className="w-4 h-4" /> Create New Plan
+          </button>
+        </div>
+
+        {isLoadingPlans ? (
+          <div className="flex flex-col items-center justify-center py-24 gap-3">
+            <div className="w-8 h-8 border-4 border-violet-200 border-t-violet-600 rounded-full animate-spin" />
+            <p className="text-xs text-gray-500 font-medium">Loading plans catalog...</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {plansList.map((plan) => {
+              const activeCount = summary?.owners.filter((o) => o.planCode === plan.code).length ?? 0;
+              return (
+                <div key={plan.id} className={`bg-white rounded-2xl border ${plan.is_active ? 'border-gray-200 shadow-sm' : 'border-dashed border-gray-300 opacity-75 shadow-xs'} overflow-hidden flex flex-col justify-between`}>
+                  <div className="p-6 space-y-4">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <span className="font-mono text-[10px] font-bold text-gray-400 uppercase tracking-wider">{plan.code}</span>
+                        <h3 className="text-lg font-bold text-gray-900 mt-0.5">{plan.label}</h3>
+                      </div>
+                      <div className="flex flex-col items-end gap-1">
+                        <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ${plan.is_active ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500'}`}>
+                          {plan.is_active ? 'Active' : 'Deactivated'}
+                        </span>
+                        {plan.is_archived && (
+                          <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-amber-100 text-amber-700 uppercase tracking-wider">Archived</span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-baseline gap-1 py-2">
+                      <span className="text-3xl font-extrabold text-gray-900">{formatRs(plan.price)}</span>
+                      <span className="text-xs text-gray-400 font-medium">/{plan.billing_cycle || 'monthly'}</span>
+                    </div>
+
+                    <div className="space-y-2 border-t border-gray-100 pt-3">
+                      <div className="flex justify-between text-xs">
+                        <span className="text-gray-500 font-medium">Property Limit:</span>
+                        <span className="text-gray-900 font-semibold">{plan.property_limit === null ? 'Unlimited' : `${plan.property_limit} Properties`}</span>
+                      </div>
+                      <div className="flex justify-between text-xs">
+                        <span className="text-gray-500 font-medium">Tenant Limit:</span>
+                        <span className="text-gray-900 font-semibold">{plan.tenant_limit === null ? 'Unlimited' : `${plan.tenant_limit} Tenants`}</span>
+                      </div>
+                      <div className="flex justify-between text-xs">
+                        <span className="text-gray-500 font-medium">Active Subscribers:</span>
+                        <span className="text-violet-600 font-bold">{activeCount} owners</span>
+                      </div>
+                    </div>
+
+                    {/* Features Tags */}
+                    {plan.features && plan.features.length > 0 && (
+                      <div className="space-y-1.5 border-t border-gray-100 pt-3">
+                        <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Key Inclusions</p>
+                        <div className="flex flex-wrap gap-1">
+                          {(plan.features as string[]).map((feat, idx) => (
+                            <span key={idx} className="px-2 py-0.5 bg-violet-50 text-violet-700 rounded text-[10px] font-medium border border-violet-100">
+                              {feat}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Feature Flags */}
+                    <div className="space-y-1.5 border-t border-gray-100 pt-3">
+                      <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Capability Flags</p>
+                      <div className="grid grid-cols-2 gap-y-1.5 gap-x-2 text-[10px]">
+                        <div className="flex items-center gap-1.5">
+                          <div className={`w-1.5 h-1.5 rounded-full ${plan.feature_flags?.whatsapp ? 'bg-green-500' : 'bg-gray-300'}`} />
+                          <span className={plan.feature_flags?.whatsapp ? 'text-gray-800 font-medium' : 'text-gray-400'}>WhatsApp Gateway</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <div className={`w-1.5 h-1.5 rounded-full ${plan.feature_flags?.aiAssistant ? 'bg-green-500' : 'bg-gray-300'}`} />
+                          <span className={plan.feature_flags?.aiAssistant ? 'text-gray-800 font-medium' : 'text-gray-400'}>AI Assistant</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <div className={`w-1.5 h-1.5 rounded-full ${plan.feature_flags?.tenantPortal ? 'bg-green-500' : 'bg-gray-300'}`} />
+                          <span className={plan.feature_flags?.tenantPortal ? 'text-gray-800 font-medium' : 'text-gray-400'}>Tenant Portal</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <div className={`w-1.5 h-1.5 rounded-full ${plan.feature_flags?.multiUser ? 'bg-green-500' : 'bg-gray-300'}`} />
+                          <span className={plan.feature_flags?.multiUser ? 'text-gray-800 font-medium' : 'text-gray-400'}>Multi-User</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="p-4 bg-slate-50 border-t border-gray-100 flex gap-2">
+                    <button
+                      onClick={() => {
+                        setEditingPlan(plan);
+                        setPlanForm({
+                          code: plan.code,
+                          label: plan.label,
+                          price: plan.price,
+                          billingCycle: plan.billing_cycle || 'monthly',
+                          propertyLimit: plan.property_limit,
+                          tenantLimit: plan.tenant_limit,
+                          features: plan.features || [],
+                          featureFlags: {
+                            whatsapp: plan.feature_flags?.whatsapp ?? false,
+                            aiAssistant: plan.feature_flags?.aiAssistant ?? false,
+                            tenantPortal: plan.feature_flags?.tenantPortal ?? true,
+                            multiUser: plan.feature_flags?.multiUser ?? false,
+                            receipts: plan.feature_flags?.receipts ?? true,
+                            buildingView: plan.feature_flags?.buildingView ?? true
+                          }
+                        });
+                        setIsPlanModalOpen(true);
+                      }}
+                      className="flex-1 py-1.5 border border-gray-300 hover:border-violet-600 hover:text-violet-600 bg-white rounded-lg text-xs font-semibold text-gray-700 transition-colors"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => handleClonePlan(plan)}
+                      className="px-3 py-1.5 border border-gray-300 bg-white rounded-lg text-xs font-semibold text-gray-700 hover:bg-slate-100 transition-colors"
+                    >
+                      Clone
+                    </button>
+                    <button
+                      onClick={() => void handleTogglePlanActive(plan)}
+                      className="px-3 py-1.5 border border-gray-300 bg-white rounded-lg text-xs font-semibold text-gray-700 hover:bg-slate-100 transition-colors"
+                    >
+                      {plan.is_active ? 'Disable' : 'Enable'}
+                    </button>
+                    <button
+                      onClick={() => void handleArchivePlan(plan)}
+                      className={`px-3 py-1.5 border ${plan.is_archived ? 'border-green-300 text-green-700 hover:bg-green-50' : 'border-rose-300 text-rose-700 hover:bg-rose-50'} bg-white rounded-lg text-xs font-semibold transition-colors`}
+                    >
+                      {plan.is_archived ? 'Restore' : 'Archive'}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+            {plansList.length === 0 && (
+              <div className="col-span-full bg-white rounded-2xl border border-gray-200 p-8 text-center text-gray-500 text-sm">
+                No subscription plans configured.
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Plan CRUD Modal */}
+        {isPlanModalOpen && (
+          <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs animate-in fade-in duration-200">
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg border border-gray-200 overflow-hidden animate-in zoom-in-95 duration-200">
+              <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center bg-gray-50/50">
+                <h3 className="text-base font-bold text-gray-900">{editingPlan ? 'Edit Plan Configuration' : 'Create Subscription Plan'}</h3>
+                <button onClick={() => setIsPlanModalOpen(false)} className="p-1 rounded-full hover:bg-gray-200 text-gray-400 hover:text-gray-600"><XCircle className="w-5 h-5" /></button>
+              </div>
+
+              <form onSubmit={(e) => void handleSavePlan(e)} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] text-gray-400 font-bold uppercase tracking-wider block mb-1">Plan Code</label>
+                    <input
+                      required
+                      disabled={!!editingPlan}
+                      value={planForm.code}
+                      onChange={(e) => setPlanForm({ ...planForm, code: e.target.value.toLowerCase().replace(/\s+/g, '-') })}
+                      placeholder="e.g. starter"
+                      className="px-3 py-2 border border-gray-300 rounded-lg text-xs w-full bg-white font-semibold text-gray-800 focus:outline-none focus:border-violet-500 disabled:bg-slate-100 disabled:text-gray-400"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-400 font-bold uppercase tracking-wider block mb-1">Plan Name (Label)</label>
+                    <input
+                      required
+                      value={planForm.label}
+                      onChange={(e) => setPlanForm({ ...planForm, label: e.target.value })}
+                      placeholder="e.g. Starter Plan"
+                      className="px-3 py-2 border border-gray-300 rounded-lg text-xs w-full bg-white font-semibold text-gray-800 focus:outline-none focus:border-violet-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] text-gray-400 font-bold uppercase tracking-wider block mb-1">Price (₹ INR)</label>
+                    <input
+                      required
+                      type="number"
+                      value={planForm.price}
+                      onChange={(e) => setPlanForm({ ...planForm, price: Number(e.target.value) })}
+                      placeholder="999"
+                      className="px-3 py-2 border border-gray-300 rounded-lg text-xs w-full bg-white font-semibold text-gray-800 focus:outline-none focus:border-violet-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-400 font-bold uppercase tracking-wider block mb-1">Billing Cycle</label>
+                    <select
+                      value={planForm.billingCycle}
+                      onChange={(e) => setPlanForm({ ...planForm, billingCycle: e.target.value })}
+                      className="px-3 py-2 border border-gray-300 rounded-lg text-xs w-full bg-white font-semibold text-gray-800 focus:outline-none focus:border-violet-500"
+                    >
+                      <option value="monthly">Monthly</option>
+                      <option value="yearly">Yearly</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] text-gray-400 font-bold uppercase tracking-wider block mb-1">Properties Limit</label>
+                    <input
+                      type="number"
+                      value={planForm.propertyLimit === null ? '' : planForm.propertyLimit}
+                      onChange={(e) => setPlanForm({ ...planForm, propertyLimit: e.target.value === '' ? null : Number(e.target.value) })}
+                      placeholder="Unlimited (Leave Blank)"
+                      className="px-3 py-2 border border-gray-300 rounded-lg text-xs w-full bg-white font-semibold text-gray-800 focus:outline-none focus:border-violet-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-400 font-bold uppercase tracking-wider block mb-1">Tenants Limit</label>
+                    <input
+                      type="number"
+                      value={planForm.tenantLimit === null ? '' : planForm.tenantLimit}
+                      onChange={(e) => setPlanForm({ ...planForm, tenantLimit: e.target.value === '' ? null : Number(e.target.value) })}
+                      placeholder="Unlimited (Leave Blank)"
+                      className="px-3 py-2 border border-gray-300 rounded-lg text-xs w-full bg-white font-semibold text-gray-800 focus:outline-none focus:border-violet-500"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[10px] text-gray-400 font-bold uppercase tracking-wider block mb-1">Key Inclusions (One feature per line)</label>
+                  <textarea
+                    rows={3}
+                    value={planForm.features.join('\n')}
+                    onChange={(e) => setPlanForm({ ...planForm, features: e.target.value.split('\n').filter(Boolean) })}
+                    placeholder="Receipt Generator&#10;WhatsApp Notifications&#10;Basic Support"
+                    className="px-3 py-2 border border-gray-300 rounded-lg text-xs w-full bg-white font-semibold text-gray-800 focus:outline-none focus:border-violet-500 resize-none"
+                  />
+                </div>
+
+                <div className="space-y-3 border-t border-gray-100 pt-4">
+                  <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider block">Capability Toggles</p>
+                  <div className="grid grid-cols-2 gap-3 text-xs">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={planForm.featureFlags.whatsapp}
+                        onChange={(e) => setPlanForm({
+                          ...planForm,
+                          featureFlags: { ...planForm.featureFlags, whatsapp: e.target.checked }
+                        })}
+                        className="rounded border-gray-300 text-violet-600 focus:ring-violet-500"
+                      />
+                      <span>WhatsApp Gateway</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={planForm.featureFlags.aiAssistant}
+                        onChange={(e) => setPlanForm({
+                          ...planForm,
+                          featureFlags: { ...planForm.featureFlags, aiAssistant: e.target.checked }
+                        })}
+                        className="rounded border-gray-300 text-violet-600 focus:ring-violet-500"
+                      />
+                      <span>AI Tenant Assistant</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={planForm.featureFlags.tenantPortal}
+                        onChange={(e) => setPlanForm({
+                          ...planForm,
+                          featureFlags: { ...planForm.featureFlags, tenantPortal: e.target.checked }
+                        })}
+                        className="rounded border-gray-300 text-violet-600 focus:ring-violet-500"
+                      />
+                      <span>Tenant Portal API</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={planForm.featureFlags.multiUser}
+                        onChange={(e) => setPlanForm({
+                          ...planForm,
+                          featureFlags: { ...planForm.featureFlags, multiUser: e.target.checked }
+                        })}
+                        className="rounded border-gray-300 text-violet-600 focus:ring-violet-500"
+                      />
+                      <span>Multi-user Workspace</span>
+                    </label>
+                  </div>
+                </div>
+
+                <div className="pt-4 border-t border-gray-100 flex gap-3 justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setIsPlanModalOpen(false)}
+                    className="px-4 py-2 border border-gray-300 hover:bg-slate-50 text-gray-700 rounded-lg text-xs font-semibold transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-violet-600 text-white rounded-lg text-xs font-semibold hover:bg-violet-700 transition-colors shadow-sm"
+                  >
+                    Save Changes
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // ── View: Offers & Coupons (CRUD) ──────────────────────────────────────────
+
+  const renderOffersCoupons = () => {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h1 className="ds-page-title">Offers & Coupons</h1>
+            <p className="text-gray-600 mt-1">Configure platform-wide and plan-restricted discount codes.</p>
+          </div>
+          <button
+            onClick={() => {
+              setEditingCoupon(null);
+              setCouponForm({
+                code: '',
+                description: '',
+                discountType: 'percent',
+                discountValue: 0,
+                maxUses: '',
+                validUntil: '',
+                planRestriction: '',
+                isActive: true
+              });
+              setIsCouponModalOpen(true);
+            }}
+            className="px-4 py-2 bg-violet-600 text-white rounded-lg text-sm font-semibold hover:bg-violet-700 transition-colors flex items-center gap-2 shadow-sm"
+          >
+            <Plus className="w-4 h-4" /> Create Coupon
+          </button>
+        </div>
+
+        {isLoadingCoupons ? (
+          <div className="flex flex-col items-center justify-center py-24 gap-3">
+            <div className="w-8 h-8 border-4 border-violet-200 border-t-violet-600 rounded-full animate-spin" />
+            <p className="text-xs text-gray-500 font-medium">Loading coupon codes...</p>
+          </div>
+        ) : (
+          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-sm">
+            {/* Mobile cards */}
+            <div className="md:hidden ds-card-list p-3">
+              {couponsList.map((coupon) => (
+                <div key={coupon.id} className="ds-card-list-item">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <span className="font-bold text-gray-900 tracking-wider text-xs block">{coupon.code}</span>
+                      <span className="text-[10px] text-gray-400 font-semibold mt-0.5 block truncate">{coupon.description || 'No description'}</span>
+                    </div>
+                    <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider flex-shrink-0 ${coupon.isActive ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' : 'bg-gray-100 text-gray-500'}`}>
+                      {coupon.isActive ? 'Active' : 'Inactive'}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 pt-2 border-t border-gray-100 text-[11px]">
+                    <div className="ds-card-list-row"><span className="ds-card-list-label">Value</span><span className="ds-card-list-value">{coupon.discountType === 'percent' ? `${coupon.discountValue}% Off` : `₹${coupon.discountValue} Flat`}</span></div>
+                    <div className="ds-card-list-row"><span className="ds-card-list-label">Uses</span><span className="ds-card-list-value">{coupon.usedCount} / {coupon.maxUses === null ? '∞' : coupon.maxUses}</span></div>
+                  </div>
+                  <p className="text-[11px] text-gray-500">Valid until {coupon.validUntil ? fmtDate(coupon.validUntil) : 'unlimited'}</p>
+                  <div className="flex gap-2 justify-end pt-2 border-t border-gray-100">
+                    <button onClick={() => void handleToggleCouponActive(coupon)} className="px-2.5 py-1 border border-gray-300 rounded text-[11px] font-semibold bg-white text-gray-700">
+                      {coupon.isActive ? 'Disable' : 'Enable'}
+                    </button>
+                    <button onClick={() => void handleDeleteCoupon(coupon.id)} className="px-2.5 py-1 border border-rose-300 text-rose-700 rounded text-[11px] font-semibold bg-white">
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {couponsList.length === 0 && (
+                <p className="text-center text-gray-500 text-xs font-semibold py-8">No coupon codes registered.</p>
+              )}
+            </div>
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-xs text-left">
+                <thead className="bg-slate-50 border-b border-gray-200 text-gray-500 uppercase tracking-wider text-[10px] font-bold">
+                  <tr>
+                    <th className="px-5 py-3.5">Coupon</th>
+                    <th className="px-5 py-3.5">Value</th>
+                    <th className="px-5 py-3.5">Uses Count</th>
+                    <th className="px-5 py-3.5">Validity Range</th>
+                    <th className="px-5 py-3.5">Applies To</th>
+                    <th className="px-5 py-3.5">Status</th>
+                    <th className="px-5 py-3.5 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {couponsList.map((coupon) => (
+                    <tr key={coupon.id} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="px-5 py-4">
+                        <span className="font-bold text-gray-900 tracking-wider text-xs block">{coupon.code}</span>
+                        <span className="text-[10px] text-gray-400 font-semibold mt-0.5 block">{coupon.description || 'No description'}</span>
+                      </td>
+                      <td className="px-5 py-4 font-bold text-gray-800 text-xs">
+                        {coupon.discountType === 'percent' ? `${coupon.discountValue}% Off` : `₹${coupon.discountValue} Flat`}
+                      </td>
+                      <td className="px-5 py-4 font-medium text-gray-600">
+                        {coupon.usedCount} / {coupon.maxUses === null ? '∞' : coupon.maxUses}
+                      </td>
+                      <td className="px-5 py-4 text-gray-500">
+                        Until {coupon.validUntil ? fmtDate(coupon.validUntil) : 'unlimited'}
+                      </td>
+                      <td className="px-5 py-4">
+                        {coupon.planRestriction ? (
+                          <div className="flex flex-wrap gap-1">
+                            {coupon.planRestriction.split(',').map((p: string, idx: number) => (
+                              <span key={idx} className="px-1.5 py-0.5 bg-violet-50 text-violet-700 rounded text-[9px] font-bold uppercase tracking-wider border border-violet-100">
+                                {p.trim()}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-gray-400 font-medium">All plans</span>
+                        )}
+                      </td>
+                      <td className="px-5 py-4">
+                        <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ${coupon.isActive ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' : 'bg-gray-100 text-gray-500'}`}>
+                          {coupon.isActive ? 'Active' : 'Inactive'}
+                        </span>
+                      </td>
+                      <td className="px-5 py-4 text-right flex gap-2 justify-end">
+                        <button
+                          onClick={() => void handleToggleCouponActive(coupon)}
+                          className="px-2.5 py-1 border border-gray-300 hover:bg-slate-100 rounded text-[11px] font-semibold bg-white text-gray-700 transition-colors"
+                        >
+                          {coupon.isActive ? 'Disable' : 'Enable'}
+                        </button>
+                        <button
+                          onClick={() => void handleDeleteCoupon(coupon.id)}
+                          className="px-2.5 py-1 border border-rose-300 text-rose-700 hover:bg-rose-50 rounded text-[11px] font-semibold bg-white transition-colors"
+                        >
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {couponsList.length === 0 && (
+                    <tr>
+                      <td colSpan={7} className="px-5 py-8 text-center text-gray-500 text-xs font-semibold">No coupon codes registered.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Coupon CRUD Modal */}
+        {isCouponModalOpen && (
+          <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs animate-in fade-in duration-200">
+            <div className="bg-white rounded-2xl shadow-xl w-full max-w-md border border-gray-200 overflow-hidden animate-in zoom-in-95 duration-200">
+              <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center bg-gray-50/50">
+                <h3 className="text-base font-bold text-gray-900">Create Coupon Code</h3>
+                <button onClick={() => setIsCouponModalOpen(false)} className="p-1 rounded-full hover:bg-gray-200 text-gray-400 hover:text-gray-600"><XCircle className="w-5 h-5" /></button>
+              </div>
+
+              <form onSubmit={(e) => void handleSaveCoupon(e)} className="p-6 space-y-4">
+                <div>
+                  <label className="text-[10px] text-gray-400 font-bold uppercase tracking-wider block mb-1">Promo Code (Uppercase)</label>
+                  <input
+                    required
+                    value={couponForm.code}
+                    onChange={(e) => setCouponForm({ ...couponForm, code: e.target.value.toUpperCase().replace(/\s+/g, '') })}
+                    placeholder="e.g. PLATFORM25"
+                    className="px-3 py-2 border border-gray-300 rounded-lg text-xs w-full bg-white font-semibold text-gray-800 focus:outline-none focus:border-violet-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] text-gray-400 font-bold uppercase tracking-wider block mb-1">Coupon Description</label>
+                  <input
+                    value={couponForm.description}
+                    onChange={(e) => setCouponForm({ ...couponForm, description: e.target.value })}
+                    placeholder="e.g. 25% off monthly subscription billing"
+                    className="px-3 py-2 border border-gray-300 rounded-lg text-xs w-full bg-white font-semibold text-gray-800 focus:outline-none focus:border-violet-500"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] text-gray-400 font-bold uppercase tracking-wider block mb-1">Discount Type</label>
+                    <select
+                      value={couponForm.discountType}
+                      onChange={(e) => setCouponForm({ ...couponForm, discountType: e.target.value as any })}
+                      className="px-3 py-2 border border-gray-300 rounded-lg text-xs w-full bg-white font-semibold text-gray-800 focus:outline-none focus:border-violet-500"
+                    >
+                      <option value="percent">Percentage (%)</option>
+                      <option value="flat">Fixed Flat Amount (₹)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-400 font-bold uppercase tracking-wider block mb-1">Discount Value</label>
+                    <input
+                      required
+                      type="number"
+                      value={couponForm.discountValue}
+                      onChange={(e) => setCouponForm({ ...couponForm, discountValue: Number(e.target.value) })}
+                      placeholder="e.g. 25"
+                      className="px-3 py-2 border border-gray-300 rounded-lg text-xs w-full bg-white font-semibold text-gray-800 focus:outline-none focus:border-violet-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] text-gray-400 font-bold uppercase tracking-wider block mb-1">Max Usage Limit</label>
+                    <input
+                      type="number"
+                      value={couponForm.maxUses}
+                      onChange={(e) => setCouponForm({ ...couponForm, maxUses: e.target.value })}
+                      placeholder="Unlimited (Leave Blank)"
+                      className="px-3 py-2 border border-gray-300 rounded-lg text-xs w-full bg-white font-semibold text-gray-800 focus:outline-none focus:border-violet-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-gray-400 font-bold uppercase tracking-wider block mb-1">Expiration Target Date</label>
+                    <input
+                      type="date"
+                      value={couponForm.validUntil}
+                      onChange={(e) => setCouponForm({ ...couponForm, validUntil: e.target.value })}
+                      className="px-3 py-2 border border-gray-300 rounded-lg text-xs w-full bg-white font-semibold text-gray-800 focus:outline-none focus:border-violet-500"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[10px] text-gray-400 font-bold uppercase tracking-wider block mb-1">Plan Specific Limitations (Comma separated)</label>
+                  <input
+                    value={couponForm.planRestriction}
+                    onChange={(e) => setCouponForm({ ...couponForm, planRestriction: e.target.value.toLowerCase().replace(/\s+/g, '') })}
+                    placeholder="e.g. starter,growth (Leave blank for all)"
+                    className="px-3 py-2 border border-gray-300 rounded-lg text-xs w-full bg-white font-semibold text-gray-800 focus:outline-none focus:border-violet-500"
+                  />
+                </div>
+
+                <div className="pt-4 border-t border-gray-100 flex gap-3 justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setIsCouponModalOpen(false)}
+                    className="px-4 py-2 border border-gray-300 hover:bg-slate-50 text-gray-700 rounded-lg text-xs font-semibold transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-violet-600 text-white rounded-lg text-xs font-semibold hover:bg-violet-700 transition-colors shadow-sm"
+                  >
+                    Generate Coupon
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   // ── View: Platform Settings ───────────────────────────────────────────────
 
@@ -2430,32 +3932,54 @@ export function AdminSection() {
           ) : filtered.length === 0 ? (
             <div className="flex items-center justify-center h-32 text-sm text-slate-400">No invitations found</div>
           ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-slate-100 bg-slate-50">
-                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Invited Email</th>
-                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Role</th>
-                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Status</th>
-                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Invited</th>
-                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Expires</th>
-                </tr>
-              </thead>
-              <tbody>
+            <>
+              {/* Mobile cards */}
+              <div className="md:hidden ds-card-list p-3">
                 {filtered.map((inv) => (
-                  <tr key={inv.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50 transition-colors">
-                    <td className="px-4 py-3 font-medium text-slate-900">{inv.invited_email}</td>
-                    <td className="px-4 py-3 text-slate-600 capitalize">{inv.display_role}</td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium capitalize ${inviteStatusColor(inv.status)}`}>
+                  <div key={inv.id} className="ds-card-list-item">
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="font-medium text-slate-900 truncate">{inv.invited_email}</p>
+                      <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium capitalize flex-shrink-0 ${inviteStatusColor(inv.status)}`}>
                         {inv.status}
                       </span>
-                    </td>
-                    <td className="px-4 py-3 text-slate-500">{fmtDate(inv.invited_at)}</td>
-                    <td className="px-4 py-3 text-slate-500">{fmtDate(inv.expires_at)}</td>
-                  </tr>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-100 text-[11px]">
+                      <div className="ds-card-list-row"><span className="ds-card-list-label">Role</span><span className="ds-card-list-value capitalize">{inv.display_role}</span></div>
+                      <div className="ds-card-list-row"><span className="ds-card-list-label">Invited</span><span className="ds-card-list-value">{fmtDate(inv.invited_at)}</span></div>
+                      <div className="ds-card-list-row"><span className="ds-card-list-label">Expires</span><span className="ds-card-list-value">{fmtDate(inv.expires_at)}</span></div>
+                    </div>
+                  </div>
                 ))}
-              </tbody>
-            </table>
+              </div>
+              <div className="hidden md:block overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-slate-100 bg-slate-50">
+                      <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Invited Email</th>
+                      <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Role</th>
+                      <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Status</th>
+                      <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Invited</th>
+                      <th className="text-left px-4 py-2.5 text-xs font-semibold text-slate-500 uppercase tracking-wide">Expires</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map((inv) => (
+                      <tr key={inv.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50 transition-colors">
+                        <td className="px-4 py-3 font-medium text-slate-900">{inv.invited_email}</td>
+                        <td className="px-4 py-3 text-slate-600 capitalize">{inv.display_role}</td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium capitalize ${inviteStatusColor(inv.status)}`}>
+                            {inv.status}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-slate-500">{fmtDate(inv.invited_at)}</td>
+                        <td className="px-4 py-3 text-slate-500">{fmtDate(inv.expires_at)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </div>
       </div>
@@ -2469,6 +3993,8 @@ export function AdminSection() {
       case 'dashboard': return renderDashboard();
       case 'owners': return renderOwners();
       case 'subscriptions': return renderSubscriptions();
+      case 'plans': return renderPlans();
+      case 'offers-coupons': return renderOffersCoupons();
       case 'transactions': return renderTransactions();
       case 'analytics': return renderAnalytics();
       case 'audit-logs': return renderAuditLogs();

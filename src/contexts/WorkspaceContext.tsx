@@ -28,7 +28,7 @@ export interface WorkspaceOccupancy {
 }
 
 export interface WorkspaceSubscriptionSummary {
-  status: 'trialing' | 'active' | 'past_due' | 'cancelled';
+  status: 'trialing' | 'active' | 'paused' | 'past_due' | 'cancelled';
   planCode: string;
   trialEndsAt: string | null;
   renewsAt: string | null;
@@ -296,6 +296,7 @@ export function getSubscriptionLabel(sub: WorkspaceSubscriptionSummary | null): 
   switch (sub.status) {
     case 'trialing':  return 'Trial Active';
     case 'active':    return 'Active';
+    case 'paused':    return 'Paused';
     case 'past_due':  return 'Payment Due';
     case 'cancelled': return 'Expired';
     default:          return '';

@@ -903,8 +903,18 @@ export function Tenants({ onViewTenant }: TenantsProps) {
       <div className="ds-card" style={{ padding: 0, overflow: 'hidden' }}>
 
         {/* Filter + search merged */}
-        <div style={{ padding: '8px 12px', borderBottom: '1px solid #F4F4F6', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <div className="ds-tab-bar" style={{ flexShrink: 0, overflowX: 'auto', flexWrap: 'nowrap' }}>
+        <div className="flex flex-col md:flex-row md:items-center" style={{ padding: '8px 12px', borderBottom: '1px solid #F4F4F6', gap: 8 }}>
+          <div className="flex-1 md:flex-none md:order-2 md:min-w-[140px]" style={{ position: 'relative' }}>
+            <Search style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', width: 13, height: 13, color: '#A1A1AA' }} />
+            <Input
+              type="text"
+              placeholder="Search name, room, phone…"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              style={{ paddingLeft: 30, height: 36, fontSize: 13, width: '100%' }}
+            />
+          </div>
+          <div className="ds-tab-bar md:order-1" style={{ flexShrink: 0, overflowX: 'auto', flexWrap: 'nowrap' }}>
             {(['all', 'active', 'payment_overdue', 'notice_submitted', 'vacating', 'inactive', 'archived'] as const).map((s) => (
               <button
                 key={s}
@@ -920,16 +930,6 @@ export function Tenants({ onViewTenant }: TenantsProps) {
                 </span>
               </button>
             ))}
-          </div>
-          <div style={{ flex: 1, position: 'relative', minWidth: 140 }}>
-            <Search style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', width: 13, height: 13, color: '#A1A1AA' }} />
-            <Input
-              type="text"
-              placeholder="Search name, room, phone…"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              style={{ paddingLeft: 30, height: 32, fontSize: 12 }}
-            />
           </div>
         </div>
 

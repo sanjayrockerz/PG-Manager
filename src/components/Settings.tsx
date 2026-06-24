@@ -15,6 +15,7 @@ import {
   Loader2, Save, Camera, Download, QrCode, Building2,
   X, Info, Tag, Upload, RefreshCw, CheckCircle2,
   FileSignature, PenLine, Type, FileText,
+  Palette, RotateCcw, History, Code, Eye, Layout,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
@@ -24,9 +25,10 @@ import {
   supabaseAuthDataApi, supabaseOwnerDataApi, supabaseLifecycleApi,
   type OwnerSettingsRecord, type ProfileUpdateInput, type OwnerSubscriptionRecord,
   type OwnerSignatureProfile, type AgreementTemplate, type AgreementTemplateUpsertInput,
+  type EmailTemplateRecord, DEFAULT_EMAIL_TEMPLATES,
   defaultSettings,
 } from '../services/supabaseData';
-import { logSettingsChange } from '../utils/settingsAudit';
+import { logSettingsChange, type SettingsAuditEvent } from '../utils/settingsAudit';
 import { SMS_PROVIDER_OPTIONS, type SMSProviderName } from '../services/smsProvider';
 import { useWorkspace } from '../contexts/WorkspaceContext';
 import { hasWorkspacePermission } from '../utils/permissions';
@@ -370,6 +372,627 @@ function IntegrationsTab({
         {!saving && <Save className="w-4 h-4 mr-2" />}
         Save Integrations
       </Button>
+    </div>
+  );
+}
+
+// ─── Email Templates Tab ──────────────────────────────────────────────────────
+
+interface EmailTemplatesTabProps {
+  settings: OwnerSettingsRecord;
+  onSaveSettings: (updated: OwnerSettingsRecord, auditEvent?: SettingsAuditEvent, auditDetail?: string) => Promise<void>;
+  savingSettings: boolean;
+}
+
+export function EmailTemplatesTab({ settings, onSaveSettings, savingSettings }: EmailTemplatesTabProps) {
+  const [activeTemplateKey, setActiveTemplateKey] = useState('tenant_invitation');
+  const [subject, setSubject] = useState('');
+  const [body, setBody] = useState('');
+  const [isHtmlMode, setIsHtmlMode] = useState(false);
+  const [logoUploading, setLogoUploading] = useState(false);
+  const [savingTemplate, setSavingTemplate] = useState(false);
+  const [resettingTemplate, setResettingTemplate] = useState(false);
+  const [versions, setVersions] = useState<EmailTemplateRecord[]>([]);
+  const [selectedVersion, setSelectedVersion] = useState('');
+  const [brandingColor, setBrandingColor] = useState(settings.branding?.primaryColor || '#4F46E5');
+  const [brandingFooter, setBrandingFooter] = useState(settings.branding?.footerText || '');
+
+  const editorRef = useRef<HTMLDivElement>(null);
+
+  const defaultTemplate = DEFAULT_EMAIL_TEMPLATES[activeTemplateKey] || { subject: '', body: '' };
+
+  useEffect(() => {
+    void loadTemplate();
+  }, [activeTemplateKey]);
+
+  // Keep local state in sync when settings prop updates
+  useEffect(() => {
+    if (settings.branding?.primaryColor) {
+      setBrandingColor(settings.branding.primaryColor);
+    }
+    if (settings.branding?.footerText !== undefined) {
+      setBrandingFooter(settings.branding.footerText);
+    }
+  }, [settings]);
+
+  const loadTemplate = async () => {
+    try {
+      const templates = await supabaseLifecycleApi.getEmailTemplates();
+      const current = templates.find((t) => t.templateKey === activeTemplateKey);
+      if (current) {
+        setSubject(current.subject);
+        setBody(current.body);
+      } else {
+        setSubject(defaultTemplate.subject);
+        setBody(defaultTemplate.body);
+      }
+
+      const history = await supabaseLifecycleApi.getEmailTemplateVersions(activeTemplateKey);
+      setVersions(history);
+      setSelectedVersion('');
+    } catch (err) {
+      console.warn('Failed to load email template:', err);
+      setSubject(defaultTemplate.subject);
+      setBody(defaultTemplate.body);
+    }
+  };
+
+  useEffect(() => {
+    if (editorRef.current && !isHtmlMode) {
+      editorRef.current.innerHTML = body;
+    }
+  }, [body, isHtmlMode]);
+
+  const handleSaveTemplate = async () => {
+    setSavingTemplate(true);
+    try {
+      const finalBody = isHtmlMode ? body : (editorRef.current?.innerHTML || body);
+      await supabaseLifecycleApi.saveEmailTemplate(activeTemplateKey, subject, finalBody);
+      setBody(finalBody);
+      toast.success('Email template saved successfully.');
+      void loadTemplate();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to save email template.');
+    } finally {
+      setSavingTemplate(false);
+    }
+  };
+
+  const handleResetTemplate = async () => {
+    setResettingTemplate(true);
+    try {
+      await supabaseLifecycleApi.resetEmailTemplate(activeTemplateKey);
+      toast.success('Template reset to system default.');
+      setSubject(defaultTemplate.subject);
+      setBody(defaultTemplate.body);
+      void loadTemplate();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to reset template.');
+    } finally {
+      setResettingTemplate(false);
+    }
+  };
+
+  const handleRestoreVersion = (versionVal: string) => {
+    setSelectedVersion(versionVal);
+    const ver = versions.find(v => String(v.version) === versionVal);
+    if (ver) {
+      setSubject(ver.subject);
+      setBody(ver.body);
+      if (editorRef.current && !isHtmlMode) {
+        editorRef.current.innerHTML = ver.body;
+      }
+      toast.info(`Restored version v${ver.version} contents to editor.`);
+    }
+  };
+
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error('Logo image must be under 2 MB.');
+      return;
+    }
+    if (!file.type.startsWith('image/')) {
+      toast.error('File must be an image.');
+      return;
+    }
+    setLogoUploading(true);
+    try {
+      const url = await supabaseLifecycleApi.uploadBrandingLogo(file);
+      const updated = {
+        ...settings,
+        branding: {
+          ...settings.branding,
+          logoUrl: url,
+        }
+      };
+      await onSaveSettings(updated, 'OWNER_BRANDING_UPDATED', 'Email branding logo uploaded');
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to upload logo.');
+    } finally {
+      setLogoUploading(false);
+    }
+  };
+
+  const handleRemoveLogo = async () => {
+    const updated = {
+      ...settings,
+      branding: {
+        ...settings.branding,
+        logoUrl: '',
+      }
+    };
+    await onSaveSettings(updated, 'OWNER_BRANDING_UPDATED', 'Email branding logo removed');
+  };
+
+  const handleSaveBranding = async () => {
+    const updated = {
+      ...settings,
+      branding: {
+        ...settings.branding,
+        primaryColor: brandingColor,
+        footerText: brandingFooter,
+      }
+    };
+    await onSaveSettings(updated, 'OWNER_BRANDING_UPDATED', 'Email branding details updated');
+  };
+
+  const handleInsertVariable = (variable: string) => {
+    const token = `{{${variable}}}`;
+    if (isHtmlMode) {
+      const textarea = document.getElementById('raw-html-editor') as HTMLTextAreaElement;
+      if (textarea) {
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+        const text = textarea.value;
+        const before = text.substring(0, start);
+        const after = text.substring(end, text.length);
+        const updatedVal = before + token + after;
+        setBody(updatedVal);
+        setTimeout(() => {
+          textarea.focus();
+          textarea.selectionStart = textarea.selectionEnd = start + token.length;
+        }, 10);
+      }
+    } else {
+      if (editorRef.current) {
+        editorRef.current.focus();
+        let sel = window.getSelection();
+        if (sel && sel.rangeCount > 0) {
+          let range = sel.getRangeAt(0);
+          if (editorRef.current.contains(range.startContainer)) {
+            range.deleteContents();
+            let node = document.createTextNode(token);
+            range.insertNode(node);
+            range.setStartAfter(node);
+            range.setEndAfter(node);
+            sel.removeAllRanges();
+            sel.addRange(range);
+            setBody(editorRef.current.innerHTML);
+            return;
+          }
+        }
+        setBody(prev => prev + token);
+      }
+    }
+  };
+
+  const execCmd = (command: string, value: string = '') => {
+    if (isHtmlMode) return;
+    document.execCommand(command, false, value);
+    if (editorRef.current) {
+      setBody(editorRef.current.innerHTML);
+    }
+  };
+
+  const renderPreview = () => {
+    const mockValues: Record<string, string> = {
+      tenant_name: 'John Doe',
+      property_name: 'Vibrant Heights PG',
+      room_number: '204-A',
+      owner_name: settings.branding?.footerText ? settings.branding.footerText.split('\n')[0] : 'Sanjay Kumar',
+      due_amount: '8,500',
+      due_date: '05 Jul 2026',
+      payment_link: 'https://pay.pgmanager.app/bill/inv_90124',
+      agreement_link: 'https://sign.pgmanager.app/agreements/sign_29104',
+      magic_link: 'https://login.pgmanager.app/otp/auth_92841',
+    };
+
+    let renderedBody = isHtmlMode ? body : (editorRef.current?.innerHTML || body);
+    let renderedSubject = subject;
+
+    Object.entries(mockValues).forEach(([key, val]) => {
+      const regex = new RegExp(`\\{\\{${key}\\}\\}`, 'g');
+      renderedBody = renderedBody.replace(regex, val);
+      renderedSubject = renderedSubject.replace(regex, val);
+    });
+
+    if (!renderedBody.includes('<p>') && !renderedBody.includes('<div>') && !renderedBody.includes('<br>')) {
+      renderedBody = renderedBody.replace(/\n/g, '<br />');
+    }
+
+    const brandColor = brandingColor || '#4F46E5';
+    const brandLogo = settings.branding?.logoUrl || '';
+    const brandFooter = brandingFooter || `Sent by Sanjay Kumar`;
+
+    return `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <style>
+            body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; background-color: #f3f4f6; color: #1f2937; padding: 20px; }
+            .container { max-width: 550px; margin: 10px auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); border: 1px solid #e5e7eb; }
+            .header-bar { height: 6px; background-color: ${brandColor}; }
+            .header { padding: 20px; text-align: center; border-bottom: 1px solid #f3f4f6; }
+            .logo { max-height: 40px; object-fit: contain; margin-bottom: 8px; }
+            .property-name { font-size: 14px; font-weight: 600; color: #4b5563; margin: 0; }
+            .content { padding: 24px; font-size: 14px; line-height: 1.6; color: #374151; }
+            .subject { font-size: 15px; font-weight: 750; color: #111827; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px dashed #e5e7eb; }
+            .footer { padding: 20px; background-color: #f9fafb; border-top: 1px solid #f3f4f6; text-align: center; font-size: 12px; color: #6b7280; }
+            .footer-text { margin: 0 0 6px 0; white-space: pre-wrap; }
+            .footer-sub { margin: 0; font-size: 10px; color: #9ca3af; }
+            a { color: ${brandColor}; text-decoration: underline; font-weight: 500; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header-bar"></div>
+            <div class="header">
+              ${brandLogo ? `<img class="logo" src="${brandLogo}" alt="Logo" />` : ''}
+              <div class="property-name">Vibrant Heights PG</div>
+            </div>
+            <div class="content">
+              <div class="subject">Subject: ${renderedSubject}</div>
+              <div>${renderedBody}</div>
+            </div>
+            <div class="footer">
+              <p class="footer-text">${brandFooter || 'Sent via PG Manager Notification Service'}</p>
+              <p class="footer-sub">System Notification Engine</p>
+            </div>
+          </div>
+        </body>
+      </html>
+    `;
+  };
+
+  const templatesList = [
+    { key: 'tenant_invitation', label: 'Tenant Invitation' },
+    { key: 'agreement_signature', label: 'Agreement Signature Request' },
+    { key: 'payment_reminder', label: 'Payment Reminder' },
+    { key: 'overdue_reminder', label: 'Overdue Reminder' },
+    { key: 'payment_receipt', label: 'Payment Receipt' },
+    { key: 'maintenance_update', label: 'Maintenance Update' },
+    { key: 'vacate_notice', label: 'Vacate Notice' },
+    { key: 'team_invitation', label: 'Team Member Invitation' },
+  ];
+
+  const variablesList = [
+    { key: 'tenant_name', label: 'Tenant Name' },
+    { key: 'property_name', label: 'Property Name' },
+    { key: 'room_number', label: 'Room Number' },
+    { key: 'owner_name', label: 'Owner Name' },
+    { key: 'due_amount', label: 'Due Amount' },
+    { key: 'due_date', label: 'Due Date' },
+    { key: 'payment_link', label: 'Payment Link' },
+    { key: 'agreement_link', label: 'Agreement Link' },
+    { key: 'magic_link', label: 'Magic Login Link' },
+  ];
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      {/* LEFT COLUMN: EDITOR */}
+      <div className="lg:col-span-7 space-y-6">
+        <Card className="border-gray-200">
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <FileText className="w-5 h-5 text-indigo-600" />
+              Configure Notification Templates
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <Label className="text-xs text-gray-500">Template Type</Label>
+              <select
+                value={activeTemplateKey}
+                onChange={(e) => setActiveTemplateKey(e.target.value)}
+                className="w-full mt-1.5 h-10 px-3 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+              >
+                {templatesList.map((t) => (
+                  <option key={t.key} value={t.key}>{t.label}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <Label className="text-xs text-gray-500">Subject Line</Label>
+              <Input
+                value={subject}
+                onChange={(e) => setSubject(e.target.value)}
+                placeholder="Enter email subject"
+                className="mt-1.5 h-10 text-sm border-gray-200"
+              />
+            </div>
+
+            {/* Editor toolbar */}
+            <div className="border border-gray-200 rounded-xl overflow-hidden">
+              <div className="bg-gray-50 px-3 py-2 border-b border-gray-200 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => execCmd('bold')}
+                    type="button"
+                    className="p-1.5 hover:bg-gray-200 rounded text-gray-600 font-bold hover:text-gray-900 text-sm"
+                    title="Bold"
+                  >
+                    B
+                  </button>
+                  <button
+                    onClick={() => execCmd('italic')}
+                    type="button"
+                    className="p-1.5 hover:bg-gray-200 rounded text-gray-600 italic hover:text-gray-900 text-sm"
+                    title="Italic"
+                  >
+                    I
+                  </button>
+                  <button
+                    onClick={() => execCmd('underline')}
+                    type="button"
+                    className="p-1.5 hover:bg-gray-200 rounded text-gray-600 underline hover:text-gray-900 text-sm"
+                    title="Underline"
+                  >
+                    U
+                  </button>
+                  <div className="w-px h-4 bg-gray-300 mx-1"></div>
+                  <button
+                    onClick={() => execCmd('insertUnorderedList')}
+                    type="button"
+                    className="p-1 px-2 hover:bg-gray-200 rounded text-gray-600 hover:text-gray-900 text-xs font-medium"
+                    title="Bullet List"
+                  >
+                    • List
+                  </button>
+                  <button
+                    onClick={() => execCmd('insertOrderedList')}
+                    type="button"
+                    className="p-1 px-2 hover:bg-gray-200 rounded text-gray-600 hover:text-gray-900 text-xs font-medium"
+                    title="Numbered List"
+                  >
+                    1. List
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <select
+                    onChange={(e) => {
+                      if (e.target.value) {
+                        handleInsertVariable(e.target.value);
+                        e.target.value = '';
+                      }
+                    }}
+                    defaultValue=""
+                    className="text-xs border border-gray-200 rounded px-2 py-1 bg-white"
+                  >
+                    <option value="" disabled>Insert Variable...</option>
+                    {variablesList.map(v => (
+                      <option key={v.key} value={v.key}>{v.label}</option>
+                    ))}
+                  </select>
+
+                  <button
+                    onClick={() => {
+                      if (!isHtmlMode && editorRef.current) {
+                        setBody(editorRef.current.innerHTML);
+                      }
+                      setIsHtmlMode(!isHtmlMode);
+                    }}
+                    type="button"
+                    className={`p-1 px-2 rounded text-xs flex items-center gap-1 ${
+                      isHtmlMode ? 'bg-indigo-100 text-indigo-700 font-semibold' : 'bg-gray-200 text-gray-600 hover:bg-gray-250'
+                    }`}
+                  >
+                    <Code className="w-3.5 h-3.5" />
+                    {isHtmlMode ? 'Visual' : 'HTML'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Editor body */}
+              {isHtmlMode ? (
+                <textarea
+                  id="raw-html-editor"
+                  value={body}
+                  onChange={(e) => setBody(e.target.value)}
+                  className="w-full h-64 p-4 font-mono text-sm border-0 focus:outline-none focus:ring-0 focus:border-0"
+                  style={{ outline: 'none', border: 'none', minHeight: 250 }}
+                />
+              ) : (
+                <div
+                  ref={editorRef}
+                  contentEditable
+                  className="w-full min-h-[250px] p-4 text-sm bg-white overflow-y-auto focus:outline-none proset proset-indigo"
+                  style={{ outline: 'none' }}
+                  onInput={(e) => setBody(e.currentTarget.innerHTML)}
+                />
+              )}
+            </div>
+
+            {/* Variable inserting quick-chips */}
+            <div className="space-y-1.5">
+              <Label className="text-xs text-gray-500">Insert variables</Label>
+              <div className="flex flex-wrap gap-1.5">
+                {variablesList.map(v => (
+                  <button
+                    key={v.key}
+                    type="button"
+                    onClick={() => handleInsertVariable(v.key)}
+                    className="text-[11px] font-medium text-indigo-700 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded hover:bg-indigo-100 transition-colors"
+                  >
+                    {`{{${v.key}}}`}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Action buttons */}
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-gray-150">
+              <div className="flex items-center gap-2">
+                <Button
+                  onClick={() => void handleSaveTemplate()}
+                  loading={savingTemplate}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white h-9 text-xs"
+                >
+                  Save Template
+                </Button>
+                <Button
+                  onClick={() => void handleResetTemplate()}
+                  loading={resettingTemplate}
+                  variant="outline"
+                  className="h-9 text-xs gap-1 border-gray-300 hover:bg-gray-50 text-gray-700"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  Reset to Default
+                </Button>
+              </div>
+
+              {/* Version History Selector */}
+              {versions.length > 0 && (
+                <div className="flex items-center gap-1.5">
+                  <History className="w-4 h-4 text-gray-400" />
+                  <select
+                    value={selectedVersion}
+                    onChange={(e) => handleRestoreVersion(e.target.value)}
+                    className="text-xs border border-gray-200 rounded px-2 py-1 bg-white h-8"
+                  >
+                    <option value="" disabled>Versions ({versions.length})</option>
+                    {versions.map((v) => (
+                      <option key={v.version} value={v.version}>
+                        {`v${v.version} - ${new Date(v.createdAt || Date.now()).toLocaleDateString('en-IN')}`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* RIGHT COLUMN: BRANDING & PREVIEW */}
+      <div className="lg:col-span-5 space-y-6">
+        {/* BRANDING CARD */}
+        <Card className="border-gray-200">
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Palette className="w-5 h-5 text-indigo-600" />
+              Owner Branding
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Logo upload */}
+            <div>
+              <Label className="text-xs text-gray-500">Logo Mark</Label>
+              <div className="mt-2 flex items-center gap-4">
+                {settings.branding?.logoUrl ? (
+                  <div className="relative border border-gray-200 rounded-lg p-2 bg-gray-50 flex items-center justify-center shrink-0 w-16 h-16">
+                    <img
+                      src={settings.branding.logoUrl}
+                      alt="Logo mark"
+                      className="max-w-full max-h-full object-contain"
+                    />
+                    <button
+                      onClick={() => void handleRemoveLogo()}
+                      className="absolute -top-1.5 -right-1.5 p-0.5 rounded-full bg-rose-500 text-white shadow hover:bg-rose-600"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="border-2 border-dashed border-gray-200 rounded-lg flex flex-col items-center justify-center shrink-0 w-16 h-16 text-gray-400 bg-gray-50">
+                    <Upload className="w-5 h-5" />
+                  </div>
+                )}
+
+                <div>
+                  <input
+                    type="file"
+                    id="brand-logo-input"
+                    className="hidden"
+                    accept="image/*"
+                    onChange={handleLogoUpload}
+                    disabled={logoUploading}
+                  />
+                  <Button
+                    onClick={() => document.getElementById('brand-logo-input')?.click()}
+                    loading={logoUploading}
+                    variant="outline"
+                    className="h-8 text-xs border-gray-300 text-gray-700 hover:bg-gray-50"
+                  >
+                    Upload Logo
+                  </Button>
+                  <p className="text-[10px] text-gray-400 mt-1">PNG, JPG up to 2 MB.</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Colors */}
+            <div>
+              <Label className="text-xs text-gray-500">Primary Brand Color</Label>
+              <div className="mt-2 flex items-center gap-3">
+                <input
+                  type="color"
+                  value={brandingColor}
+                  onChange={(e) => setBrandingColor(e.target.value)}
+                  className="w-10 h-10 p-0 border border-gray-200 rounded-lg cursor-pointer bg-transparent"
+                />
+                <Input
+                  value={brandingColor}
+                  onChange={(e) => setBrandingColor(e.target.value)}
+                  className="h-10 text-sm font-mono border-gray-200 max-w-[120px]"
+                />
+              </div>
+            </div>
+
+            {/* Custom email footer */}
+            <div>
+              <Label className="text-xs text-gray-500">Email Footer Signature</Label>
+              <textarea
+                value={brandingFooter}
+                onChange={(e) => setBrandingFooter(e.target.value)}
+                placeholder="Company address, social links, or standard email footer signature..."
+                className="w-full mt-1.5 h-20 p-3 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+              />
+            </div>
+
+            <Button
+              onClick={() => void handleSaveBranding()}
+              loading={savingSettings}
+              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white h-9 text-xs"
+            >
+              Save Branding Options
+            </Button>
+          </CardContent>
+        </Card>
+
+        {/* LIVE PREVIEW CONTAINER */}
+        <Card className="border-gray-200 overflow-hidden">
+          <CardHeader className="bg-gray-50 border-b border-gray-150 py-3 px-4 flex items-center justify-between">
+            <CardTitle className="text-xs font-semibold text-gray-600 uppercase tracking-wider flex items-center gap-1.5">
+              <Eye className="w-4 h-4 text-gray-400" />
+              Live Preview
+            </CardTitle>
+            <span className="text-[10px] font-semibold bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full">Mock Substitution</span>
+          </CardHeader>
+          <div className="bg-gray-100 p-4 flex justify-center min-h-[300px]">
+            <iframe
+              srcDoc={renderPreview()}
+              title="Branded email template preview"
+              className="w-full border border-gray-200 rounded-lg shadow-sm bg-white min-h-[350px]"
+              sandbox="allow-same-origin"
+            />
+          </div>
+        </Card>
+      </div>
     </div>
   );
 }
@@ -932,6 +1555,7 @@ export function Settings() {
             { value: 'profile',      icon: User,          label: 'Profile',     group: 'workspace' },
             { value: 'payment',      icon: CreditCard,    label: 'Payment',     group: 'billing' },
             { value: 'whatsapp',     icon: MessageCircle, label: 'WhatsApp',    group: 'billing' },
+            { value: 'email-templates', icon: FileText,   label: 'Email Templates', group: 'billing' },
             { value: 'subscription', icon: Crown,         label: 'Plan',        group: 'billing' },
             { value: 'legal',        icon: FileSignature, label: 'Legal',       group: 'workspace' },
             { value: 'integrations', icon: Globe,         label: 'Integrations',group: 'billing' },
@@ -1850,8 +2474,17 @@ export function Settings() {
                 </Button>
               </CardContent>
             </Card>
-
           </div>
+        </TabsContent>
+
+        <TabsContent value="email-templates">
+          {ownerSettings && (
+            <EmailTemplatesTab
+              settings={ownerSettings}
+              onSaveSettings={saveOwnerSettings}
+              savingSettings={settingsSaving}
+            />
+          )}
         </TabsContent>
 
         {/* ── INTEGRATIONS TAB ─────────────────────────────────────────────────── */}

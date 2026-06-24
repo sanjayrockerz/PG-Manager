@@ -29,63 +29,21 @@ const anonKey = process.env['VITE_SUPABASE_ANON_KEY'] ?? '';
 
 const client = createClient(url, anonKey);
 
-// We want to test logging in as a demo user or admin user to verify what role the DB returns.
+// Verifies what role/scope RPCs return for a given account. Set DEBUG_LOGIN_EMAIL
+// and DEBUG_LOGIN_PASSWORD in your environment — never hardcode credentials here.
 async function run() {
-  console.log('Logging in as admin.demo@pgmanager.app (Demo2026)...');
-  let login = await client.auth.signInWithPassword({
-    email: 'admin.demo@pgmanager.app',
-    password: 'RentCare#Demo2026!'
-  });
-  if (login.error) {
-    console.log('  Failed:', login.error.message);
-  }
-  
-  if (login.error) {
-    console.log('Logging in as admin.demo@pgmanager.app (Admin2026)...');
-    login = await client.auth.signInWithPassword({
-      email: 'admin.demo@pgmanager.app',
-      password: 'RentCare#Admin2026!'
-    });
-    if (login.error) {
-      console.log('  Failed:', login.error.message);
-    }
+  const email = process.env['DEBUG_LOGIN_EMAIL'];
+  const password = process.env['DEBUG_LOGIN_PASSWORD'];
+  if (!email || !password) {
+    console.error('Set DEBUG_LOGIN_EMAIL and DEBUG_LOGIN_PASSWORD in your environment before running this script.');
+    process.exit(1);
   }
 
-  if (login.error) {
-    console.log('Logging in as admin@rentcare.com...');
-    login = await client.auth.signInWithPassword({
-      email: 'admin@rentcare.com',
-      password: 'RentCare#Admin2026!'
-    });
-    if (login.error) {
-      console.log('  Failed:', login.error.message);
-    }
-  }
+  console.log(`Logging in as ${email}...`);
+  const login = await client.auth.signInWithPassword({ email, password });
 
   if (login.error) {
-    console.log('Logging in as owner.demo@pgmanager.app (Demo2026)...');
-    login = await client.auth.signInWithPassword({
-      email: 'owner.demo@pgmanager.app',
-      password: 'RentCare#Demo2026!'
-    });
-    if (login.error) {
-      console.log('  Failed:', login.error.message);
-    }
-  }
-
-  if (login.error) {
-    console.log('Logging in as owner.demo@pgmanager.app (Owner2026)...');
-    login = await client.auth.signInWithPassword({
-      email: 'owner.demo@pgmanager.app',
-      password: 'RentCare#Owner2026!'
-    });
-    if (login.error) {
-      console.log('  Failed:', login.error.message);
-    }
-  }
-
-  if (login.error) {
-    console.log('Failed to log in as admin:', login.error.message);
+    console.log('Failed to log in:', login.error.message);
     return;
   }
 

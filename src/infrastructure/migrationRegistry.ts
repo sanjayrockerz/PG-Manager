@@ -98,7 +98,9 @@ export const REQUIRED_TABLES: TableRequirement[] = [
   },
   {
     name: 'owner_settings',
-    criticalColumns: [],
+    criticalColumns: [
+      { column: 'branding', introducedBy: '20260620_owner_email_templates' }
+    ],
     introducedBy: '20260523_core_management_domain',
   },
   {
@@ -140,6 +142,16 @@ export const REQUIRED_TABLES: TableRequirement[] = [
     name: 'owner_invites',
     criticalColumns: [],
     introducedBy: '20260416_complete_setup',
+  },
+  {
+    name: 'owner_email_templates',
+    criticalColumns: [],
+    introducedBy: '20260620_owner_email_templates',
+  },
+  {
+    name: 'owner_email_template_versions',
+    criticalColumns: [],
+    introducedBy: '20260620_owner_email_templates',
   },
 ];
 
@@ -192,4 +204,5 @@ export const MIGRATION_APPLY_ORDER: string[] = [
   '20260529_maintenance_image_url.sql',
   '20260530_production_bootstrap.sql',
   '20260530_admin_portal_v2.sql',
+  '20260620_owner_email_templates.sql',
 ];

@@ -363,7 +363,7 @@ export function WorkspaceSelector({ hidden }: WorkspaceSelectorProps) {
   } = useWorkspace();
 
   const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const [pos, setPos] = useState({ top: 0, left: 0, width: 340 });
   const triggerRef = useRef<HTMLButtonElement>(null);
 
   if (hidden) return null;
@@ -375,10 +375,10 @@ export function WorkspaceSelector({ hidden }: WorkspaceSelectorProps) {
   const openPanel = () => {
     if (triggerRef.current) {
       const r = triggerRef.current.getBoundingClientRect();
-      const panelW = 340;
       const margin = 12;
+      const panelW = Math.min(340, window.innerWidth - margin * 2);
       const left = Math.min(r.left, window.innerWidth - panelW - margin);
-      setPos({ top: r.bottom + 6, left: Math.max(margin, left) });
+      setPos({ top: r.bottom + 6, left: Math.max(margin, left), width: panelW });
     }
     setOpen(true);
   };
@@ -446,7 +446,7 @@ export function WorkspaceSelector({ hidden }: WorkspaceSelectorProps) {
             style={{
               top: pos.top,
               left: pos.left,
-              width: 340,
+              width: pos.width,
               maxHeight: 'calc(100vh - 80px)',
               overflowY: 'auto',
               zIndex: 9999,
